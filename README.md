@@ -1,6 +1,6 @@
 # Lifetime
 
-**Lifetime shows how long your computer has really been awake, since it was first used.** Sleep, hibernation and Windows Fast Startup are never counted. It runs on Windows and Linux, in English and Tiáº¿ng Viá»‡t.
+**Lifetime shows how long your computer has really been awake, since it was first used.** Sleep, hibernation and Windows Fast Startup are never counted. It runs on Windows and Linux, in English and Tiếng Việt.
 
 Made by [JPL Innovation](https://github.com/jpl-innovation).
 
@@ -22,7 +22,7 @@ Every release also contains **SHA256SUMS.txt**. To check a download, run `sha256
 2. Double-click **Install Lifetime.cmd**.
 3. Approve the Windows prompt (see "Why admin?" below) and open **Lifetime** from the Start menu.
 
-The downloaded programs are not code-signed, so Windows SmartScreen may say "Windows protected your PC". Click **More info â†’ Run anyway**. If your organisation blocks unsigned programs (Smart App Control / App Control), use the Python route below.
+The downloaded programs are not code-signed, so Windows SmartScreen may say "Windows protected your PC". Click **More info → Run anyway**. If your organisation blocks unsigned programs (Smart App Control / App Control), use the Python route below.
 
 **Python route** (works anywhere Python 3.10+ is installed):
 
