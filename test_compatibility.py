@@ -62,15 +62,48 @@ class LinuxTests(unittest.TestCase):
     def test_wifi_nmcli_and_iw(self):
         wireless = self.root/'wireless'
         wireless.write_text(self.fixture['wireless'])
-        self.assertEqual(s.parse_wireless(self.fixture['wireless'])['wlan0'], 80)
-        for tool, output in [('nmcli', self.fixture['nmcli']), ('iw', self.fixture['iw'])]:
+        # /proc level -54 dBm maps to 92 % the way NetworkManager does (not link quality 56/70 = 80 %).
+        self.assertEqual(s.parse_wireless(self.fixture['wireless'])['wlan0'], 92)
+        for tool, output, expected in [('nmcli', self.fixture['nmcli'], 80), ('iw', self.fixture['iw'], 92)]:
             with self.subTest(tool=tool), patch.object(s.shutil, 'which', side_effect=lambda name: name if name == tool else None), \
                     patch.object(s, 'command', return_value=output) as cmd:
                 row = s.linux_wifi(self.root/'net', wireless)[0]
                 self.assertEqual(row['ssid'], 'Office: Upstairs')
-                self.assertEqual(row['signal'], 80)
+                self.assertEqual(row['signal'], expected)
                 self.assertEqual(row['state'], 'connected')
                 self.assertEqual(cmd.call_args.args[0][0], tool)
+
+    def test_wifi_prefers_networkmanager_signal_over_proc(self):
+        """Bug 2: /proc said 83 % while NetworkManager (and the desktop) showed 100 %."""
+        wireless = self.root/'wireless'
+        wireless.write_text('Inter-| sta-| Quality | Discarded packets\n face | tus | link level noise\n wlan0: 0000 58. -48. -256 0 0 0 0 0 0\n')
+        self.assertEqual(s.parse_wireless(wireless.read_text())['wlan0'], 100)   # fallback now agrees with NM's mapping
+        nmcli = 'yes:Home:100:wlan0:866 Mbit/s\nno:Other:40:wlan0:130 Mbit/s\n'
+        with patch.object(s.shutil, 'which', side_effect=lambda name: name if name == 'nmcli' else None), \
+                patch.object(s, 'command', return_value=nmcli):
+            row = s.linux_wifi(self.root/'net', wireless)[0]
+        self.assertEqual((row['ssid'], row['signal'], row['state']), ('Home', 100, 'connected'))
+        # nmcli missing or failing: the /proc value is still labelled and sane (0-100).
+        with patch.object(s.shutil, 'which', return_value=None):
+            self.assertEqual(s.linux_wifi(self.root/'net', wireless)[0]['signal'], 100)
+        self.assertEqual(s.dbm_to_percent(-100), 0)
+        self.assertEqual(s.dbm_to_percent(-75), 50)
+        self.assertEqual(s.dbm_to_percent(-30), 100)
+
+    def test_wifi_link_speed_from_iw_and_nmcli(self):
+        """Bug 4: Wi-Fi adapters had no link speed on Linux."""
+        iw = 'Connected to aa:bb (on wlan0)\n\tSSID: Home\n\tsignal: -50 dBm\n\trx bitrate: 780.0 MBit/s\n\ttx bitrate: 866.7 MBit/s\n'
+        with patch.object(s.shutil, 'which', side_effect=lambda name: name if name == 'iw' else None), patch.object(s, 'command', return_value=iw):
+            self.assertEqual(s.wifi_bitrate('wlan0'), 866.7)
+            adapters = s.linux_network(self.root/'net', bitrate=s.wifi_bitrate)
+        self.assertEqual(adapters[0]['LinkSpeed'], '1000 Mbps')            # Ethernet from sysfs, unchanged
+        self.assertEqual(adapters[1]['LinkSpeed'], '866.7 Mbps')           # Wi-Fi from iw
+        with patch.object(s.shutil, 'which', side_effect=lambda name: name if name == 'nmcli' else None), \
+                patch.object(s, 'command', return_value='yes:Home:90:wlan0:540 Mbit/s\n'):
+            self.assertEqual(s.wifi_bitrate('wlan0'), 540)
+        with patch.object(s.shutil, 'which', return_value=None):
+            self.assertIsNone(s.wifi_bitrate('wlan0'))
+            self.assertIsNone(s.linux_network(self.root/'net', bitrate=s.wifi_bitrate)[1]['LinkSpeed'])
 
     def test_multi_gpu_amd_and_intel(self):
         gpus = s.linux_gpu(self.root/'drm')
@@ -79,6 +112,32 @@ class LinuxTests(unittest.TestCase):
         self.assertEqual(gpus[0]['utilization'], 37)
         self.assertIn('Intel', gpus[1]['name'])
         self.assertIsNone(gpus[1]['watts'])
+
+    def test_gpu_friendly_name_and_frequency(self):
+        """Bug 3: 'Intel (0x9a49)' with nothing else. Show a real name and the clock when utilisation is unreadable."""
+        (self.root/'drm/card1/device/uevent').write_text('DRIVER=i915\nPCI_SLOT_NAME=0000:00:02.0\n')
+        (self.root/'drm/card1/gt_cur_freq_mhz').write_text('1250\n')
+        lspci = '00:02.0 "VGA compatible controller [0300]" "Intel Corporation [8086]" "TigerLake-LP GT2 [Iris Xe Graphics] [9a49]" -r01 "Lenovo [17aa]" "Device [22d3]"\n'
+        with patch.object(s.shutil, 'which', return_value='/usr/bin/lspci'), patch.object(s, 'command', return_value=lspci) as cmd:
+            self.assertEqual(s.lspci_name('0000:00:02.0'), 'Intel Iris Xe Graphics')
+            gpus = s.linux_gpu(self.root/'drm', namer=s.lspci_name)
+        self.assertEqual(cmd.call_args.args[0], ['lspci', '-mm', '-nn', '-s', '0000:00:02.0'])
+        self.assertEqual(gpus[1]['name'], 'Intel Iris Xe Graphics')
+        self.assertEqual(gpus[1]['frequency_mhz'], 1250)
+        self.assertIsNone(gpus[1]['utilization'])
+        self.assertIsNone(gpus[0]['frequency_mhz'])
+        amd = '03:00.0 "VGA compatible controller [0300]" "Advanced Micro Devices, Inc. [AMD/ATI] [1002]" "Navi 22 [Radeon RX 6700 XT] [73df]"\n'
+        with patch.object(s.shutil, 'which', return_value='/usr/bin/lspci'), patch.object(s, 'command', return_value=amd):
+            self.assertEqual(s.lspci_name('0000:03:00.0'), 'AMD Radeon RX 6700 XT')
+        # No lspci or no match: keep the old readable fallback instead of failing.
+        self.assertIn('0x1234', s.linux_gpu(self.root/'drm')[1]['name'])
+        with patch.object(s.shutil, 'which', return_value=None):
+            self.assertIsNone(s.lspci_name('0000:00:02.0'))
+
+    def test_dashboard_shows_frequency_only_when_known(self):
+        import lifetime_dashboard as dashboard
+        self.assertEqual(dashboard.fmt(1250.0, 'MHz', 0), ('1,250', 'MHz'))
+        self.assertIsNone(dashboard.fmt(None, 'MHz', 0))
 
     def test_disks_use_mount_fixture_and_skip_unreadable_device(self):
         raw = '/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 /media/My\\040Disk ext4 rw 0 0\nproc /proc proc rw 0 0\n'
@@ -101,16 +160,67 @@ class LinuxTests(unittest.TestCase):
     def test_journal_verification_and_missing_access(self):
         raw = '\n'.join(json.dumps(row) for row in self.fixture['journal'])
         self.assertEqual(s.parse_journal_awake(raw), 400)
-        with patch.object(s, 'command', return_value=raw) as cmd:
+        with patch.object(s, 'run_command', return_value=(0, raw)) as cmd:
             self.assertIn('incomplete suspend intervals', s.verify_linux_awake()['message'])
             self.assertIn('journalctl', cmd.call_args.args[0])
+            self.assertEqual(cmd.call_args.kwargs['timeout'], s.JOURNAL_TIMEOUT)   # bug 5: not the default 5 s
         raw = '\n'.join(json.dumps(row) for row in self.fixture['journal'][:2])
-        with patch.object(s, 'command', return_value=raw), patch.object(s, 'probe_clocks', return_value=dict(uptime=1000, awake=410)):
+        with patch.object(s, 'run_command', return_value=(0, raw)), patch.object(s, 'probe_clocks', return_value=dict(uptime=1000, awake=410)):
             result = s.verify_linux_awake()
             self.assertEqual(result['event_seconds'], 410)
             self.assertEqual(result['difference'], 0)
-        with patch.object(s, 'command', return_value=None):
+        with patch.object(s, 'run_command', return_value=None):
             self.assertIn('could not be read', s.verify_linux_awake()['message'])
+
+    def test_verify_boot_without_suspend_events(self):
+        """Bug 1: journalctl --grep exits 1 with no output when nothing matches; that is a clean boot, not an error."""
+        clocks = dict(uptime=5000, awake=4990)
+        entry = (0, json.dumps(self.fixture['journal'][0]) + '\n')
+        def journal(args, timeout=5):
+            return (1, '') if '--grep' in args else entry          # grep: no matches; plain query: journal readable
+        with patch.object(s, 'run_command', side_effect=journal), patch.object(s, 'probe_clocks', return_value=clocks):
+            result = s.verify_linux_awake()
+        self.assertEqual((result['event_seconds'], result['awake_seconds'], result['difference']), (5000, 4990, 10))
+        self.assertNotIn('Not available', result['message'])
+        # The same exit code is still an error when the journal itself is unreadable (permission denied, empty).
+        for plain in ((1, ''), (0, ''), (2, 'x'), None):
+            with self.subTest(plain=plain), patch.object(s, 'probe_clocks', return_value=clocks), \
+                    patch.object(s, 'run_command', side_effect=lambda args, timeout=5, plain=plain: (1, '') if '--grep' in args else plain):
+                self.assertIn('could not be read', s.verify_linux_awake()['message'])
+        # Other exit codes and timeouts are real failures.
+        for failure in ((2, ''), (1, 'x\n'), None):
+            with self.subTest(failure=failure), patch.object(s, 'run_command', return_value=failure):
+                self.assertIn('could not be read', s.verify_linux_awake()['message'])
+        # Missing clocks keep their own message.
+        with patch.object(s, 'run_command', side_effect=journal), patch.object(s, 'probe_clocks', return_value=dict(uptime=None, awake=None)):
+            self.assertIn('inconsistent', s.verify_linux_awake()['message'])
+
+    def test_verify_boot_with_a_suspend_pair(self):
+        """A boot with one completed suspend/resume pair still compares uptime minus sleep with the awake clock."""
+        raw = '\n'.join(json.dumps(row) for row in self.fixture['journal'][:2])
+        with patch.object(s, 'run_command', return_value=(0, raw)), patch.object(s, 'probe_clocks', return_value=dict(uptime=2000, awake=1410)):
+            result = s.verify_linux_awake()
+        self.assertEqual(result['event_seconds'], 1410)        # 2000 s uptime minus 590 s asleep
+        self.assertEqual(result['difference'], 0)
+
+    def test_command_returns_exit_code_or_ok_codes(self):
+        """Bug 1/5: command() must not hide the exit code, and other callers keep their old behaviour."""
+        def fake(code, out):
+            return patch.object(s.subprocess, 'run', return_value=SimpleNamespace(returncode=code, stdout=out))
+        with fake(1, ''):
+            self.assertEqual(s.run_command(['x']), (1, ''))
+            self.assertIsNone(s.command(['x']))                          # default: only exit 0 counts, as before
+            self.assertEqual(s.command(['x'], ok_codes=(0, 1)), '')
+        with fake(0, 'out'):
+            self.assertEqual(s.command(['x']), 'out')
+        with patch.object(s.subprocess, 'run', side_effect=s.subprocess.TimeoutExpired('x', 5)):
+            self.assertIsNone(s.run_command(['x']))
+            self.assertIsNone(s.command(['x'], ok_codes=(0, 1)))
+        with patch.object(s.subprocess, 'run', side_effect=FileNotFoundError()):
+            self.assertIsNone(s.run_command(['missing']))
+        with fake(0, ''), patch.object(s.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout='')) as run:
+            s.run_command(['x'], timeout=20)
+            self.assertEqual(run.call_args.kwargs['timeout'], 20)
 
 
 class WindowsTests(unittest.TestCase):

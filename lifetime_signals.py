@@ -10,6 +10,7 @@ import json
 import math
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -157,14 +158,21 @@ def parse_event_awake(boot, now, events):
     return None if pending is not None else max(0, now - boot - off)
 
 
-def command(args):
+def run_command(args, timeout=5):
+    """Run a program and return (exit_code, stdout), or None if it is missing, times out or cannot start."""
     try:
-        run = subprocess.run(args, capture_output=True, timeout=5,
+        run = subprocess.run(args, capture_output=True, timeout=timeout,
                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                              encoding='utf-8', errors='replace')
-        return run.stdout if run.returncode == 0 else None
+        return run.returncode, run.stdout
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
+
+
+def command(args, timeout=5, ok_codes=(0,)):
+    """Standard output of a program, or None unless it ran and exited with one of ok_codes."""
+    result = run_command(args, timeout)
+    return result[1] if result is not None and result[0] in ok_codes else None
 
 
 def powershell(script):
@@ -273,16 +281,47 @@ def linux_power(root='/sys/class/power_supply'):
     return dict(percent=percent, state=', '.join(states) or None, remaining=None, ac=ac)
 
 
-def linux_network(root='/sys/class/net'):
+def linux_network(root='/sys/class/net', bitrate=None):
+    """Active adapters. bitrate(name) supplies the Wi-Fi link rate in Mbps, which sysfs does not expose."""
     result = []
     for base in sorted(Path(root).glob('*')):
         if base.name == 'lo' or read_file(base/'operstate') != 'up':
             continue
+        wireless = (base/'wireless').exists()
         speed = number(read_file(base/'speed'))
-        kind = 'Wi-Fi' if (base/'wireless').exists() else 'Ethernet' if read_file(base/'type') == '1' else 'Network'
+        if (speed is None or speed <= 0) and wireless and bitrate:
+            speed = bitrate(base.name)
+        kind = 'Wi-Fi' if wireless else 'Ethernet' if read_file(base/'type') == '1' else 'Network'
         result.append(dict(Name=base.name, Status='Up', InterfaceDescription=kind,
-                           LinkSpeed=f'{speed:g} Mbps' if speed else None))
+                           LinkSpeed=f'{speed:g} Mbps' if speed and speed > 0 else None))
     return result
+
+
+def iw_link(name):
+    """Details of the current Wi-Fi association from `iw dev NAME link` (None when iw is absent or not connected)."""
+    if not shutil.which('iw'):
+        return None
+    raw = command(['iw', 'dev', name, 'link'])
+    if not raw or 'Not connected' in raw:
+        return None
+    ssid = re.search(r'^\s*SSID: (.*)$', raw, re.M)
+    signal = re.search(r'^\s*signal:\s*(-?\d+(?:\.\d+)?)\s*dBm', raw, re.M)
+    rate = re.search(r'^\s*tx bitrate:\s*([\d.]+)\s*MBit/s', raw, re.M) or re.search(r'^\s*rx bitrate:\s*([\d.]+)\s*MBit/s', raw, re.M)
+    return dict(ssid=ssid[1] if ssid else None, dbm=float(signal[1]) if signal else None,
+                rate_mbps=float(rate[1]) if rate else None)
+
+
+def dbm_to_percent(dbm):
+    """NetworkManager's mapping: -100 dBm or worse is 0 %, -50 dBm or better is 100 %."""
+    return max(0, min(100, 2*(dbm+100)))
+
+
+def wifi_bitrate(name):
+    """Link rate in Mbps from iw, otherwise from NetworkManager's RATE column."""
+    link = iw_link(name)
+    if link and link['rate_mbps']:
+        return link['rate_mbps']
+    return next((row['rate_mbps'] for row in nmcli_wifi() if row['device'] == name and row['rate_mbps']), None)
 
 
 def split_nmcli(line):
@@ -303,15 +342,43 @@ def split_nmcli(line):
 
 
 def parse_wireless(text):
+    """Signal percent per interface from /proc/net/wireless.
+
+    The level column (dBm) is converted with NetworkManager's mapping so the value matches the desktop's;
+    the 0-70 link-quality column is only used when no dBm level is present.
+    """
     result = {}
-    for line in text.splitlines():
+    for line in (text or '').splitlines():
         if ':' in line:
             name, fields = line.split(':', 1)
             values = fields.split()
-            if len(values) >= 2:
+            if len(values) >= 3:
                 quality = number(values[1].rstrip('.'))
-                result[name.strip()] = min(100, quality/70*100) if quality is not None else None
+                try:
+                    level = float(values[2].rstrip('.'))      # signed dBm; number() rejects negatives
+                except ValueError:
+                    level = None
+                if level is not None and level < 0:
+                    result[name.strip()] = dbm_to_percent(level)
+                else:
+                    result[name.strip()] = min(100, quality/70*100) if quality is not None else None
     return result
+
+
+def nmcli_wifi():
+    """Active Wi-Fi connections from NetworkManager: dicts with active, ssid, signal (%), device, rate_mbps."""
+    base = ['nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL,DEVICE,RATE', 'device', 'wifi', 'list']
+    raw = command(base + ['--rescan', 'no'], timeout=10)
+    if raw is None:
+        raw = command(base, timeout=10)
+    rows = []
+    for line in (raw or '').splitlines():
+        fields = split_nmcli(line)
+        if len(fields) >= 4 and fields[0] in ('yes', '*'):
+            rate = re.match(r'\s*([\d.]+)', fields[4]) if len(fields) > 4 else None
+            rows.append(dict(active=True, ssid=fields[1], signal=number(fields[2]), device=fields[3],
+                             rate_mbps=float(rate[1]) if rate else None))
+    return rows
 
 
 def linux_wifi(root='/sys/class/net', wireless='/proc/net/wireless'):
@@ -320,22 +387,55 @@ def linux_wifi(root='/sys/class/net', wireless='/proc/net/wireless'):
     if not interfaces:
         return []
     rows = {name: dict(name=name, state='disconnected', signal=qualities.get(name)) for name in sorted(interfaces)}
+    # Signal source order: NetworkManager (what the desktop shows), then iw, then /proc/net/wireless.
     if shutil.which('nmcli'):
-        raw = command(['nmcli', '-t', '-f', 'IN-USE,SSID,SIGNAL,DEVICE', 'device', 'wifi', 'list', '--rescan', 'no'])
-        for line in (raw or '').splitlines():
-            fields = split_nmcli(line)
-            if len(fields) == 4 and fields[0] == '*' and fields[3] in rows:
-                rows[fields[3]].update(state='connected', ssid=fields[1], signal=number(fields[2]))
-    elif shutil.which('iw'):
-        for name in rows:
-            raw = command(['iw', 'dev', name, 'link']) or ''
-            match = re.search(r'^\s*SSID: (.*)$', raw, re.M)
-            if match:
-                rows[name].update(state='connected', ssid=match[1])
+        for row in nmcli_wifi():
+            if row['device'] in rows:
+                rows[row['device']].update(state='connected', ssid=row['ssid'], signal=row['signal'])
+    if shutil.which('iw'):
+        for name, row in rows.items():
+            if row['state'] == 'connected':
+                continue
+            link = iw_link(name)
+            if link and link['ssid']:
+                row.update(state='connected', ssid=link['ssid'])
+                if link['dbm'] is not None:
+                    row['signal'] = dbm_to_percent(link['dbm'])
     return list(rows.values())
 
 
-def linux_gpu(root='/sys/class/drm'):
+def lspci_name(slot):
+    """Friendly adapter name from `lspci -mm -nn -s SLOT`, e.g. 'Intel Iris Xe Graphics'."""
+    if not slot or not shutil.which('lspci'):
+        return None
+    raw = command(['lspci', '-mm', '-nn', '-s', slot])
+    try:
+        fields = shlex.split((raw or '').strip().splitlines()[0])
+    except (ValueError, IndexError):
+        return None
+    if len(fields) < 4:
+        return None
+    strip_id = lambda text: re.sub(r'\s*\[[0-9a-fA-F]{4}\]$', '', text).strip()
+    vendor, chip = strip_id(fields[2]), strip_id(fields[3])
+    marketing = re.findall(r'\[([^\[\]]+)\]', chip)        # 'TigerLake-LP GT2 [Iris Xe Graphics]' -> 'Iris Xe Graphics'
+    name = marketing[-1] if marketing else chip
+    short = next((label for prefix, label in (('Intel', 'Intel'), ('Advanced Micro Devices', 'AMD'), ('AMD', 'AMD'),
+                                              ('NVIDIA', 'NVIDIA')) if vendor.startswith(prefix)), vendor)
+    return name if name.lower().startswith(short.lower()) else f'{short} {name}'
+
+
+def gpu_frequency(base, device):
+    """Current graphics clock in MHz (i915 and xe expose it in sysfs; AMD uses pp_dpm_sclk)."""
+    for path in (base/'gt_cur_freq_mhz', base/'gt/gt0/rps_cur_freq_mhz', device/'tile0/gt0/freq0/cur_freq'):
+        value = number(read_file(path))
+        if value is not None:
+            return value
+    match = re.search(r'(\d+)\s*Mhz\s*\*', read_file(device/'pp_dpm_sclk') or '', re.I)
+    return float(match[1]) if match else None
+
+
+def linux_gpu(root='/sys/class/drm', namer=None):
+    """Graphics adapters from sysfs. namer(pci_slot) may supply a friendly device name."""
     result = []
     for base in sorted(Path(root).glob('card[0-9]*')):
         if not re.fullmatch(r'card\d+', base.name):
@@ -344,13 +444,16 @@ def linux_gpu(root='/sys/class/drm'):
         if not device.exists():
             continue
         vendor, model = read_file(device/'vendor'), read_file(device/'device')
-        name = read_file(device/'product_name') or {'0x1002': 'AMD', '0x8086': 'Intel', '0x10de': 'NVIDIA'}.get(vendor, 'Graphics')
+        brand = {'0x1002': 'AMD', '0x8086': 'Intel', '0x10de': 'NVIDIA'}.get(vendor, 'Graphics')
+        slot = re.search(r'^PCI_SLOT_NAME=(.+)$', read_file(device/'uevent') or '', re.M)
+        friendly = read_file(device/'product_name') or (namer(slot[1].strip()) if namer and slot else None)
         hwmon = sorted((device/'hwmon').glob('hwmon*'))
         watts = next((number(read_file(p/'power1_average')) for p in hwmon if number(read_file(p/'power1_average')) is not None), None)
-        result.append(dict(name=f'{name} ({model})' if model else name,
+        result.append(dict(name=friendly or (f'{brand} ({model})' if model else brand),
                            vendor=vendor,
                            watts=watts/1e6 if watts is not None else None,
-                           utilization=number(read_file(device/'gpu_busy_percent'))))
+                           utilization=number(read_file(device/'gpu_busy_percent')),
+                           frequency_mhz=gpu_frequency(base, device)))
     return result
 
 
@@ -427,12 +530,30 @@ def parse_journal_awake(text):
     return pairs[-1][1]-pairs[0][1]
 
 
+JOURNAL_TIMEOUT = 20   # a large journal can take longer than the default 5 s
+
+
 def verify_linux_awake():
     # Kernel PM strings are kernel-generated (not translated); classification uses
     # transport metadata and clocks, never translated user-facing journal messages.
-    raw = command(['journalctl', '-k', '-b', '0', '-o', 'json', '--no-pager',
-                   '--grep', 'PM: (suspend|hibernation) (entry|exit)'])
-    if raw is None:
+    # journalctl exits with 1 when --grep matches nothing, which is normal for a boot that never slept.
+    result = run_command(['journalctl', '-k', '-b', '0', '-o', 'json', '--no-pager',
+                          '--grep', 'PM: (suspend|hibernation) (entry|exit)'], timeout=JOURNAL_TIMEOUT)
+    if result is None:
+        return dict(message='Not available · system journal could not be read')
+    code, raw = result
+    if code == 1 and not raw.strip():
+        # Distinguish "no suspend events" from a journal we cannot read: a plain query must return entries.
+        probe = run_command(['journalctl', '-k', '-b', '0', '-n', '1', '-o', 'json', '--no-pager'], timeout=JOURNAL_TIMEOUT)
+        if probe is None or probe[0] != 0 or not probe[1].strip():
+            return dict(message='Not available · system journal could not be read')
+        clocks = probe_clocks() or {}
+        uptime, awake = clocks.get('uptime'), clocks.get('awake')
+        if uptime is None or awake is None:
+            return dict(message='Not available · journal clocks are inconsistent')
+        return dict(event_seconds=uptime, awake_seconds=awake, difference=abs(uptime-awake),
+                    message='Compared journal suspend intervals with the awake clock')
+    if code != 0:
         return dict(message='Not available · system journal could not be read')
     seconds = parse_journal_awake(raw)
     if seconds is None:
@@ -473,7 +594,7 @@ def probe_gpu():
                       '--format=csv,noheader,nounits']) if shutil.which('nvidia-smi') else None
     nvidia = parse_nvidia(output)
     if sys.platform != 'win32':
-        basic = linux_gpu()
+        basic = linux_gpu(namer=lspci_name)
     else:
         raw = powershell('Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,PNPDeviceID | ConvertTo-Json -Compress')
         if raw is None:
@@ -495,7 +616,7 @@ def probe_gpu():
 @safe
 def probe_network():
     if sys.platform != 'win32':
-        return linux_network()
+        return linux_network(bitrate=wifi_bitrate)
     output = powershell("Get-CimInstance -Namespace root/StandardCimv2 MSFT_NetAdapter | Where-Object MediaConnectState -eq 1 | "
         "ForEach-Object { @{Name=$_.Name;InterfaceDescription=$_.InterfaceDescription;Status='Up';"
         "LinkSpeed=($_.TransmitLinkSpeed/1000000).ToString([cultureinfo]::InvariantCulture)+' Mbps';ifIndex=$_.InterfaceIndex;"

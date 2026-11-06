@@ -55,9 +55,23 @@ class WorkerTests(unittest.TestCase):
     def test_verification_deadline_emits_unavailable(self):
         results = []
         self.worker.verified.connect(results.append)
-        self.worker.jobs['verify'] = (Future(), time.monotonic()-6, False)
+        self.worker.jobs['verify'] = (Future(), time.monotonic()-(dash.VERIFY_LIMIT+1), False)
         self.worker.poll()
         self.assertEqual(results, [None])
+
+    def test_verification_gets_longer_deadline_than_ordinary_probes(self):
+        """Bug 5: a large journal needs up to 20 s, so Verify must not be cut off at the 5 s probe limit."""
+        results = []
+        self.worker.verified.connect(results.append)
+        pending = Future()
+        self.worker.jobs['verify'] = (pending, time.monotonic()-10, False)     # 10 s old: still within its limit
+        self.worker.poll()
+        self.assertEqual(results, [])
+        self.assertIn('verify', self.worker.jobs)
+        pending.set_result({'verification': {'message': 'done'}})
+        self.worker.poll()
+        self.assertEqual(results, [{'verification': {'message': 'done'}}])
+        self.assertGreater(dash.VERIFY_LIMIT, 20)                               # longer than the journal query timeout
 
 
 class DashboardTests(unittest.TestCase):

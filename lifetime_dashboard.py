@@ -63,10 +63,11 @@ class ProbeWorker(QWidget):
         now = time.monotonic()
         dirty = False
         for key, (future, started, expired) in list(self.jobs.items()):
-            if not future.done() and now-started <= 5:
+            limit = VERIFY_LIMIT if key == 'verify' else 5     # Verify may read a large system journal
+            if not future.done() and now-started <= limit:
                 continue
             result = None
-            if future.done() and not expired and now-started <= 5:
+            if future.done() and not expired and now-started <= limit:
                 try:
                     result = future.result()
                 except Exception:
@@ -143,6 +144,9 @@ class RefreshGlyph(QWidget):
         p.drawArc(-6, -6, 12, 12, 40*16, 285*16)
         p.drawLine(6, -6, 6, -1)
         p.drawLine(2, -1, 6, -1)
+
+
+VERIFY_LIMIT = 45   # seconds; longer than the 20 s journal query plus the event-log or ledger reads
 
 
 def fmt(value, unit='', digits=1):
@@ -330,6 +334,8 @@ class SystemDashboard(QWidget):
             graphics += [(tr('gpu.field', prefix=prefix, field=tr('Model')), gpu.get('name'), None), (tr('gpu.field', prefix=prefix, field=tr('Power')), fmt(gpu.get('watts'), 'W'), None),
                          (tr('gpu.field', prefix=prefix, field=tr('Temperature')), fmt(gpu.get('temperature'), '°C', 0), None),
                          (tr('gpu.field', prefix=prefix, field=tr('Utilization')), fmt(gpu.get('utilization'), '%', 0), gpu.get('utilization')),
+                         *([(tr('gpu.field', prefix=prefix, field=tr('Frequency')), fmt(gpu.get('frequency_mhz'), 'MHz', 0), None)]
+                           if gpu.get('frequency_mhz') is not None else []),
                          (tr('gpu.field', prefix=prefix, field=tr('Memory')), storage(gpu.get('memory_used'), gpu.get('memory_total'), 'MiB', 1), None)]
         if not graphics:
             graphics = [('Graphics card', None, None)]

@@ -161,7 +161,7 @@ VI = {
     'Wi-Fi receive': 'Tốc độ nhận Wi-Fi', 'Wi-Fi transmit': 'Tốc độ gửi Wi-Fi',
     'Wi-Fi': 'Wi-Fi', 'No Wi-Fi adapter': 'Không có bộ điều hợp Wi-Fi',
     'Graphics card': 'Card đồ họa', 'No graphics adapter detected': 'Không phát hiện card đồ họa',
-    'Model': 'Mẫu thiết bị', 'Temperature': 'Nhiệt độ', 'Utilization': 'Mức sử dụng', 'Memory': 'Bộ nhớ',
+    'Model': 'Mẫu thiết bị', 'Frequency': 'Xung nhịp', 'Temperature': 'Nhiệt độ', 'Utilization': 'Mức sử dụng', 'Memory': 'Bộ nhớ',
     'Processor': 'Bộ xử lý', 'CPU': 'CPU', 'RAM': 'RAM', 'Disks': 'Ổ đĩa',
     'Uptime · incl. sleep': 'Thời gian từ lúc khởi động · gồm cả ngủ',
     'Awake since boot': 'Hoạt động từ lúc khởi động', 'Last boot': 'Khởi động gần nhất',
