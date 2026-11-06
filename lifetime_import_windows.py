@@ -16,7 +16,11 @@ from lifetime_import import main
 
 def _timestamp(value):
     # Event XML is invariant UTC, regardless of the Windows display language.
-    value = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
+    import re
+    text = value.strip().replace('Z', '+00:00')
+    # Event logs write 7 fractional digits; Python 3.10 only parses 3 or 6, so normalise to microseconds.
+    text = re.sub(r'\.(\d+)', lambda m: '.' + (m.group(1) + '000000')[:6], text, count=1)
+    value = dt.datetime.fromisoformat(text)
     if value.tzinfo is None:
         raise ValueError('Event timestamp has no UTC offset')
     return value.timestamp()

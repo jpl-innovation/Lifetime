@@ -19,7 +19,7 @@ TZ = dt.timezone(dt.timedelta(hours=7))
 
 
 def stamp(value):
-    parsed = dt.datetime.fromisoformat(value)
+    parsed = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))  # 'Z' is only accepted natively from Python 3.11
     return (parsed.replace(tzinfo=TZ) if parsed.tzinfo is None else parsed).timestamp()
 
 
@@ -288,6 +288,15 @@ def test_silent_gap_not_counted():
     boot = dict(id='x', start=1000, end=1000 + 600 + 5 * 86400, events=[], activity=stamps)
     total = sum(b - a for a, b in li.awake_spans(boot))
     assert total == 600, total
+
+
+class EventTimestampTests(unittest.TestCase):
+    def test_windows_event_timestamps_parse_on_every_python(self):
+        """Event logs write 7 fractional digits and a Z suffix; Python 3.10 cannot parse those natively."""
+        base = dt.datetime(2026, 8, 30, 10, 2, tzinfo=dt.timezone.utc).timestamp()
+        for text, extra in (('2026-08-30T10:02:00Z', 0), ('2026-08-30T10:02:00.5Z', .5),
+                            ('2026-08-30T10:02:00.1234567Z', .123456), ('2026-08-30T10:02:00.123456789+00:00', .123456)):
+            self.assertAlmostEqual(windows._timestamp(text), base + extra, places=6, msg=text)
 
 
 if __name__ == '__main__':
