@@ -22,7 +22,7 @@ Go to the **[latest release](../../releases/latest)** and pick your system.
 
 The downloaded programs are not code-signed, so Windows SmartScreen may say "Windows protected your PC". Click **More info â†’ Run anyway**. If your organisation blocks unsigned programs (Smart App Control / App Control), use the Python route below.
 
-**Python route** (works anywhere Python 3.9+ is installed):
+**Python route** (works anywhere Python 3.10+ is installed):
 
 ```powershell
 python -m pip install PyQt6
@@ -78,7 +78,7 @@ Windows executables: `./build_windows.ps1` (needs `pyinstaller`, produces `packa
 
 ## Supported systems
 
-Windows 10 and 11 (x64 and ARM64), and Linux with systemd and Python 3.9+. Desktops without a battery or without an NVIDIA GPU are handled. Windows 10, ARM64, non-English Windows and Linux paths are covered by automated tests but have had less real-world testing than Windows 11 x64.
+Windows 10 and 11 (x64 and ARM64), and Linux with systemd and Python 3.10+. Desktops without a battery or without an NVIDIA GPU are handled. Windows 10, ARM64, non-English Windows and Linux paths are covered by automated tests but have had less real-world testing than Windows 11 x64.
 
 ## Credits
 

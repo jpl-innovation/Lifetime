@@ -1,4 +1,4 @@
-# Run on a Windows PC with Python 3.9+: builds Lifetime.exe, LifetimeTracker.exe, LifetimeImport.exe and a ready-to-install "package" folder.
+# Run on a Windows PC with Python 3.10+: builds Lifetime.exe, LifetimeTracker.exe, LifetimeImport.exe and a ready-to-install "package" folder.
 # Native tools (pip, PyInstaller) print progress on stderr; Windows PowerShell 5.1 would treat that as an error, so check exit codes instead.
 $ErrorActionPreference = 'Continue'
 python -m pip install --upgrade --disable-pip-version-check PyQt6 pyinstaller
