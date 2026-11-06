@@ -737,10 +737,16 @@ class Window(QWidget):
             effect.setOpacity(0)
             def begin(w=widget, e=effect):
                 def frame(value):
-                    e.setOpacity(value)
-                    e.offset = 5 * (1 - value)
-                    e.update()
-                animate(w, 'entrance_animation', 0, 1, frame, 150)
+                    try:
+                        e.setOpacity(value)
+                        e.offset = 5 * (1 - value)
+                        e.update()
+                    except RuntimeError:
+                        pass  # effect already deleted
+                try:
+                    animate(w, 'entrance_animation', 0, 1, frame, 150)
+                except RuntimeError:
+                    pass  # the card was deleted (window closed or rebuilt) before its turn; PyQt would abort on this
             QTimer.singleShot(index * 50, begin)
 
     def hideEvent(self, event):
