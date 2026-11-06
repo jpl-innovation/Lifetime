@@ -367,6 +367,8 @@ def parse_wireless(text):
 
 def nmcli_wifi():
     """Active Wi-Fi connections from NetworkManager: dicts with active, ssid, signal (%), device, rate_mbps."""
+    if not shutil.which('nmcli'):          # never launch a program that is not installed
+        return []
     base = ['nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL,DEVICE,RATE', 'device', 'wifi', 'list']
     raw = command(base + ['--rescan', 'no'], timeout=10)
     if raw is None:
@@ -800,3 +802,30 @@ covered=($old.TimeCreated -le $boot);events=$events} | ConvertTo-Json -Depth 5 -
     if seconds is None or awake is None:
         return dict(message='Not available · Windows event log has incomplete sleep intervals')
     return dict(event_seconds=seconds, awake_seconds=awake, difference=abs(seconds-awake))
+
+
+def verify_debug():
+    """Raw journal evidence for diagnosing a Verify gap. Run: python3 lifetime_signals.py --verify-debug"""
+    lines = [f'clocks: {probe_clocks()}']
+    queries = [('kernel suspend/resume messages', ['journalctl', '-k', '-b', '0', '-o', 'json', '--no-pager',
+                                                   '--grep', 'PM: (suspend|hibernation) (entry|exit)']),
+               ('systemd-sleep', ['journalctl', '-b', '0', '-o', 'json', '--no-pager', 'SYSLOG_IDENTIFIER=systemd-sleep']),
+               ('logind', ['journalctl', '-b', '0', '-o', 'json', '--no-pager', '_SYSTEMD_UNIT=systemd-logind.service',
+                           '--grep', 'Suspend|sleep|Lid'])]
+    for title, args in queries:
+        result = run_command(args, timeout=JOURNAL_TIMEOUT)
+        lines.append(f'--- {title}: ' + ('could not run' if result is None else f'exit {result[0]}'))
+        for raw in (result[1].splitlines() if result else []):
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                continue
+            lines.append('  real={} mono={} source_mono={} id={} | {}'.format(
+                row.get('__REALTIME_TIMESTAMP'), row.get('__MONOTONIC_TIMESTAMP'), row.get('_SOURCE_MONOTONIC_TIMESTAMP'),
+                row.get('MESSAGE_ID'), str(row.get('MESSAGE'))[:90]))
+    lines.append(f'verify_linux_awake(): {verify_linux_awake()}')
+    return '\n'.join(lines)
+
+
+if __name__ == '__main__' and '--verify-debug' in sys.argv:
+    print(verify_debug())

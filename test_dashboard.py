@@ -108,6 +108,26 @@ class DashboardTests(unittest.TestCase):
         self.window.verification_finished(None)
         self.assertIn('Not available', self.window.verification.text())
 
+    def test_verify_reports_small_gaps_instead_of_hiding_them(self):
+        """A 116 s gap used to read 'difference 0.0 h' under 'Verified'. Gaps over a minute are now stated."""
+        def show(difference):
+            self.window.verification_finished(dict(ledger=self.ledger, verification=dict(
+                event_seconds=5*3600, awake_seconds=5*3600+difference, difference=difference)))
+            return self.window.verification.text()
+        self.assertIn('Verified against', show(30))
+        self.assertNotIn('Gap of', show(30))
+        gap = show(116)
+        self.assertIn('Gap of 1 m 56 s', gap)
+        self.assertNotIn('Verified against', gap)
+        self.assertIn('Compared with', gap)
+        self.assertIn('Review the difference', show(2*3600))                    # large gaps keep the stronger wording
+        self.assertEqual([gui.format_gap(s) for s in (0, 45, 60, 116, 3605, 11100)],
+                         ['0 s', '45 s', '1 m 00 s', '1 m 56 s', '1 h 00 m', '3 h 05 m'])
+
+    def test_tests_use_the_offscreen_platform(self):
+        """The responsive-tabs test failed on tiling window managers because the real compositor ignored resize()."""
+        self.assertEqual(self.app.platformName(), 'offscreen')
+
     def test_power_ac_zero_and_missing_gpu(self):
         self.window.system.update_values({'power': {'ac': True, 'state': 'On AC power', 'percent': 80},
                                           'battery': {'watts': 0}, 'gpu': []}, gui.THEMES['dark'])

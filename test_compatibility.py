@@ -101,9 +101,27 @@ class LinuxTests(unittest.TestCase):
         with patch.object(s.shutil, 'which', side_effect=lambda name: name if name == 'nmcli' else None), \
                 patch.object(s, 'command', return_value='yes:Home:90:wlan0:540 Mbit/s\n'):
             self.assertEqual(s.wifi_bitrate('wlan0'), 540)
-        with patch.object(s.shutil, 'which', return_value=None):
+        # Neither tool installed: nothing may be launched, so the result cannot depend on this machine's NetworkManager.
+        with patch.object(s.shutil, 'which', return_value=None), \
+                patch.object(s, 'command', side_effect=AssertionError('a missing program was launched')) as cmd:
             self.assertIsNone(s.wifi_bitrate('wlan0'))
             self.assertIsNone(s.linux_network(self.root/'net', bitrate=s.wifi_bitrate)[1]['LinkSpeed'])
+            self.assertEqual(s.nmcli_wifi(), [])
+            cmd.assert_not_called()
+        # nmcli installed but failing, iw absent: still no link speed, and no real program runs.
+        with patch.object(s.shutil, 'which', side_effect=lambda name: name if name == 'nmcli' else None), \
+                patch.object(s, 'command', return_value=None):
+            self.assertIsNone(s.wifi_bitrate('wlan0'))
+
+    def test_verify_debug_lists_raw_journal_rows(self):
+        row = json.dumps({'__REALTIME_TIMESTAMP': '10', '__MONOTONIC_TIMESTAMP': '5', '_SOURCE_MONOTONIC_TIMESTAMP': '4',
+                          'MESSAGE_ID': 'abc', 'MESSAGE': 'PM: suspend entry (s2idle)'})
+        with patch.object(s, 'run_command', return_value=(0, row + '\n')), patch.object(s, 'probe_clocks', return_value=dict(uptime=9)), \
+                patch.object(s, 'verify_linux_awake', return_value={'message': 'fixture'}):
+            text = s.verify_debug()
+        self.assertIn('real=10 mono=5 source_mono=4 id=abc | PM: suspend entry (s2idle)', text)
+        self.assertIn('--- kernel suspend/resume messages: exit 0', text)
+        self.assertIn("verify_linux_awake(): {'message': 'fixture'}", text)
 
     def test_multi_gpu_amd_and_intel(self):
         gpus = s.linux_gpu(self.root/'drm')

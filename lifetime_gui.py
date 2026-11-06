@@ -34,6 +34,19 @@ THEMES = {
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
+VERIFY_TOLERANCE = 60   # seconds; a larger gap between the log and the awake clock is shown, not hidden as "verified"
+
+
+def format_gap(seconds):
+    """'1 m 56 s', '3 h 05 m' or '40 s' for a short difference."""
+    total = int(round(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f'{hours} h {minutes:02d} m'
+    return f'{minutes} m {secs:02d} s' if minutes else f'{secs} s'
+
+
 def animate(owner, name, start, end, callback, milliseconds=360):
     previous = getattr(owner, name, None)
     if previous is not None:
@@ -706,10 +719,16 @@ class Window(QWidget):
             self.display_ledger(result['ledger'])
         verification = result.get('verification') or {}
         if verification.get('event_seconds') is not None:
-            difference = verification['difference']/3600
-            text = tr('verify.compared' if difference > 0.5 else 'verify.result', log=self.log_name,
-                      events=verification['event_seconds']/3600, awake=verification['awake_seconds']/3600,
-                      difference=difference)
+            seconds = verification['difference']
+            difference = seconds/3600
+            numbers = dict(log=self.log_name, events=verification['event_seconds']/3600,
+                           awake=verification['awake_seconds']/3600, difference=difference)
+            if difference > 0.5:
+                text = tr('verify.compared', **numbers)
+            elif seconds > VERIFY_TOLERANCE:      # small but real: say so, in minutes and seconds
+                text = tr('verify.gap', gap=format_gap(seconds), **numbers)
+            else:
+                text = tr('verify.result', **numbers)
         else:
             text = tr(verification.get('message', 'Not available · Windows event log could not be read'))
         if result.get('ledger_error'):
