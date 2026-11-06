@@ -22,7 +22,7 @@ Every release also contains **SHA256SUMS.txt**. To check a download, run `sha256
 2. Double-click **Install Lifetime.cmd**.
 3. Approve the Windows prompt (see "Why admin?" below) and open **Lifetime** from the Start menu.
 
-The downloaded programs are not code-signed, so Windows SmartScreen may say "Windows protected your PC". Click **More info → Run anyway**. If your organisation blocks unsigned programs (Smart App Control / App Control), use the Python route below.
+The downloaded programs are not code-signed, so Windows SmartScreen may say "Windows protected your PC". Click **More info → Run anyway**. **Smart App Control** (on by default on new Windows 11 PCs) blocks unsigned programs outright, with no "Run anyway" button. **Install Lifetime.cmd** detects this and automatically installs the Python version of Lifetime instead; if Python is missing it offers to install it with winget. You do not need to turn Smart App Control off.
 
 **Python route** (works anywhere Python 3.10+ is installed):
 

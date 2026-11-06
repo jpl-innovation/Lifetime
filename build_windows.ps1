@@ -12,5 +12,10 @@ python -m PyInstaller @common --console --name LifetimeImport --hidden-import li
 if ($LASTEXITCODE) { throw 'PyInstaller failed (LifetimeImport)' }
 Remove-Item -Recurse -Force package -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path package | Out-Null
-Copy-Item dist\Lifetime.exe, dist\LifetimeTracker.exe, dist\LifetimeImport.exe, install_windows_exe.ps1, install_windows_common.ps1, 'Install Lifetime.cmd' package\ -Force
+Copy-Item dist\Lifetime.exe, dist\LifetimeTracker.exe, dist\LifetimeImport.exe, install_windows_exe.ps1, install_windows_common.ps1, `
+    install_windows.ps1, install_windows_auto.ps1, 'Install Lifetime.cmd' package\ -Force
+# The Python sources too: when Smart App Control blocks the unsigned .exe files, the installer falls back to these.
+Copy-Item lifetime_*.py package\ -Force
+New-Item -ItemType Directory -Force -Path package\assets | Out-Null
+Copy-Item assets\lifetime.png, assets\lifetime.ico package\assets\ -Force
 Write-Host 'Done. Open the "package" folder and double-click "Install Lifetime.cmd".'
