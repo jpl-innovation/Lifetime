@@ -14,6 +14,8 @@ Made by [JPL Innovation](https://github.com/jpl-innovation).
 
 Go to the **[latest release](../../releases/latest)** and pick your system.
 
+Every release also contains **SHA256SUMS.txt**. To check a download, run `sha256sum -c SHA256SUMS.txt` (Linux) or `Get-FileHash Lifetime-Windows.zip` (Windows) and compare the value.
+
 ### Windows 10 / 11 (no Python needed)
 
 1. Download **Lifetime-Windows.zip** and unzip it.
@@ -45,9 +47,9 @@ The installer needs Python 3 and PyQt6 and offers to install PyQt6 for you (no s
 
 ## What it shows
 
-- **Overview** â€“ total awake time, ticking live to the second, with first-used date, boots, current and longest session, and daily average. A **Verify** button cross-checks the number against the operating system's own records (the Windows event log or the Linux journal).
-- **System** â€“ live power and battery, network and Wi-Fi, graphics, CPU, memory and disks, with five-minute sparklines.
-- **Insights** â€“ calendar heatmap, daily hours with a 7-day average, cumulative lifetime hours, hour-of-day and weekday profiles, and a session-length histogram. Every chart has a table view.
+- **Overview** – total awake time, ticking live to the second, with first-used date, boots, current and longest session, and daily average. A **Verify** button cross-checks the number against the operating system's own records (the Windows event log or the Linux journal).
+- **System** – live power and battery, network and Wi-Fi, graphics, CPU, memory and disks, with five-minute sparklines.
+- **Insights** – calendar heatmap, daily hours with a 7-day average, cumulative lifetime hours, hour-of-day and weekday profiles, and a session-length histogram. Every chart has a table view.
 
 ## Privacy and consent
 
@@ -80,6 +82,13 @@ Windows executables: `./build_windows.ps1` (needs `pyinstaller`, produces `packa
 
 Windows 10 and 11 (x64 and ARM64), and Linux with systemd and Python 3.10+. Desktops without a battery or without an NVIDIA GPU are handled. Windows 10, ARM64, non-English Windows and Linux paths are covered by automated tests but have had less real-world testing than Windows 11 x64.
 
+## Troubleshooting and known issues
+
+- **Windows says "Windows protected your PC".** The programs are not code-signed yet. Choose **More info -> Run anyway**, or use the Python route above.
+- **Linux: Verify shows a gap of a couple of minutes after a suspend.** On some laptops the journal timestamps for suspend events are approximate, so the comparison can be off by about the length of the sleep. The total itself comes from the awake-only clock and is not affected. To help fix this, run `python3 lifetime_signals.py --verify-debug` right after a suspend and resume, and attach the output to an issue.
+- **Linux: no Wi-Fi or graphics details.** Wi-Fi uses NetworkManager (`nmcli`) or `iw`; graphics names use `lspci`. Install them with your package manager if a field shows "Not available".
+- **Something else.** Open an issue on GitHub with your operating system, Python version and the exact message.
+
 ## Credits
 
-Lifetime Â· Made by JPL Innovation
+Lifetime · Made by JPL Innovation
