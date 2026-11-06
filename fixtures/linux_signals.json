@@ -1,0 +1,29 @@
+{
+  "stat_before": "cpu  100 20 30 400 50 10 20 0 0 0\ncpu0 0 0 0 0\n",
+  "stat_after": "cpu  150 20 50 420 60 10 20 0 0 0\n",
+  "meminfo": "MemTotal: 8388608 kB\nMemFree: 1048576 kB\nMemAvailable: 2097152 kB\nBuffers: 262144 kB\nCached: 786432 kB\n",
+  "netdev": "Inter-| Receive | Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n lo: 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0\n eth0: 1234 1 0 0 0 0 0 0 5678 1 0 0 0 0 0 0\n wlan0: 300 1 0 0 0 0 0 0 900 1 0 0 0 0 0 0\n",
+  "wireless": "Inter-| sta-| Quality | Discarded packets\n face | tus | link level noise\n wlan0: 0000 56. -54. -256 0 0 0 0 0 0\n",
+  "nmcli": "*:Office\\: Upstairs:80:wlan0\n:Other:30:wlan0\n",
+  "iw": "Connected to 00:11:22:33:44:55 (on wlan0)\n\tSSID: Office: Upstairs\n\tfreq: 5180\n\tsignal: -54 dBm\n",
+  "files": {
+    "power/BAT0/type": "Battery", "power/BAT0/capacity": "80", "power/BAT0/status": "Discharging",
+    "power/BAT0/power_now": "10000000", "power/BAT0/voltage_now": "12000000",
+    "power/BAT0/energy_now": "40000000", "power/BAT0/energy_full": "50000000", "power/BAT0/energy_full_design": "60000000",
+    "power/BAT1/type": "Battery", "power/BAT1/capacity": "50", "power/BAT1/status": "Discharging",
+    "power/BAT1/current_now": "1000000", "power/BAT1/voltage_now": "10000000",
+    "power/BAT1/energy_now": "10000000", "power/BAT1/energy_full": "20000000", "power/BAT1/energy_full_design": "25000000",
+    "power/AC/type": "Mains", "power/AC/online": "0",
+    "net/eth0/operstate": "up", "net/eth0/speed": "1000", "net/eth0/type": "1",
+    "net/wlan0/operstate": "up", "net/wlan0/speed": "-1", "net/wlan0/type": "1", "net/wlan0/wireless/marker": "",
+    "net/lo/operstate": "up", "net/down0/operstate": "down",
+    "drm/card0/device/vendor": "0x1002", "drm/card0/device/device": "0x73ff", "drm/card0/device/gpu_busy_percent": "37",
+    "drm/card0/device/hwmon/hwmon0/power1_average": "23500000",
+    "drm/card1/device/vendor": "0x8086", "drm/card1/device/device": "0x1234"
+  },
+  "journal": [
+    {"_TRANSPORT": "kernel", "__REALTIME_TIMESTAMP": "1000000000", "__MONOTONIC_TIMESTAMP": "100000000", "MESSAGE": "PM: suspend entry (deep)"},
+    {"_TRANSPORT": "kernel", "__REALTIME_TIMESTAMP": "1600000000", "__MONOTONIC_TIMESTAMP": "110000000", "MESSAGE": "PM: suspend exit"},
+    {"_TRANSPORT": "kernel", "__REALTIME_TIMESTAMP": "2000000000", "__MONOTONIC_TIMESTAMP": "500000000", "MESSAGE": "PM: suspend entry (deep)"}
+  ]
+}
