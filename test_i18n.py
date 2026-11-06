@@ -128,6 +128,14 @@ class LiveLanguageTests(unittest.TestCase):
 import runpy
 from PyQt6 import QtWidgets
 from PyQt6.QtCore import QTimer
+import datetime as dt
+import lifetime_tracker as tracker
+# Supply fixed boot evidence so the result does not depend on this machine's real uptime
+# (a freshly started CI machine cannot hold 153 awake hours and would show a blocking dialog).
+original_repair = tracker.repair_daily
+end = dt.datetime.fromisoformat('2026-11-06T19:00:00').timestamp()
+evidence = (end-153*3600, [(end-153*3600, end)], True)
+tracker.repair_daily = lambda directory=None, given=None: original_repair(directory, evidence if given is None else given)
 BaseApplication = QtWidgets.QApplication
 class AutoCloseApplication(BaseApplication):
     def __init__(self, *args):
@@ -149,8 +157,11 @@ runpy.run_path('lifetime_gui.py', run_name='__main__')
             environment = {**os.environ, 'LIFETIME_DATA_DIR': root, 'QT_QPA_PLATFORM': 'offscreen',
                            'LIFETIME_REDUCE_MOTION': '1'}
             for run in range(2):
-                result = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).parent,
-                                        env=environment, capture_output=True, text=True, timeout=90)
+                try:
+                    result = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).parent,
+                                            env=environment, capture_output=True, text=True, timeout=60)
+                except subprocess.TimeoutExpired as error:
+                    self.fail(f'GUI did not exit. stdout={error.stdout!r} stderr={error.stderr!r}')
                 self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
                 repaired = tracker.read_ledger(root)
                 self.assertEqual(repaired['total_seconds'], ledger['total_seconds'])
