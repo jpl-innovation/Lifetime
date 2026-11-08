@@ -9,29 +9,34 @@ import subprocess
 import sys
 import statistics
 import time
+import platform
 
 from PyQt6.QtCore import QEvent, Qt, QTimer, QRectF, QVariantAnimation, QEasingCurve, QPointF, QProcess
-from PyQt6.QtGui import QColor, QIcon, QPalette, QPainter, QPen, QFont
+from PyQt6.QtGui import QColor, QIcon, QPalette, QPainter, QPen, QFont, QShortcut, QKeySequence, QFontMetrics
 from PyQt6.QtWidgets import (QApplication, QAbstractSpinBox, QDoubleSpinBox,
                             QGraphicsOpacityEffect, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
                             QProgressBar, QPushButton, QButtonGroup, QToolTip, QScrollArea, QVBoxLayout, QWidget)
 from PyQt6.QtWidgets import QSizePolicy
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QDoubleSpinBox
-from lifetime_tracker import average_awake, data_dir, read_ledger, set_baseline, repair_daily
+from lifetime_tracker import average_awake, data_dir, read_ledger, set_baseline, repair_daily, awake_clock, MAX_DELTA
 from lifetime_i18n import duration
 from lifetime_dashboard import ProbeWorker, SystemDashboard, RefreshGlyph
-from lifetime_charts import Insights
-from lifetime_settings import load_settings, save_settings
+from lifetime_charts import Insights, Plot, clean_daily, date_series
+from lifetime_health_gui import HealthPage
+from lifetime_shell import Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, tray_available, tell_running_instance, configure_tray_login
+from lifetime_settings import load_settings, save_settings, update_settings
 from lifetime_setup import SetupDialog, configure_login
+from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
+from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
+from lifetime_connect import ConnectPage
+from lifetime_tasks import Tasks
 
-THEMES = {
-    'dark': dict(bg='#0B1426', card='#12203A', text='#FFFFFF',
-                 muted='#9FB0CC', border='#22345A', accent='#FFC93C', accent_hover='#FFD761', track='#1B2A46'),
-    # Retained for callers that inspect available legacy theme keys; never selected.
-    'light': dict(bg='#F3F4F1', card='#FCFCFA', text='#252D2D',
-                  muted='#626E6C', border='#D8DEDA', accent='#52796D', track='#E1E6E1'),
-}
+from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
+
+
+def motion_reduced():
+    return REDUCE_MOTION or os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
 VERIFY_TOLERANCE = 60   # seconds; a larger gap between the log and the awake clock is shown, not hidden as "verified"
@@ -47,12 +52,12 @@ def format_gap(seconds):
     return f'{minutes} m {secs:02d} s' if minutes else f'{secs} s'
 
 
-def animate(owner, name, start, end, callback, milliseconds=360):
+def animate(owner, name, start, end, callback, milliseconds=150):
     previous = getattr(owner, name, None)
     if previous is not None:
         previous.stop()
         previous.deleteLater()
-    if REDUCE_MOTION or start == end:
+    if motion_reduced() or start == end:
         callback(end)
         setattr(owner, name, None)
         return
@@ -75,7 +80,7 @@ class RiseEffect(QGraphicsOpacityEffect):
         self.setOpacity(1.0)
 
     def boundingRectFor(self, rect):
-        return rect.adjusted(0, -2, 0, 5)
+        return rect.adjusted(0, -2, 0, 10)
 
     def draw(self, painter):
         painter.save()
@@ -94,40 +99,28 @@ class ValueLabel(QLabel):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setOpacity(self.opacity)
-        painter.setFont(self.font())
+        font = QFont(self.font())
+        # Keep translated duration units readable before resorting to elision.
+        while font.pixelSize() > 15 and QFontMetrics(font).horizontalAdvance(self.text()) > self.contentsRect().width():
+            font.setPixelSize(font.pixelSize()-1)
+        painter.setFont(font)
         painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
-        shown = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, self.contentsRect().width())
+        shown = QFontMetrics(font).elidedText(self.text(), Qt.TextElideMode.ElideRight, self.contentsRect().width())
         self.setToolTip(self.text() if shown != self.text() else '')
         painter.drawText(self.contentsRect(), self.alignment() | Qt.AlignmentFlag.AlignVCenter, shown)
 
 
-class LiveDot(QWidget):
+STATUS_GOOD = '#4CC38A'   # same green as the server's "Connected" dots
+
+
+class LiveDot(PulseDot):
+    """Tracking: green dot with a ripple wave. Paused: grey dot. Label beside it names the state."""
+
     def __init__(self):
-        super().__init__()
-        self.setFixedSize(10, 10)
-        self.active = False
-        self.phase = False
+        super().__init__(size=24, reduce_motion=REDUCE_MOTION)
 
     def tick(self, active):
-        changed = self.active != active
-        self.active = active
-        if active and not REDUCE_MOTION:
-            self.phase = not self.phase
-            changed = True
-        if changed:
-            self.update()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        t = THEMES[self.window().theme]
-        color = QColor(t['accent'] if self.active else t['muted'])
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(color)
-        p.drawEllipse(QRectF(2, 2, 6, 6))
-        if self.active and self.phase:
-            p.setPen(QPen(color, 1))
-            p.drawLine(4, 0, 6, 0)
+        self.set_active(active)
 
 
 def label(text='', name=''):
@@ -198,8 +191,26 @@ class Hero(QWidget):
         self.seconds = 0
         self.target = 0
         self.fraction = 0
-        self.setFixedHeight(148)
+        self.setFixedHeight(144)     # content ends at 140 px; the old 156 left dead space and made Overview scroll by 4 px
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setAccessibleName(tr('Total time awake'))
+
+    def position_controls(self):
+        if not hasattr(self, 'controls'):
+            return
+        f = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
+        f.setPixelSize(64)
+        f.setWeight(QFont.Weight.Light)
+        number_width = QFontMetrics(f).horizontalAdvance(f'{self.seconds / 3600:,.1f}')
+        controls = self.controls
+        controls.adjustSize()
+        inline = self.width() >= 400
+        controls.move(min(self.width()-controls.width(), number_width+24) if inline else 0, 62 if inline else 148)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.position_controls()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -216,24 +227,30 @@ class Hero(QWidget):
         whole_minutes, secs = divmod(int(self.seconds), 60)
         days, rest = divmod(whole_minutes, 1440)
         hours, minutes = divmod(rest, 60)
-        compact = h < 140
-        text(2, 25, tr('Total time awake'), 15, t['muted'])
+        # The number is the focal point and aligns with the page title; the old 100-hour ring read as a
+        # loading spinner and pushed the number out of line with everything else.
+        x = 0
+        text(3, 25, tr('Total time awake'), 15, t['muted'], x=x, width=w-x)
         value = f'{self.seconds / 3600:,.1f}'
-        size = 52 if compact else 60
+        size = 64
         f = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
         f.setPixelSize(size)
-        from PyQt6.QtGui import QFontMetrics
-        while QFontMetrics(f).horizontalAdvance(value) > max(120, w-12) and size > 26:
+        available = w-x-8
+        if hasattr(self, 'controls') and w >= 400:
+            available -= self.controls.width()+24
+        while QFontMetrics(f).horizontalAdvance(value) > max(60, available) and size > 18:
             size -= 2
             f.setPixelSize(size)
-        text(23 if compact else 29, 62 if compact else 78, value, size, t['text'], QFont.Weight.Light)
-        text(82 if compact else 111, 28, tr('hero.duration', days=days, hours=hours, minutes=minutes, seconds=secs), 15, t['muted'])
+        text(28, 80, value, size, t['text'], QFont.Weight.Light, x=x, width=w-x)
+        text(112, 28, tr('hero.duration', days=days, hours=hours, minutes=minutes, seconds=secs),
+             13 if w < 400 else 15, t['muted'], x=0 if w < 400 else x, width=w if w < 400 else w-x)
 
     def set_total(self, seconds):
         self.target = seconds
         self.setAccessibleDescription(duration(seconds))
         def update_value(value):
             self.seconds = value
+            self.position_controls()
             self.update()
         def update_ring(value):
             self.fraction = value
@@ -245,52 +262,53 @@ class Hero(QWidget):
 class StatCard(QFrame):
     def __init__(self, title, kind, progress=False):
         super().__init__()
-        self.setObjectName('card')
+        self.setObjectName('statCell')
         self.hover = 0.0
         self.number = 0.0
         self.target = None
         self.effect = RiseEffect(self)
         self.setGraphicsEffect(self.effect)
-        self.setFixedHeight(96 if not progress else 72)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
-        layout.setSpacing(2)
-        heading = QHBoxLayout()
-        heading.setSpacing(8)
-        heading.addWidget(Icon(kind))
-        heading_label = label(title, 'muted')
-        heading_label.setWordWrap(True)
-        heading.addWidget(heading_label, 1)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.box = QVBoxLayout(self)
+        self.box.setContentsMargins(16, 12, 16, 12)
+        self.box.setSpacing(8)
+        self.heading_label = label(title, 'muted')
+        self.heading_label.setWordWrap(True)
+        self.heading_label.setMinimumWidth(0)
+        self.heading_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.live = LiveDot() if kind == 'clock' else None
         if self.live:
-            heading.addWidget(self.live)
-        self.value = ValueLabel('—')
+            self.live.setParent(self)
+            self.live.hide()
+        self.value = ValueLabel('')
         self.value.setMinimumWidth(0)
         self.value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.value.setObjectName('value')
+        self.value.setObjectName('statValue')
         self.caption = label('', 'caption')
         self.caption.setWordWrap(True)
+        self.caption.hide()
         self.progress = None
-        if progress:
-            self.value.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-            self.value.setFixedWidth(130)
-            heading.addWidget(self.value)
-            layout.addLayout(heading)
-            self.progress = QProgressBar()
-            self.progress.setRange(0, 2400)
-            self.progress.setTextVisible(False)
-            layout.addWidget(self.progress)
-            layout.addWidget(self.caption)
-        else:
-            layout.addLayout(heading)
-            layout.addWidget(self.value)
-            layout.addWidget(self.caption)
+        self.box.addWidget(self.heading_label)
+        self.box.addWidget(self.value)
+        self.setFixedHeight(104)
+        self.divider = False
+        self.list_mode = False
+
+    def set_list_mode(self, enabled, divider):
+        self.list_mode, self.divider = enabled, divider
+        self.box.setDirection(QVBoxLayout.Direction.LeftToRight if enabled else QVBoxLayout.Direction.TopToBottom)
+        self.box.setStretch(0, 1)
+        self.box.setStretch(1, 1 if enabled else 0)
+        self.value.setAlignment(Qt.AlignmentFlag.AlignRight if enabled else Qt.AlignmentFlag.AlignLeft)
+        self.setFixedHeight(56 if enabled else 104)
+        self.update()
 
     def set_number(self, value, formatter):
         if value == self.target:
             return
         if self.target is not None and formatter(value) != formatter(self.target):
-            animate(self, 'value_fade', .65, 1, self.value.set_opacity, 180)
+            animate(self, 'value_fade', .65, 1, self.value.set_opacity, 150)
         self.target = value
         self.value.setAccessibleName(formatter(value))
         def update(value):
@@ -304,14 +322,12 @@ class StatCard(QFrame):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         t = THEMES[self.window().theme]
-        border = QColor(t['border'])
-        bright = QColor(t['muted'])
-        border.setRedF(border.redF() + (bright.redF() - border.redF()) * self.hover * .5)
-        border.setGreenF(border.greenF() + (bright.greenF() - border.greenF()) * self.hover * .5)
-        border.setBlueF(border.blueF() + (bright.blueF() - border.blueF()) * self.hover * .5)
-        p.setPen(QPen(border, 1))
-        p.setBrush(QColor(t['card']))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 10, 10)
+        p.setPen(QPen(QColor(t['border']), 1))
+        if self.divider:
+            if self.list_mode:
+                p.drawLine(16, self.height()-1, self.width()-16, self.height()-1)
+            else:
+                p.drawLine(self.width()-1, 16, self.width()-1, self.height()-16)
 
     def set_hover(self, value):
         self.hover = value
@@ -321,11 +337,9 @@ class StatCard(QFrame):
 
     def enterEvent(self, event):
         super().enterEvent(event)
-        animate(self, 'hover_animation', self.hover, 1, self.set_hover, 120)
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
-        animate(self, 'hover_animation', self.hover, 0, self.set_hover, 120)
 
 
 def hours_minutes(seconds):
@@ -445,112 +459,186 @@ def segments(items, callback):
 History = Insights
 
 
+class OverviewTrend(Plot):
+    def __init__(self, activate):
+        super().__init__('daily')
+        self.activate = activate
+        self.bar_color = None      # brand yellow, like every other chart
+        self.setFixedHeight(160)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(tr('Last 14 days; open Activity'))
+        self.setToolTip(tr('Last 14 days; open Activity'))
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.activate()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.activate()
+        else:
+            super().keyPressEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.hasFocus():
+            p = QPainter(self)
+            p.setPen(QPen(QColor(THEMES['dark']['muted']), 1))
+            p.drawRoundedRect(self.rect().adjusted(1, 1, -2, -2), PANEL_RADIUS, PANEL_RADIUS)
+
+
 class Window(QWidget):
+    tray = None
+
     def __init__(self, settings=None):
         super().__init__()
         self.settings = settings if settings is not None else load_settings(data_dir())
+        self.last_verification = None
+        self.daily_repair_complete = True
         set_language(self.settings.get('language', language()))
         self.theme = None
         self.initialized = False
         self.setWindowTitle(tr('Lifetime · JPL Innovation'))
         self.resize(1280, 800)
         self.setMinimumSize(390, 440)
-        outer = QVBoxLayout(self)
+        outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        outer.addWidget(self.scroll)
-        footer = label(tr('Lifetime · Made by JPL Innovation'), 'footer')
-        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setContentsMargins(16, 8, 16, 12)
-        outer.addWidget(footer)
-        canvas = Backdrop()
-        self.scroll.setWidget(canvas)
-        centering = QHBoxLayout(canvas)
-        self.centering = centering
-        centering.setContentsMargins(24, 24, 24, 24)
-        self.body = QWidget()
-        self.body.setMaximumWidth(1400)
-        centering.addWidget(self.body, 1, Qt.AlignmentFlag.AlignTop)
-        layout = QVBoxLayout(self.body)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        header = QHBoxLayout()
-        header.addWidget(label(tr('Lifetime'), 'brand'))
-        header.addStretch()
+        outer.setSpacing(0)
         self.status = label('', 'status')
         self.status_dot = LiveDot()
-        header.addWidget(self.status_dot)
-        header.addWidget(self.status)
-        settings_button = QPushButton(tr('Settings'))
-        settings_button.clicked.connect(self.open_settings)
-        header.addWidget(settings_button)
         self.language_control = segments([tr('EN'), tr('VI')],
                                          lambda index: self.switch_language(('en', 'vi')[index]))
         self.language_control.group.button(('en', 'vi').index(language())).setChecked(True)
         for button in self.language_control.group.buttons():
-            button.setMinimumSize(44, 36)
+            button.setMinimumSize(40, 36)       # tall enough for the button's padding, so its corners are never cut
         self.language_control.setAccessibleName(tr('Language'))
-        header.addWidget(self.language_control)
-        header.setContentsMargins(24, 12, 24, 4)
-        outer.insertLayout(0, header)
-        self.navigation = segments([tr('Overview'), tr('System'), tr('Insights')], self.select_page)
-        layout.addWidget(self.navigation, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.sidebar = Sidebar(self.select_page, self.open_settings, motion_reduced,
+                               self.language_control, self.status, self.status_dot)
+        self.navigation = self.sidebar
+        outer.addWidget(self.sidebar)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(self.scroll, 1)
+        canvas = Backdrop()
+        self.scroll.setWidget(canvas)
+        self.centering = QHBoxLayout(canvas)
+        self.centering.setContentsMargins(32, 32, 32, 32)
+        self.body = QWidget()
+        self.body.setMinimumWidth(0)
+        self.body.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.body.setMaximumWidth(1200)
+        self.centering.addWidget(self.body, 1, Qt.AlignmentFlag.AlignTop)
+        body_layout = QVBoxLayout(self.body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(16)
+        self.pages = PageStack()
+        self.pages.setMinimumWidth(0)
+        self.pages.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        body_layout.addWidget(self.pages)
         self.overview = QWidget()
-        overview_layout = QVBoxLayout(self.overview)
-        overview_layout.setContentsMargins(0, 0, 0, 0)
-        overview_layout.setSpacing(8)
-        page_layout = layout
-        page_layout.addWidget(self.overview)
-        layout = overview_layout
+        layout = QVBoxLayout(self.overview)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        self.overview_title = label(tr('Overview'), 'pageTitle')
+        layout.addWidget(self.overview_title)
         self.hero = Hero()
-        total_row = QHBoxLayout()
-        total_row.addWidget(self.hero, 1)
+        self.total_row = QHBoxLayout()
+        self.total_row.setSpacing(16)
+        self.total_row.addWidget(self.hero)
         self.verify_glyph = RefreshGlyph()
         self.verify_button = QPushButton(tr('Verify'))
+        self.verify_button.setMinimumHeight(36)
         self.log_name = tr('Windows event log') if sys.platform == 'win32' else tr('system journal')
         self.verify_button.setAccessibleName(tr('verify.accessible', log=self.log_name))
         self.verify_button.clicked.connect(self.verify)
-        total_row.addWidget(self.verify_glyph)
-        total_row.addWidget(self.verify_button)
-        layout.addLayout(total_row)
+        self.verify_controls = QWidget()
+        verify_row = QHBoxLayout(self.verify_controls)
+        verify_row.setContentsMargins(0, 0, 0, 0)
+        verify_row.setSpacing(8)
+        verify_row.addWidget(self.verify_glyph)
+        verify_row.addWidget(self.verify_button)
+        self.verify_controls.setParent(self.hero)
+        self.hero.controls = self.verify_controls
+        self.total_row.addStretch(1)
+        layout.addLayout(self.total_row)
         self.verification = label(tr('verify.intro', log=self.log_name), 'caption')
         self.verification.setWordWrap(True)
+        self.verification.setMinimumWidth(0)
+        self.verification.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.verification)
-        grid = QGridLayout()
-        self.grid = grid
-        self.columns = 2
-        grid.setSpacing(16)
+        self.stats_panel = QFrame()
+        self.stats_panel.setObjectName('insetPanel')
+        self.grid = QGridLayout(self.stats_panel)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(0)
+        self.columns = 0
         self.cards = {}
-        for i, (key, title, kind) in enumerate((
-            ('first', tr('First used'), 'calendar'), ('boots', tr('Boots observed'), 'restart'),
-            ('current', tr('Current session'), 'clock'), ('longest', tr('Longest session'), 'longest'),
-            ('average', tr('Average awake / day'), 'average'))):
-            card = StatCard(tr(title), kind, i == 4)
-            self.cards[key] = card
-            grid.addWidget(card, i // 2, i % 2, 1, 2 if i == 4 else 1)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
+        # Preserve the public stat keys and provenance mapping.
+        for key, title, kind in (
+            ('first', 'Earliest known date', 'calendar'), ('boots', 'Boots observed', 'restart'),
+            ('current', 'Current session', 'clock'), ('longest', 'Longest session', 'longest'),
+            ('average', 'Average awake / day', 'average')):
+            self.cards[key] = StatCard(tr(title), kind)
+        self.stat_order = ('current', 'longest', 'average', 'boots', 'first')
+        layout.addWidget(self.stats_panel)
+        self.trend_panel = QFrame()
+        self.trend_panel.setObjectName('insetPanel')
+        trend_box = QVBoxLayout(self.trend_panel)
+        trend_box.setContentsMargins(16, 12, 16, 8)
+        trend_box.setSpacing(8)
+        trend_header = QHBoxLayout()
+        trend_header.addWidget(label(tr('Last 14 days'), 'groupTitle'))
+        trend_header.addStretch()
+        self.activity_link = QPushButton(tr('View Activity'))
+        self.activity_link.setObjectName('quietAction')
+        self.activity_link.clicked.connect(lambda: self.select_page(2))
+        trend_header.addWidget(self.activity_link)
+        trend_box.addLayout(trend_header)
+        self.trend = OverviewTrend(lambda: self.select_page(2))
+        trend_box.addWidget(self.trend)
+        layout.addWidget(self.trend_panel)
+        self.counting_toggle = DisclosureButton(tr('How this is counted'))
+        self.counting_toggle.setObjectName('disclosure')
+        self.counting_toggle.setCheckable(True)
+        self.counting_toggle.toggled.connect(self.toggle_counting)
+        layout.addWidget(self.counting_toggle)
+        self.counting_panel = QWidget()
+        counting = QVBoxLayout(self.counting_panel)
+        counting.setContentsMargins(16, 0, 16, 8)
+        counting.setSpacing(8)
+        self.source_breakdown = label('', 'caption')
+        self.source_breakdown.setWordWrap(True)
+        self.source_breakdown.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.coverage_summary = label('', 'caption')
+        self.coverage_summary.setWordWrap(True)
+        self.device_name = label('', 'caption')
+        self.device_name.setWordWrap(True)
+        self.device_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.device_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.awake_note = label(tr('Awake time is the time the computer was running and awake. It does not measure human activity, component health or remaining lifespan.'), 'caption')
+        self.awake_note.setWordWrap(True)
         note = label(tr('Sleep and hibernation are not counted.'), 'caption')
         note.setWordWrap(True)
-        actions = QHBoxLayout()
-        actions.addWidget(note, 1)
+        for item in (self.source_breakdown, self.coverage_summary, self.device_name, self.awake_note, note):
+            counting.addWidget(item)
         self.import_toggle = QPushButton(tr('+  Import starting hours'))
         self.import_toggle.setObjectName('importToggle')
         self.import_toggle.setCheckable(True)
         self.import_toggle.toggled.connect(self.toggle_import)
-        actions.addWidget(self.import_toggle)
-        layout.addLayout(actions)
+        counting.addWidget(self.import_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
         self.import_panel = QWidget()
         form = QVBoxLayout(self.import_panel)
         form.setContentsMargins(0, 0, 0, 8)
         explanation = label(tr('Known hours before tracking. Replaces the existing baseline.'), 'caption')
         explanation.setWordWrap(True)
         form.addWidget(explanation)
-        row = QHBoxLayout()
+        self.baseline_row = QHBoxLayout()
         self.baseline = HoursInput()
+        self.baseline.setMinimumWidth(0)
+        self.baseline.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.baseline.setFixedHeight(40)
         self.baseline.lineEdit().setTextMargins(12, 0, 12, 0)
         self.baseline.setRange(0, 100_000_000)
@@ -558,30 +646,108 @@ class Window(QWidget):
         self.baseline.setSuffix(tr('unit.hour.suffix'))
         self.baseline.setAccessibleName(tr('Starting hours'))
         self.baseline.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        row.addWidget(self.baseline, 1)
+        self.baseline_row.addWidget(self.baseline, 1)
         apply = QPushButton(tr('Set baseline'))
         apply.clicked.connect(self.apply_baseline)
-        row.addWidget(apply)
-        form.addLayout(row)
-        layout.addWidget(self.import_panel)
+        self.baseline_row.addWidget(apply)
+        form.addLayout(self.baseline_row)
+        counting.addWidget(self.import_panel)
         self.import_panel.setMaximumHeight(0)
         self.import_panel.hide()
+        layout.addWidget(self.counting_panel)
+        self.counting_panel.setMaximumHeight(0)
+        self.counting_panel.hide()
         self.system = SystemDashboard()
-        page_layout.addWidget(self.system)
-        self.system.hide()
         self.history = History()
-        page_layout.addWidget(self.history)
-        self.history.hide()
-        layout = page_layout
-        tracker = QHBoxLayout()
+        self.system.layout().setContentsMargins(0, 0, 0, 0)
+        self.history.layout().setContentsMargins(0, 0, 0, 0)
+        self.history.layout().itemAt(0).layout().itemAt(0).widget().setText(tr('Activity'))
+        self.reports = QWidget()
+        reports_layout = QVBoxLayout(self.reports)
+        reports_layout.setContentsMargins(0, 0, 0, 0)
+        reports_layout.setSpacing(16)
+        reports_layout.addWidget(label(tr('Reports'), 'pageTitle'))
+        intro = label(tr('Reports and details for this computer.'), 'caption')
+        intro.setWordWrap(True)
+        reports_layout.addWidget(intro)
+        self.report_list = QFrame()
+        self.report_list.setObjectName('insetPanel')
+        reports_list = QVBoxLayout(self.report_list)
+        reports_list.setContentsMargins(16, 0, 16, 0)
+        reports_list.setSpacing(0)
+        self.technician_actions = {}
+        self.report_rows = []
+        for index, (title, description, dialog) in enumerate((
+            ('Export report', 'Save a report of recorded awake time and coverage.', ExportDialog),
+            ('Device identity', 'Manage the device name, asset tag and ownership.', IdentityDialog),
+            ('Coverage details', 'Review sources, dates and gaps in the record.', CoverageDialog))):
+            row = QWidget()
+            row.setObjectName('reportRow')
+            row_box = QHBoxLayout(row)
+            row_box.setContentsMargins(0, 20, 0, 20)
+            row_box.setSpacing(16)
+            copy = QVBoxLayout()
+            copy.setSpacing(4)
+            title_label = label(tr(title), 'rowTitle')
+            title_label.setWordWrap(True)
+            copy.addWidget(title_label)
+            description_label = label(tr(description), 'caption')
+            description_label.setWordWrap(True)
+            description_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            copy.addWidget(description_label)
+            row_box.addLayout(copy, 1)
+            # The row title already says what it is; the button names the action only.
+            button = QPushButton(tr('Export') if index == 0 else tr('Open'))
+            button.setMinimumHeight(36)
+            button.setObjectName('primaryAction' if index == 0 else 'reportAction')
+            button.setAccessibleName(tr(title))
+            button.clicked.connect(lambda checked=False, cls=dialog: self.open_technician(cls))
+            row_box.addWidget(button)
+            reports_list.addWidget(row)
+            if index < 2:
+                divider = QFrame()
+                divider.setObjectName('divider')
+                divider.setFixedHeight(1)
+                reports_list.addWidget(divider)
+            self.technician_actions[title] = button
+            self.report_rows.append(row)
+        reports_layout.addWidget(self.report_list)
+        self.repair_notice = label('', 'caption')
+        self.repair_notice.setWordWrap(True)
+        self.repair_notice.hide()
+        reports_layout.addWidget(self.repair_notice)
+        self.health = HealthPage(self.settings, self.open_settings)
+        self.connect_page = ConnectPage(directory=data_dir())
+        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page):
+            page.setMinimumWidth(0)
+            page.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
+            self.pages.addWidget(page)
+        self.pages.setCurrentIndex(0)
+        # Paused-tracking notice: a calm banner at the top of every page, shown only while the tracker is
+        # offline, so the call to action sits where people look first instead of trailing under the content.
+        self.tracker_banner = QFrame()
+        self.tracker_banner.setObjectName('insetPanel')
+        tracker = QHBoxLayout(self.tracker_banner)
+        tracker.setContentsMargins(16, 12, 12, 12)
+        tracker.setSpacing(16)
         self.hint = label('', 'caption')
         self.hint.setWordWrap(True)
+        self.hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tracker.addWidget(self.hint, 1)
         self.start = QPushButton(tr('Start tracker'))
         self.start.setObjectName('startTracker')
         self.start.clicked.connect(self.start_tracker)
         tracker.addWidget(self.start)
-        layout.addLayout(tracker)
+        body_layout.insertWidget(0, self.tracker_banner)
+        self.tracker_banner.hide()
+        self.shortcuts = []
+        for number, page in enumerate((0, 2, 1, 4, 5, 3), 1):
+            shortcut = QShortcut(QKeySequence(f'Ctrl+{number}'), self)
+            shortcut.activated.connect(lambda index=page: self.select_page(index))
+            self.shortcuts.append(shortcut)
+        self.page_animation = None
+        self.active_page = 0
+        self.reflow()
         self.apply_theme()
         QApplication.instance().paletteChanged.connect(self.apply_theme)
         self.refresh()
@@ -595,16 +761,45 @@ class Window(QWidget):
         self.apply_visibility()
         on_language_change(self.retranslate_content)
 
+    def start_daily_repair(self, repair=repair_daily):
+        self._set_export_ready(False)
+        self.repair_notice.setText(tr('Updating history'))
+        self.repair_notice.show()
+        self.daily_repair_tasks = Tasks(self)
+        self.daily_repair_tasks.completed.connect(self._daily_repair_done)
+        self.daily_repair_tasks.failed.connect(self._daily_repair_failed)
+        self.daily_repair_tasks.submit(repair)
+
+    def _set_export_ready(self, ready):
+        self.daily_repair_complete = ready
+        self.technician_actions['Export report'].setEnabled(
+            ready and self.settings.get('completed', False))
+
+    def _daily_repair_done(self, _number, _result):
+        self._set_export_ready(True)
+        self.status.setText(tr('History updated'))
+        self.repair_notice.hide()
+        self.refresh()
+
+    def _daily_repair_failed(self, _number, error):
+        self._set_export_ready(False)
+        self.status.setText(tr('History update failed'))
+        self.repair_notice.setText(tr('Calendar history could not be updated. Restart Lifetime to retry. Report export remains unavailable.'))
+        self.repair_notice.show()
+
     def switch_language(self, value):
         previous = self.settings.get('language')
         self.settings['language'] = value
         try:
-            save_settings(self.settings, data_dir())
-        except OSError as error:
+            saved = update_settings({'language': value}, data_dir())
+            self.settings['identity'] = saved['identity']
+        except (OSError, ValueError) as error:
             self.settings['language'] = previous
             QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
             return
         set_language(value)
+        self.worker.set_settings(self.settings)
+        self.apply_visibility()
         self.language_control.group.button(('en', 'vi').index(value)).setChecked(True)
 
     def retranslate_content(self):
@@ -615,14 +810,22 @@ class Window(QWidget):
         for card in self.cards.values():
             card.target = None
         self.toggle_import(self.import_toggle.isChecked())
+        self.verify_controls.layout().invalidate()
+        self.hero.position_controls()
+        QTimer.singleShot(0, self.hero.position_controls)
         self.system.update_values(self.worker.values, THEMES[self.theme])
         self.system.sparklines.sample()
         self.refresh()
 
     def apply_visibility(self):
         enabled = self.settings.get('completed', False)
+        for button in self.technician_actions.values():
+            button.setEnabled(enabled)
+        self.technician_actions['Export report'].setEnabled(enabled and self.daily_repair_complete)
         self.navigation.group.button(2).setVisible(enabled and self.settings.get('history', False))
+        self.trend_panel.setVisible(enabled and self.settings.get('history', False))
         self.system.set_settings(self.settings if enabled else {})
+        self.health.set_settings(self.settings if enabled else {})
         self.verify_button.setEnabled(enabled)
         self.start.setEnabled(enabled)
         if not self.settings.get('history') and self.navigation.group.checkedId() == 2:
@@ -634,15 +837,46 @@ class Window(QWidget):
             self.apply_preferences(dialog.result_settings, self.settings)
             self.refresh()
 
+    def open_technician(self, cls):
+        try:
+            dialog = cls(self, directory=data_dir(), language=language())
+            dialog.exec()
+            # Identity is a preference edit, not a request to configure tracking.
+            # Refresh choices without invoking apply_preferences/autostart/import.
+            self.settings = load_settings(data_dir())
+            self.worker.set_settings(self.settings)
+            self.apply_visibility()
+            self.refresh()
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            QMessageBox.warning(self, tr('Could not open details'), str(error))
+
     def apply_preferences(self, settings, previous):
         if not settings['rebuild']:
             self.cancel_rebuild()
         self.settings = settings
+        self.connect_page.update_health(settings)
         set_language(settings['language'])
         self.worker.set_settings(settings)
         self.apply_visibility()
         self.system.update_values(self.worker.values, THEMES[self.theme])
+        if bool(settings.get('health')) != bool(previous.get('health')):
+            from lifetime_company import update_health_consent
+            future_health = self.worker.executor.submit(update_health_consent, settings.get('health', False))
+            def health_finished():
+                if not future_health.done():
+                    if not self.worker.closed:
+                        QTimer.singleShot(100, health_finished)
+                    return
+                try:
+                    future_health.result()
+                except Exception:
+                    QMessageBox.warning(self, tr('Connect'), tr('Could not change Health sharing. Open Connect to change what is shared.'))
+            QTimer.singleShot(100, health_finished)
         if settings['autostart'] != previous.get('autostart') or not previous.get('completed'):
+            try:
+                configure_tray_login(settings['autostart'])
+            except OSError:
+                pass        # the tracker's own login task below is what matters; the icon is a convenience
             future = self.worker.executor.submit(configure_login, settings['autostart'])
             def finished():
                 if not future.done():
@@ -692,10 +926,38 @@ class Window(QWidget):
             self.import_process.waitForFinished(1000)
 
     def select_page(self, index):
-        self.overview.setVisible(index == 0)
-        self.system.setVisible(index == 1)
-        self.history.setVisible(index == 2 and self.settings.get('history', False))
+        if index not in (0, 1, 2, 3, 4, 5):
+            return
+        if index == 2 and not (self.settings.get('completed') and self.settings.get('history')):
+            return
+        self.navigation.group.button(index).setChecked(True)
+        if getattr(self, 'active_page', None) == index:
+            return
+        if self.page_animation:
+            self.page_animation.stop()
+            self.page_animation.deleteLater()
+            self.page_animation = None
+        previous = self.pages.currentWidget()
+        if previous.graphicsEffect():
+            previous.setGraphicsEffect(None)
+        self.active_page = index
+        self.pages.setCurrentIndex(index)
+        self.pages.updateGeometry()
+        self.body.layout().activate()
         self.scroll.verticalScrollBar().setValue(0)
+        self.sidebar.move_indicator()
+        page = self.pages.currentWidget()
+        if not motion_reduced():
+            effect = RiseEffect(page)
+            page.setGraphicsEffect(effect)
+            def frame(value):
+                effect.setOpacity(.15 + .85*value)
+                effect.offset = 8*(1-value)
+                effect.update()
+            animate(self, 'page_animation', 0, 1, frame, 220)
+            frame(0)
+            self.page_animation.finished.connect(lambda: page.setGraphicsEffect(None))
+        self.reflow()
 
     @property
     def palette_tokens(self):
@@ -718,6 +980,7 @@ class Window(QWidget):
         if result.get('ledger') is not None:
             self.display_ledger(result['ledger'])
         verification = result.get('verification') or {}
+        self.last_verification = {**verification, 'captured': dt.datetime.now().astimezone().isoformat(timespec='seconds')}
         if verification.get('event_seconds') is not None:
             seconds = verification['difference']
             difference = seconds/3600
@@ -735,9 +998,17 @@ class Window(QWidget):
             text = tr('verify.ledger_error', message=text)
         self.verification.setText(text)
 
+    def tray_status(self):
+        if not self.isVisible():    # the window timer is stopped while hidden
+            self.refresh()
+        return self.status.text()
+
     def closeEvent(self, event):
+        if self.tray and self.tray.keep(event):
+            return
         self.cancel_rebuild()
         self.timer.stop()
+        self.health.timer.stop()
         self.system.sparklines.timer.stop()
         self.worker.stop()
         super().closeEvent(event)
@@ -746,38 +1017,24 @@ class Window(QWidget):
         super().showEvent(event)
         if hasattr(self, 'timer'):
             self.timer.start(1000)
-        if getattr(self, 'entered', False) or REDUCE_MOTION:
-            return
-        self.entered = True
-        self.hero.effect = RiseEffect(self.hero)
-        self.hero.setGraphicsEffect(self.hero.effect)
-        for index, widget in enumerate([self.hero, *self.cards.values()]):
-            effect = widget.effect
-            effect.setOpacity(0)
-            def begin(w=widget, e=effect):
-                def frame(value):
-                    try:
-                        e.setOpacity(value)
-                        e.offset = 5 * (1 - value)
-                        e.update()
-                    except RuntimeError:
-                        pass  # effect already deleted
-                try:
-                    animate(w, 'entrance_animation', 0, 1, frame, 150)
-                except RuntimeError:
-                    pass  # the card was deleted (window closed or rebuilt) before its turn; PyQt would abort on this
-            QTimer.singleShot(index * 50, begin)
+        self.reflow()
+        QTimer.singleShot(0, lambda: self.sidebar.move_indicator(False))
 
     def hideEvent(self, event):
         super().hideEvent(event)
         if hasattr(self, 'timer'):
             self.timer.stop()
+        for animation in self.findChildren(QVariantAnimation):
+            if animation.state() == QVariantAnimation.State.Running:
+                animation.setCurrentTime(animation.duration())
+                animation.stop()
 
     def apply_theme(self):
         self.theme = 'dark'
         t = THEMES[self.theme]
         surface = t['card']
-        self.setStyleSheet(f"""
+        install()
+        self.setStyleSheet(stylesheet() + f"""
             QWidget {{ color: {t['text']}; font-family: '{'Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans'}'; font-size: 15px; }}
             Window {{ background: {t['bg']}; }}
             QScrollArea {{ border: none; background: {t['bg']}; }}
@@ -786,16 +1043,24 @@ class Window(QWidget):
             QLabel#muted, QLabel#signalLabel {{ color: {t['muted']}; font-size: 13px; }}
             QLabel#caption, QLabel#footer {{ color: {t['muted']}; font-size: 13px; }}
             QLabel#value {{ font-size: 25px; font-weight: 500; }}
+            QLabel#statValue {{ font-size: 20px; font-weight: 500; }}
             QLabel#status {{ color: {t['muted']}; padding: 5px 0; font-size: 13px; }}
-            QFrame#signalCard {{ background: {surface}; border: 1px solid {t['border']}; border-radius: 6px; }}
+            QFrame#signalCard {{ background: {surface}; border: 1px solid {t['border']}; }}
             QLabel#groupTitle {{ font-size: 18px; font-weight: 600; }}
-            QLabel#pageTitle {{ font-size: 23px; font-weight: 600; }}
+            QLabel#pageTitle {{ font-size: 28px; font-weight: 600; letter-spacing: -0.5px; }}
+            QLabel#rowTitle {{ font-size: 16px; font-weight: 600; }}
+            QFrame#insetPanel {{ background: {t['card']}; border: none; }}
+            QFrame#divider {{ background: {t['border']}; border: none; }}
             QLabel#signalValue {{ font-size: 15px; }}
-            QPushButton {{ color: {t['text']}; background: {t['card']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 8px 12px; }}
-            QPushButton:hover, QPushButton:focus {{ border-color: {t['accent']}; }}
-            QPushButton#startTracker {{ color: {t['bg']}; background: {t['accent']}; border-color: {t['accent']}; font-weight: 600; }}
-            QPushButton#startTracker:hover, QPushButton#startTracker:focus {{ background: {t['accent_hover']}; border-color: {t['accent_hover']}; }}
-            QPushButton#segment {{ padding: 5px 12px; border-radius: 5px; color: {t['muted']}; background: transparent; }}
+            QPushButton#primaryAction {{ color: {t['bg']}; background: {t['accent']}; border-color: {t['accent']}; font-weight: 600; }}
+            QPushButton#primaryAction:hover, QPushButton#primaryAction:focus {{ background: {t['accent_hover']}; border-color: {t['text']}; }}
+            QPushButton#primaryAction:disabled {{ color: {t['muted']}; background: {t['track']}; border-color: {t['border']}; }}
+            QPushButton#quietAction {{ background: transparent; border-color: transparent; color: {t['muted']}; padding: 6px 0; }}
+            QPushButton#quietAction:hover, QPushButton#quietAction:focus {{ color: {t['text']}; border-color: {t['muted']}; }}
+            QPushButton#disclosure {{ text-align: left; background: transparent; border-color: transparent; color: {t['muted']}; padding: 12px 0; }}
+            QPushButton#disclosure:hover, QPushButton#disclosure:focus {{ border-color: {t['muted']}; color: {t['text']}; }}
+            QPushButton#startTracker {{ font-weight: 600; }}
+            QPushButton#segment {{ padding: 5px 12px; color: {t['muted']}; background: transparent; }}
             QPushButton#segment:checked {{ background: {t['track']}; color: {t['text']}; }}
             QLabel#historyTitle {{ font-size: 17px; font-weight: 500; }}
             QLabel#historyValue {{ font-size: 15px; }}
@@ -803,13 +1068,6 @@ class Window(QWidget):
             QPushButton:pressed {{ background: {t['track']}; }}
             QPushButton#importToggle {{ background: transparent; border: none; padding: 6px 0; text-align: left; }}
             QPushButton#importToggle:focus {{ text-decoration: underline; }}
-            QDoubleSpinBox {{ background: {t['card']}; border: 1px solid {t['border']}; border-radius: 8px; padding: 0px; selection-background-color: {t['accent']}; }}
-            QProgressBar {{ background: {t['track']}; border: none; border-radius: 2px; min-height: 4px; max-height: 4px; }}
-            QProgressBar::chunk {{ border-radius: 2px; background: {t['accent']}; }}
-            QScrollBar:vertical {{ background: {t['bg']}; width: 8px; }}
-            QScrollBar::handle:vertical {{ background: {t['border']}; min-height: 24px; border-radius: 4px; }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
         """)
         self.update()
         self.hero.update()
@@ -827,26 +1085,59 @@ class Window(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not hasattr(self, 'cards'):
+        if not hasattr(self, 'report_rows'):
             return
-        short = self.height() < 620 and self.width() >= 700
-        columns = 3 if self.width() >= 700 else 2
+        self.reflow()
+
+    def reflow(self):
+        self.sidebar.set_collapsed(self.width() < 900)
+        available = self.width() - self.sidebar.width()
+        margin = 16 if available < 850 else 32
+        self.centering.setContentsMargins(margin, margin, margin, margin)
+        content = available - margin*2
+        columns = 5 if content >= 660 else 1
         if columns != self.columns:
             for card in self.cards.values():
                 self.grid.removeWidget(card)
-            for i, card in enumerate(self.cards.values()):
-                self.grid.addWidget(card, i // columns, i % columns,
-                                    1, 2 if i == 4 else 1)
-            for column in range(3):
+            for i, key in enumerate(self.stat_order):
+                card = self.cards[key]
+                card.set_list_mode(columns == 1, i < 4)
+                self.grid.addWidget(card, i // columns, i % columns)
+            for column in range(5):
                 self.grid.setColumnStretch(column, 1 if column < columns else 0)
             self.columns = columns
-        compact = self.height() <= 640
-        self.hero.setFixedHeight(112 if compact else 148)
-        self.system.set_columns(2 if self.width() >= 700 else 1)
-        for name, card in self.cards.items():
-            card.setFixedHeight(104 if compact else 108)
-        margin = 16 if compact else 24
-        self.centering.setContentsMargins(margin, margin, margin, margin)
+        narrow = content < 480
+        self.hero.setFixedWidth(max(0, min(560, content)))
+        self.hero.setFixedHeight(196 if content < 400 else 144)
+        self.hero.position_controls()
+        self.verification.setContentsMargins(0, 0, 0, 0)     # aligned with the number now that the ring is gone
+        self.system.set_columns(2 if content >= 900 else 1)
+        self.baseline_row.setDirection(QHBoxLayout.Direction.TopToBottom if narrow else QHBoxLayout.Direction.LeftToRight)
+        for row in self.report_rows:
+            row.layout().setDirection(QHBoxLayout.Direction.TopToBottom if narrow else QHBoxLayout.Direction.LeftToRight)
+        self.pages.updateGeometry()
+        if self.counting_toggle.isChecked() and not getattr(self, 'counting_animation', None):
+            self.counting_panel.setMaximumHeight(16777215)
+
+    def toggle_counting(self, expanded):
+        self.counting_panel.show()
+        self.counting_panel.layout().activate()
+        target = self.counting_panel.layout().totalHeightForWidth(self.counting_panel.width()) if expanded else 0
+        if expanded:
+            target = max(target, self.counting_panel.sizeHint().height())
+        def frame(value):
+            self.counting_panel.setMaximumHeight(round(value))
+        def finish():
+            self.counting_panel.setVisible(self.counting_toggle.isChecked())
+            if self.counting_toggle.isChecked():
+                self.counting_panel.setMaximumHeight(16777215)
+            self.counting_animation = None
+        animate(self, 'counting_animation', self.counting_panel.height(), target, frame, 200)
+        if self.counting_animation:
+            self.counting_animation.finished.connect(finish)
+        else:
+            finish()
+        self.counting_toggle.setText(tr('Hide counting details') if expanded else tr('How this is counted'))
 
     def toggle_import(self, expanded):
         self.import_panel.show()
@@ -854,7 +1145,7 @@ class Window(QWidget):
         def update_height(value):
             self.import_panel.setMaximumHeight(round(value))
         animate(self, 'import_animation', self.import_panel.height() if self.import_panel.maximumHeight() else 0,
-                target, update_height, 180)
+                target, update_height, 150)
         if self.import_animation:
             self.import_animation.finished.connect(lambda: self.import_panel.setVisible(self.import_toggle.isChecked()))
         else:
@@ -869,37 +1160,66 @@ class Window(QWidget):
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)
             self.status.setText(tr('Ledger unavailable'))
+            self.status_dot.setToolTip(tr('Ledger unavailable'))
             self.hint.setText(tr('ledger.error', error=error))
             self.hint.show()
             self.start.show()
+            self.tracker_banner.show()
 
     def display_ledger(self, ledger):
         try:
+            evidence = coverage(ledger, self.settings)
+            self.coverage_summary.setText(tr('Coverage: {source} · {status}', source=tr(SOURCES[evidence['source']]),
+                status=tr('Partial' if evidence['status'] == 'partial' else 'Unknown')))
+            name = self.settings.get('identity', {}).get('display_name', '')
+            if not name and self.settings.get('completed') and self.settings.get('resources'):
+                name = str(tr('System name'))+': '+(platform.node() or str(tr('Not available')))
+            self.device_name.setText('\u200b'.join(name[i:i+32] for i in range(0, len(name), 32)))
+            self.device_name.setAccessibleName(name)
+            self.device_name.setVisible(bool(name))
             self.history.set_ledger(ledger)
+            today = dt.date.today()
+            points = date_series(clean_daily(ledger.get('daily', {})), today-dt.timedelta(days=13), today)
+            dates = [day for day, value in points]
+            values = [None if value is None else value/3600 for day, value in points]
+            self.trend.set_data(dates, values, dates=dates)
             try:
                 status = json.loads((data_dir() / 'status.json').read_text(encoding='utf-8-sig'))
                 running = isinstance(status, dict) and status.get('running') is True and 0 <= time.time() - status['heartbeat'] < 90
             except (OSError, ValueError, KeyError, TypeError):
                 running = False
             total = ledger['total_seconds'] + ledger['baseline_seconds']
-            # The tracker saves every 30 s; while it runs, count on from its last heartbeat so seconds tick live.
-            if running:
-                total += min(max(time.time() - status['heartbeat'], 0), 60)
+            # Interpolate with the same awake-only clock, never wall time (sleep
+            # and clock adjustments must not inflate the displayed live total).
+            if running and ledger.get('last_clock') is not None:
+                try:
+                    delta = awake_clock()-ledger['last_clock']
+                    if 0 <= delta <= MAX_DELTA:
+                        total += min(delta, 60)
+                except OSError:
+                    pass
+            parts = source_totals(ledger)
+            def component(value):
+                return duration(value) if value is not None else tr('Not available')
+            self.source_breakdown.setText(tr('Saved sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}',
+                measured=component(parts['measured_seconds']), imported=component(parts['imported_seconds']), baseline=component(parts['baseline_seconds'])))
             if not self.initialized or abs(total - self.hero.target) > 5:
                 self.hero.set_total(total)
             else:
                 self.hero.target = self.hero.seconds = total
                 self.hero.update()
-            first = dt.date.fromisoformat(ledger['first_seen'])
-            pretty_date = date_text(first)
-            days = max(1, (dt.date.today() - first).days + 1)
+            first = dt.date.fromisoformat(ledger['first_seen']) if ledger.get('first_seen') else None
+            pretty_date = date_text(first) if first else tr('Not available')
             average = average_awake(ledger)
             self.cards['first'].value.setText(pretty_date)
             self.cards['boots'].set_number(ledger['boots'], lambda v: f'{round(v):,}')
             for key, field in (('current', 'current_session_seconds'), ('longest', 'longest_session_seconds')):
                 self.cards[key].set_number(ledger[field], lambda v: duration(v) if v >= 86400 else duration(v, days=False))
-            self.cards['average'].set_number(-1 if average is None else average, lambda v: '—' if v < 0 else tr('hours.value', value=v))
-            captions = (tr('days.in_use', days=days), tr('Since tracking began'),
+            self.cards['average'].set_number(-1 if average is None else average, lambda v: tr('Not available') if v < 0 else tr('hours.value', value=v))
+            source = tr(FIRST_SEEN_SOURCES.get(ledger.get('first_seen_source', 'unknown'), 'Unknown source'))
+            since = tr('Days since this date: {days}', days=(dt.date.today()-first).days) if first and first <= dt.date.today() else tr('Not available')
+            self.cards['first'].setToolTip(str(source)+' · '+str(since))
+            captions = (source, tr('Since tracking began'),
                         tr('Awake this session'), tr('Longest recorded session'), tr('Needs 1 day of data') if average is None else tr('since tracking began'))
             for card, caption in zip(self.cards.values(), captions):
                 card.caption.setText(caption)
@@ -909,17 +1229,21 @@ class Window(QWidget):
             self.status_dot.tick(running)
             self.cards['current'].live.tick(running)
             self.status.setText(tr('Tracking active') if running else tr('Tracker offline'))
+            self.status_dot.setToolTip(tr('Tracking active') if running else tr('Tracker offline'))
             self.hint.setText(tr('Recording awake time\nTracker saves every 30 s · view refreshes every 1 s') if running
                               else tr('Saved totals are available.\nStart the tracker to resume recording.'))
             self.start.setVisible(not running)
+            self.tracker_banner.setVisible(not running)
             self.hint.setVisible(not running)
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)
             self.status.setText(tr('Ledger unavailable'))
+            self.status_dot.setToolTip(tr('Ledger unavailable'))
             self.hint.setText(tr('ledger.error', error=error))
             self.hint.show()
             self.start.show()
+            self.tracker_banner.show()
 
     def apply_baseline(self):
         try:
@@ -951,12 +1275,15 @@ if __name__ == '__main__':
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Lifetime.App')
         except Exception:
             pass
+    configure_high_dpi()
     app = QApplication(sys.argv)
     here = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
     for candidate in (here / 'assets' / 'lifetime.png', here / 'lifetime.png'):
         if candidate.exists():
             app.setWindowIcon(QIcon(str(candidate)))
             break
+    if tray_available() and tell_running_instance('lifetime-gui'):
+        sys.exit(0)
     settings = load_settings()
     set_language(settings['language'])
     previous = dict(settings)
@@ -965,12 +1292,18 @@ if __name__ == '__main__':
         if setup.exec() != setup.DialogCode.Accepted:
             sys.exit(0)
         settings = setup.result_settings
-    try:
-        repair_daily()
-    except (OSError, ValueError) as error:
-        QMessageBox.warning(None, tr('Ledger unavailable'), tr('ledger.error', error=error))
     window = Window(settings)
-    window.show()
+    window.tray = install_tray(window, 'Lifetime', window.tray_status, key='lifetime-gui')
+    if settings.get('autostart'):
+        try:
+            configure_tray_login(True)      # existing installs get the sign-in icon too
+        except OSError:
+            pass
+    if not (window.tray and '--tray' in sys.argv and previous['completed']):
+        window.show()
+    window.status.setText(tr('Updating history'))
+    window._set_export_ready(False)
+    window.start_daily_repair()
     if not previous['completed']:
         window.apply_preferences(settings, previous)
         window.start_tracker()

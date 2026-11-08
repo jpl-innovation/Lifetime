@@ -138,6 +138,45 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('Not available', power.fields['Power'][0].text())
         self.assertIn('Not available', self.window.system.cards[2].fields['Graphics card'][0].text())
 
+    def test_grouped_rows_inline_sparklines_and_single_data_toggle(self):
+        from PyQt6.QtWidgets import QPushButton
+        panel = self.window.system
+        panel.update_values(dict(cpu=25, ram=dict(percent=40), power=dict(percent=80),
+                                 battery=dict(watts=8), gpu=[dict(name='GPU', watts=12)],
+                                 counters=dict(down=1024, up=512)), gui.THEMES['dark'])
+        # Narrow content: one column in reading order. Wide content: Power | Network, Graphics | Computer,
+        # so labels stay close to their values instead of ~1400 px apart.
+        panel.set_columns(1)
+        self.assertEqual([panel.grid.getItemPosition(i)[:2] for i in range(4)], [(0, 0), (1, 0), (2, 0), (3, 0)])
+        panel.set_columns(2)
+        self.assertEqual([panel.grid.getItemPosition(i)[:2] for i in range(4)], [(0, 0), (0, 1), (1, 0), (1, 1)])
+        for key, index in [('watts', 0), ('down', 1), ('up', 1), ('gpu', 2), ('cpu', 3), ('ram', 3)]:
+            chart = panel.sparklines.charts[key]
+            self.assertTrue(panel.cards[index].isAncestorOf(chart))
+            self.assertEqual((chart.width(), chart.height()), (120, 28))
+            self.assertFalse(chart.message)
+        self.assertEqual(panel.findChildren(QPushButton), [panel.data_toggle])
+        panel.sparklines.sample()
+        panel.data_toggle.click()
+        self.assertFalse(panel.sparklines.isHidden())
+        for card in panel.sparklines.cards.values():
+            self.assertFalse(card.table.isHidden())
+            self.assertEqual(card.table.rowCount(), 1)
+        panel.data_toggle.click()
+        self.assertTrue(panel.sparklines.isHidden())
+
+    def test_consent_hides_groups_and_clears_live_data(self):
+        panel = self.window.system
+        panel.update_values(dict(cpu=45), gui.THEMES['dark'])
+        panel.sparklines.sample()
+        panel.set_settings(dict(network=True))
+        self.assertEqual([card.isHidden() for card in panel.cards], [True, False, True, True])
+        self.assertFalse(panel.sparklines.charts['cpu'].buffer.samples)
+        self.assertEqual(panel.sparklines.cards['cpu'].table.rowCount(), 0)
+        panel.set_settings({})
+        self.assertTrue(all(card.isHidden() for card in panel.cards))
+        self.assertTrue(panel.data_toggle.isHidden())
+
     def test_responsive_tabs(self):
         self.window.resize(760, 560)
         self.window.show()

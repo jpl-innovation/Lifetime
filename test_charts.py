@@ -188,7 +188,7 @@ class LiveChartTests(unittest.TestCase):
         with patch.object(c.time, 'monotonic', return_value=100):
             self.panel.sample()
         card = self.panel.cards['cpu']
-        card.toggle.click()
+        card.show_table(True)
         self.assertEqual(card.table.rowCount(), 1)
         self.panel.set_settings(dict(resources=False))
         self.assertEqual(card.table.rowCount(), 0)
@@ -196,6 +196,54 @@ class LiveChartTests(unittest.TestCase):
         self.assertFalse(self.panel.charts['cpu'].values)
         self.assertFalse(self.panel.charts['cpu'].buffer.samples)
         self.assertNotIn('cpu', self.panel.pending)
+
+
+class ActivityLayoutTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from qt_test_support import qt_app
+        cls.app = qt_app()
+
+    def test_one_toggle_six_tables_and_range_buttons_update_every_chart(self):
+        from PyQt6.QtWidgets import QPushButton
+        panel = c.Insights()
+        self.addCleanup(panel.deleteLater)
+        today = dt.date.today()
+        panel.set_ledger(dict(daily={(today-dt.timedelta(days=i)).isoformat(): 3600 for i in range(400)}))
+        self.assertEqual(len(panel.findChildren(QPushButton)), 6)  # Four ranges, disclosure, data.
+        panel.counting_toggle.click()
+        self.assertTrue(panel.counting_toggle.isChecked())
+        self.assertFalse(panel.source_panel.isHidden())
+        panel.data_toggle.click()
+        self.assertTrue(all(not card.table.isHidden() for card in panel.cards))
+        panel.ranges.buttons[1].click()
+        self.assertEqual(panel.selection, '90 days')
+        self.assertEqual(len(panel.daily.values), 90)
+        self.assertEqual(len(panel.running.values), 90)
+        self.assertEqual(panel.cards[0].table.rowCount(), 90)
+        self.assertEqual(panel.heatmap.start, panel.daily.dates[0])
+        panel.data_toggle.click()
+        self.assertTrue(all(card.table.isHidden() for card in panel.cards))
+
+    def test_range_indicator_interrupts_and_reduced_motion_is_instant(self):
+        from PyQt6.QtTest import QTest
+        from PyQt6.QtCore import QRectF
+        ranges = c.RangeSegments()
+        self.addCleanup(ranges.deleteLater)
+        ranges.show()
+        self.app.processEvents()
+        with patch.object(c, 'motion_reduced', return_value=False):
+            ranges.setCurrentIndex(1)
+            QTest.qWait(50)
+            current = QRectF(ranges.indicator)
+            ranges.setCurrentIndex(3)
+            self.assertEqual(ranges.animation.startValue(), current)
+            QTest.qWait(280)
+            self.assertEqual(ranges.indicator, QRectF(ranges.buttons[3].geometry()))
+        with patch.object(c, 'motion_reduced', return_value=True):
+            ranges.setCurrentIndex(0)
+            self.assertEqual(ranges.indicator, QRectF(ranges.buttons[0].geometry()))
+            self.assertEqual(ranges.animation.state(), ranges.animation.State.Stopped)
 
 
 if __name__ == '__main__':

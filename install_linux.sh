@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+company_agent=false
+case "${1:-}" in
+    '') ;;
+    --company-agent) company_agent=true ;;
+    *) printf 'Usage: install_linux.sh [--company-agent]\n'; exit 2 ;;
+esac
 source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 install_dir="$HOME/.local/share/lifetime"
 python_bin="$(command -v python3 || true)"
@@ -32,7 +38,7 @@ if command -v journalctl >/dev/null 2>&1; then
     fi
 fi
 mkdir -p "$install_dir/assets" "$HOME/.config/systemd/user" "$HOME/.local/share/applications"
-for file in lifetime_tracker.py lifetime_gui.py lifetime_signals.py lifetime_dashboard.py lifetime_charts.py lifetime_settings.py lifetime_setup.py lifetime_import.py lifetime_import_windows.py lifetime_daily.py lifetime_i18n.py lifetime_i18n_qt.py; do
+for file in lifetime_tracker.py lifetime_gui.py lifetime_health.py lifetime_health_gui.py lifetime_shell.py lifetime_signals.py lifetime_dashboard.py lifetime_charts.py lifetime_settings.py lifetime_setup.py lifetime_import.py lifetime_import_windows.py lifetime_daily.py lifetime_i18n.py lifetime_i18n_qt.py lifetime_reports.py lifetime_technician.py lifetime_ledger.py lifetime_identity.py lifetime_theme.py lifetime_tasks.py lifetime_company.py lifetime_connect.py lifetime_agent.py lifetime_live.py lifetime_client.py lifetime_protocol.py lifetime_tls.py lifetime_permissions.py lifetime_connection.py lifetime_discovery.py; do
     if [[ "$source_dir/$file" != "$install_dir/$file" ]]; then
         install -m 644 "$source_dir/$file" "$install_dir/$file"
     fi
@@ -52,6 +58,27 @@ unit_quote() {
     unit_quote "$install_dir/lifetime_tracker.py"
     printf ' --run\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n'
 } > "$HOME/.config/systemd/user/lifetime-tracker.service"
+if [[ "$company_agent" == true ]]; then
+    printf 'The company agent records a separate awake-time ledger while you are signed in. Reporting needs separate consent and an approved connection code in Company server. Optional history and system readings stay off.\n'
+    read -r -p 'Install and start the company-agent user service? (y/N) ' answer || answer=''
+    if [[ "$answer" == 'y' || "$answer" == 'Y' ]]; then
+        agent_dir="${XDG_STATE_HOME:-$HOME/.local/state}/lifetime-agent"
+        if [[ ! -f "$agent_dir/machine.sqlite" ]]; then
+            "$python_bin" "$install_dir/lifetime_agent.py" --directory "$agent_dir" --initialize
+        fi
+        {
+            printf '[Unit]\nDescription=Lifetime company reporting agent\n\n[Service]\nType=simple\nExecStart='
+            unit_quote "$python_bin"
+            printf ' '
+            unit_quote "$install_dir/lifetime_agent.py"
+            printf ' --directory '
+            unit_quote "$agent_dir"
+            printf ' --run\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\n\n[Install]\nWantedBy=default.target\n'
+        } > "$HOME/.config/systemd/user/lifetime-company-agent.service"
+        systemctl --user daemon-reload
+        systemctl --user enable --now lifetime-company-agent.service
+    fi
+fi
 # Desktop Exec values use a separate quoting grammar.
 desktop_quote() {
     local value="$1"
@@ -70,6 +97,7 @@ desktop_quote() {
     printf '\nIcon=%s\nTerminal=false\nCategories=Utility;\n' "$install_dir/assets/lifetime.png"
 } > "$HOME/.local/share/applications/lifetime.desktop"
 install -m 644 "$source_dir/assets/lifetime.png" "$install_dir/assets/lifetime.png"
+install -m 644 "$source_dir/assets/jpl_innovation.png" "$install_dir/assets/jpl_innovation.png"
 systemctl --user daemon-reload
 printf 'Open Lifetime to choose what to collect and whether to track at login. No tracking is started by this installer.\n'
 printf 'Installed Lifetime. The GUI requires PyQt6 for %s.\n' "$python_bin"

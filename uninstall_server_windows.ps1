@@ -1,0 +1,28 @@
+# Registration removal only. Binary files, databases, TLS identity and backups survive.
+[CmdletBinding(SupportsShouldProcess = $true)]
+param([switch]$RemoveFirewallRule)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+if ($env:OS -ne 'Windows_NT') { throw 'This uninstaller requires Windows.' }
+$administrator = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $administrator.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Open PowerShell as Administrator.' }
+$service = Get-Service -Name LifetimeServer -ErrorAction SilentlyContinue
+if ($service -and $PSCmdlet.ShouldProcess('LifetimeServer', 'Stop and remove this server service registration')) {
+    if ($service.Status -ne 'Stopped') {
+        Stop-Service -Name LifetimeServer
+        $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped, (New-TimeSpan -Seconds 30))
+    }
+    & "$env:SystemRoot\System32\sc.exe" delete LifetimeServer
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot remove LifetimeServer service registration.' }
+}
+$task = Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -ErrorAction SilentlyContinue
+if ($task -and $PSCmdlet.ShouldProcess('\Lifetime\Server', 'Stop and remove this server task registration')) {
+    if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server }
+    Unregister-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -Confirm:$false
+}
+if ($RemoveFirewallRule -and (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue) -and
+    $PSCmdlet.ShouldProcess('LifetimeServer-HTTPS', 'Remove this explicit inbound firewall rule')) {
+    Remove-NetFirewallRule -Name 'LifetimeServer-HTTPS'
+}
+Write-Host 'Server registrations removed. Program files, data, TLS keys/certificates, administrator token and backups are preserved.'
+Write-Host 'The standalone desktop and machine-agent task were not changed.'

@@ -82,24 +82,25 @@ if __name__ == '__main__' and '--child' in sys.argv:
         # Hover lanes cover the plot even when the marks are only a few px.
         hover(chart, chart.plot().center().toPoint())
         app.processEvents()
-        assert ' h ' in QToolTip.text(), QToolTip.text()
+        assert ' h ' in w._chart_tooltip.text(), w._chart_tooltip.text()
+        assert w.rect().contains(w._chart_tooltip.geometry())
         assert chart.hover is not None
-        QToolTip.hideText()
+        w._chart_tooltip.hide()
+        w.history.data_toggle.click()
+        app.processEvents()
         for card in w.history.cards:
-            card.toggle.click()
-            app.processEvents()
             assert not card.table.isHidden()
             assert card.table.rowCount() == len(card.rows)
             assert card.viewport.isHidden()
-            card.toggle.click()
-            assert card.table.isHidden()
+        w.history.data_toggle.click()
+        assert all(card.table.isHidden() for card in w.history.cards)
         heat = w.history.heatmap
         w.scroll.ensureWidgetVisible(heat)
         app.processEvents()
         hover(heat, QPoint(50, 30+heat.start.weekday()*20))
         app.processEvents()
-        assert '2026-' in QToolTip.text() or str(today.year) in QToolTip.text()
-        QToolTip.hideText()
+        assert str(today.year) in w._chart_tooltip.text()
+        w._chart_tooltip.hide()
         assert w.history.width() < w.width()
         assert w.history.columns == 1
         # Three-year rendering exercises line reduction and calendar scrolling.

@@ -49,7 +49,7 @@ def boot_id():
     return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
 
 
-def estimate_first_seen():
+def estimate_first_seen(with_source=False):
     candidates = []
     if sys.platform == 'win32':
         try:
@@ -70,38 +70,54 @@ def estimate_first_seen():
             candidates.append(birth)
     now = time.time()
     candidates = [stamp for stamp in candidates if 0 < stamp <= now]
-    return dt.date.fromtimestamp(min(candidates, default=now)).isoformat()
+    day = dt.date.fromtimestamp(min(candidates, default=now)).isoformat()
+    source = ('os-install-date' if candidates and sys.platform == 'win32' else
+              'system-file-date' if candidates else 'tracking-start')
+    return (day, source) if with_source else day
 
 
 def new_ledger():
+    estimate = estimate_first_seen(with_source=True)
+    # Older integrations/tests may still supply the original string API.
+    first_seen, source = estimate if isinstance(estimate, tuple) and len(estimate) == 2 else (estimate, 'unknown')
     return dict(total_seconds=0.0, baseline_seconds=0.0,
-                first_seen=estimate_first_seen(), boots=0,
+                first_seen=first_seen, first_seen_source=source, boots=0,
                 current_session_seconds=0.0, longest_session_seconds=0.0,
                 last_update=None, boot_id=None, last_clock=None,
                 tracking_started=None, boot_credited_for=None, boot_accounted_seconds=0.0,
                 daily={}, hourly=[0.0] * 24, sessions=[], history_started=None,
-                unattributed_seconds=0.0)
+                unattributed_seconds=0.0, recording_started=None, coverage_gaps=[], clock_note_count=0)
+
+
+def load_ledger(path):
+    """Read one existing file strictly; malformed bytes and fields stay visible."""
+    return validate_ledger(json.loads(Path(path).read_text(encoding='utf-8-sig')))
 
 
 def read_ledger(directory=None):
     path = Path(directory or data_dir()) / 'ledger.json'
     try:
-        value = json.loads(path.read_text())
+        return load_ledger(path)
     except FileNotFoundError:
         return new_ledger()
-    if not isinstance(value, dict):
-        raise ValueError('Ledger must be a JSON object')
+
+
+def validate_ledger(value):
+    """Validate before legacy defaults/migrations; retain unknown extensions."""
+    from lifetime_ledger import validate
+    validate(value)
     result = new_ledger()
     result.update(value)
+    result['first_seen'] = value.get('first_seen')
+    result['first_seen_source'] = value.get('first_seen_source', 'unknown')
     if 'boot_accounted_seconds' not in value:
-        result['boot_accounted_seconds'] = min(value.get('total_seconds', 0.0), value.get('last_clock') or 0.0)
-    for key in ('total_seconds', 'baseline_seconds', 'current_session_seconds', 'longest_session_seconds'):
-        if not isinstance(result[key], (int, float)) or not math.isfinite(result[key]) or result[key] < 0:
-            raise ValueError(f'Invalid ledger field: {key}')
+        result['boot_accounted_seconds'] = min(result['total_seconds'], result['last_clock'] or 0.0)
     if not result.get('tracking_started'):
         # last_update is the latest sample, not evidence of the first sample.
-        result['tracking_started'] = (value.get('first_sample') or dt.date.today().isoformat())[:10]
-    return result
+        first_sample = value.get('first_sample')
+        result['tracking_started'] = (first_sample or dt.date.today().isoformat())[:10]
+        result['tracking_started_estimated'] = not bool(first_sample)
+    return validate(result)
 
 
 @contextlib.contextmanager
@@ -134,7 +150,7 @@ def atomic_json(path, value):
     path = Path(path)
     fd, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
     try:
-        with os.fdopen(fd, 'w') as stream:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
             json.dump(value, stream, indent=2, allow_nan=False)
             stream.write('\n')
             stream.flush()
@@ -157,6 +173,8 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     if not math.isfinite(tick) or tick < 0:
         raise ValueError('Invalid awake clock')
     stamp = timestamp or dt.datetime.now(dt.timezone.utc).isoformat()
+    if not ledger.get('recording_started') and ledger.get('last_update') is None and not ledger.get('total_seconds'):
+        ledger['recording_started'] = dt.datetime.fromisoformat(stamp).astimezone(dt.timezone.utc).isoformat()
     if not ledger.get('tracking_started'):
         ledger['tracking_started'] = stamp[:10]
     local = dt.datetime.fromisoformat(stamp).astimezone()
@@ -210,6 +228,9 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
             distribute(delta, end, ledger['daily'], ledger['hourly'],
                        (end-delta, [(end-delta, end)], False), dated=ledger.setdefault('dated_hourly', {}))
     elif delta is not None:
+        if history:
+            ledger.setdefault('coverage_gaps', []).append(dict(start=ledger.get('last_update'), end=stamp, reason='awake_clock_discontinuity'))
+            ledger['coverage_gaps'] = ledger['coverage_gaps'][-100:]
         ledger['current_session_seconds'] = 0.0
         if history:
             ledger['sessions'].append(dict(start=local.isoformat(), seconds=0.0))
@@ -220,6 +241,11 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     ledger['daily'] = {key: value for key, value in ledger['daily'].items() if key >= cutoff}
     if 'dated_hourly' in ledger:
         ledger['dated_hourly'] = {key: value for key, value in ledger['dated_hourly'].items() if key >= cutoff}
+    if ledger.get('last_update'):
+        previous_stamp = dt.datetime.fromisoformat(ledger['last_update']).astimezone(dt.timezone.utc)
+        elapsed_wall = (local.astimezone(dt.timezone.utc)-previous_stamp).total_seconds()
+        if elapsed_wall < 0 or (not changed_boot and delta is not None and elapsed_wall+2 < delta):
+            ledger['clock_note_count'] = ledger.get('clock_note_count', 0)+1
     ledger['boot_accounted_seconds'] = accounted
     ledger['longest_session_seconds'] = max(ledger['longest_session_seconds'], ledger['current_session_seconds'])
     ledger.update(last_clock=tick, boot_id=identity, last_update=stamp)
@@ -313,6 +339,55 @@ def repair_daily(directory=None, evidence=None):
         return repaired
 
 
+def recover(directory=None):
+    """Explicit recovery; return (ledger, how, notes), preserving original bytes.
+
+    Salvage only derived damage. Otherwise try backups newest first, validating
+    each strictly. Without a valid replacement the original is never changed.
+    """
+    from lifetime_ledger import salvage
+    directory = Path(directory or data_dir())
+    with file_lock(directory, 'ledger.lock'):
+        path = directory / 'ledger.json'
+        raw = path.read_bytes()
+        how = 'salvaged'
+        try:
+            value = json.loads(raw.decode('utf-8-sig'))
+            # Retain missing optional fields until the normal legacy migrations.
+            ledger, notes = salvage(value, {})
+            ledger = validate_ledger(ledger)
+            if not notes:
+                return ledger, 'unchanged', []
+        except (ValueError, UnicodeError) as error:
+            candidates = []
+            for candidate in (*directory.glob('ledger.json.bak*'),
+                              *directory.glob('backup-*/ledger.json')):
+                try:
+                    if candidate.is_file():
+                        candidates.append((candidate.stat().st_mtime_ns, candidate))
+                except OSError:
+                    continue
+            ledger = None
+            for _, candidate in sorted(candidates, key=lambda item: item[0], reverse=True):
+                try:
+                    ledger = load_ledger(candidate)
+                except (OSError, ValueError, UnicodeError):
+                    continue
+                how, notes = f'restored from {candidate.relative_to(directory)}', [str(error)]
+                break
+            if ledger is None:
+                raise ValueError(f'Ledger left unchanged; no valid backup found. {error}') from error
+        stamp = dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+        fd, damaged = tempfile.mkstemp(prefix=f'ledger.json.corrupt-{stamp}-', dir=directory)
+        # Exclusive creation plus fsync: replacement cannot precede preservation.
+        with os.fdopen(fd, 'wb') as target:
+            target.write(raw)
+            target.flush()
+            os.fsync(target.fileno())
+        atomic_json(path, ledger)
+        return ledger, how, notes
+
+
 def average_awake(ledger, today=None):
     if not ledger.get('tracking_started'):
         return None
@@ -338,7 +413,7 @@ def duration(seconds):
 
 
 def summary(ledger):
-    return f"{duration(ledger['total_seconds'] + ledger['baseline_seconds'])} awake (first used {ledger['first_seen']}, {ledger['boots']} boots)"
+    return f"{duration(ledger['total_seconds'] + ledger['baseline_seconds'])} awake (earliest known date {ledger['first_seen']}, {ledger['boots']} boots)"
 
 
 def run(directory=None):
@@ -363,12 +438,32 @@ def run(directory=None):
         callback = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)(console_close)
         ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, True)
     with file_lock(directory, 'tracker.lock', blocking=False):
+        # Capacity collection never delays accounting or holds the ledger lock.
+        import lifetime_health as health
+        health_results = []
+        health_pending = False
+        health_attempt = -3600
+        def collect_capacity():
+            health_results.append(health.probe_battery())
         def flush(running):
+            nonlocal health_pending, health_attempt
             with file_lock(directory, 'ledger.lock'):
                 settings = load_settings(directory)
                 if not settings['completed']:
                     return
                 ledger = read_ledger(directory)
+                if settings.get('health'):
+                    if health_results:
+                        health.capacity_sample(ledger, health_results.pop())
+                        health_pending = False
+                    today = dt.date.today().isoformat()
+                    if running and not health_pending and time.monotonic()-health_attempt >= 3600 and today not in ledger.get('health_capacity', {}):
+                        health_pending = True
+                        health_attempt = time.monotonic()
+                        threading.Thread(target=collect_capacity, daemon=True).start()
+                else:
+                    health_results.clear()
+                    health_pending = False
                 sample(ledger, awake_clock(), boot_id(), history=settings['history'])
                 save(directory, ledger, running)
         try:
@@ -389,6 +484,8 @@ def main():
     group.add_argument('--set-baseline', type=float, metavar='HOURS')
     group.add_argument('--run', action='store_true')
     group.add_argument('--repair-daily', action='store_true', help='Repair legacy daily boot credits once, preserving totals')
+    group.add_argument('--recover', action='store_true',
+                       help='Recover damaged data, preserving ledger.json.corrupt-*')
     group.add_argument('--credit-current-boot', action='store_true',
                        help='Credit unrecorded awake time in this boot once')
     args = parser.parse_args()
@@ -397,6 +494,10 @@ def main():
             run()
         elif args.repair_daily:
             print(summary(repair_daily()))
+        elif args.recover:
+            ledger, how, notes = recover()
+            print(f'Ledger {how}.' + ''.join(f'\n  - {note}' for note in notes))
+            print(summary(ledger))
         elif args.credit_current_boot:
             print(summary(credit_current_boot()))
         else:

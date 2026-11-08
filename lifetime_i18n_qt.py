@@ -10,7 +10,10 @@ class NativeTranslator(QTranslator):
         return False
 
     def translate(self, context, source, disambiguation=None, n=-1):
-        return str(tr(source)) if source in EN else ''
+        # None is a null QString: let Qt fall back to its original source text.
+        # An empty Python string is an intentional empty translation, which can
+        # erase internal names such as A4 and invalidate a PDF page layout.
+        return str(tr(source)) if source in EN else None
 
     def retranslate(self):
         app = QtWidgets.QApplication.instance()

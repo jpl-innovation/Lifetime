@@ -646,6 +646,33 @@ def probe_identity():
 
 
 @safe
+def probe_hardware():
+    """Infrequent inventory; no serial numbers or user identity."""
+    if sys.platform == 'win32':
+        return parse_json(powershell(
+            "$c=Get-CimInstance Win32_ComputerSystem; $p=@(Get-CimInstance Win32_Processor); "
+            "$m=@(Get-CimInstance Win32_NetworkAdapter | Where-Object PhysicalAdapter | "
+            "ForEach-Object { $_.MACAddress }); "
+            "@{manufacturer=$c.Manufacturer;model=$c.Model;cpu_cores=($p|Measure-Object NumberOfCores -Sum).Sum;"
+            "cpu_threads=$c.NumberOfLogicalProcessors;mac_addresses=$m}|ConvertTo-Json -Compress"))
+    import os
+    macs = []
+    for base in sorted(Path('/sys/class/net').glob('*')):
+        address = read_file(base/'address').upper()
+        if (base/'device').exists() and re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}', address):
+            macs.append(address)
+    cores = set()
+    for block in read_file('/proc/cpuinfo').split('\n\n'):
+        fields = dict(line.split(':', 1) for line in block.splitlines() if ':' in line)
+        fields = {k.strip(): v.strip() for k, v in fields.items()}
+        if 'core id' in fields:
+            cores.add((fields.get('physical id'), fields['core id']))
+    return dict(manufacturer=read_file('/sys/class/dmi/id/sys_vendor') or None,
+                model=read_file('/sys/class/dmi/id/product_name') or None,
+                cpu_cores=len(cores) or None, cpu_threads=os.cpu_count(), mac_addresses=macs)
+
+
+@safe
 def probe_power():
     if sys.platform != 'win32':
         return linux_power()

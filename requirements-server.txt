@@ -1,0 +1,4 @@
+# Server edition only. Desktop and client require no additional packages.
+cryptography>=43
+websockets>=15
+pywin32>=306; sys_platform == "win32"

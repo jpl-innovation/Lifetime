@@ -14,6 +14,14 @@ import lifetime_i18n as i18n
 
 
 class CatalogueTests(unittest.TestCase):
+    def test_attention_labels(self):
+        expected = {'Offline': 'Ngoại tuyến', 'Disk almost full': 'Ổ đĩa gần đầy',
+                    'Battery worn': 'Pin đã chai', 'Running hot': 'Đang quá nóng',
+                    'Unstable': 'Không ổn định', 'Waiting to run a command': 'Đang chờ thực hiện lệnh'}
+        for key, translation in expected.items():
+            self.assertEqual(i18n.EN[key], key)
+            self.assertEqual(i18n.VI[key], translation)
+
     def tearDown(self):
         i18n.set_language('en')
 
@@ -67,13 +75,14 @@ class LiveLanguageTests(unittest.TestCase):
             ledger = tracker.new_ledger()
             ledger['daily'] = {dt.date.today().isoformat(): 3600}
             tracker.atomic_json(Path(root)/'ledger.json', ledger)
-            window = gui.Window(settings.normalize(dict(completed=True, history=True, battery=True, language='en')))
+            settings.save_settings(dict(completed=True, history=True, battery=True, language='en'), root)
+            window = gui.Window(settings.load_settings(root))
             window.worker.timer.stop()
             window.timer.stop()
             window.resize(760, 560)
             window.show()
             self.app.processEvents()
-            window.history.cards[0].toggle.click()
+            window.history.data_toggle.click()
             window.switch_language('vi')
             self.app.processEvents()
             for width, height in ((760, 560), (1280, 800)):
@@ -84,14 +93,15 @@ class LiveLanguageTests(unittest.TestCase):
             self.assertEqual(window.navigation.group.button(0).text(), 'Tổng quan')
             self.assertEqual(window.verify_button.text(), 'Đối chiếu')
             self.assertEqual(self.app.translate('QPlatformTheme', '&Yes'), '&Có')
-            self.assertEqual(window.history.ranges.itemText(0), '30 ngày')
+            self.assertEqual(window.history.ranges.buttons[0].text(), '30 ngày')
             self.assertEqual(window.history.cards[0].table.horizontalHeaderItem(0).text(), 'Ngày địa phương')
-            self.assertTrue(any(label.text() == 'Ngày bắt đầu sử dụng' for label in window.findChildren(QLabel)))
+            self.assertTrue(any(label.text() == str(i18n.tr('Earliest known date')) for label in window.findChildren(QLabel)))
             self.assertEqual(settings.load_settings(root)['language'], 'vi')
             self.assertGreaterEqual(window.language_control.group.button(1).width(), 40)
             window.scroll.verticalScrollBar().setValue(window.scroll.verticalScrollBar().maximum())
             self.assertTrue(window.language_control.isVisible())
-            self.assertLess(window.language_control.mapTo(window, window.language_control.rect().topLeft()).y(), 80)
+            self.assertTrue(window.sidebar.isAncestorOf(window.language_control))
+            self.assertLessEqual(window.language_control.mapTo(window, window.language_control.rect().bottomRight()).y(), window.height())
             dialog = SetupDialog(gui.THEMES['dark'], settings.load_settings(root), root, window)
             self.assertEqual(dialog.pages.count(), 5)
             self.assertEqual(dialog.progress.text(), 'Bước 1 / 5')

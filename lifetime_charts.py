@@ -7,17 +7,20 @@ from collections import deque
 import datetime as dt
 from lifetime_i18n import tr, language, set_language, on_language_change, date_text, datetime_text, month, weekdays
 import math
+import os
 import sys
 import time
 
-from PyQt6.QtCore import Qt, QRectF, QPointF, QTimer
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtCore import Qt, QRectF, QPointF, QTimer, QVariantAnimation, QEasingCurve, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QFontMetrics
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
-                            QHBoxLayout, QGridLayout, QComboBox, QScrollArea,
+                            QHBoxLayout, QGridLayout, QButtonGroup, QScrollArea,
                             QTableWidget, QTableWidgetItem, QHeaderView, QToolTip,
                             QAbstractItemView)
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget
 from lifetime_i18n import duration, time_text
+from lifetime_shell import DisclosureButton
+from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS
 
 TOKENS = dict(bg='#0B1426', card='#12203A', text='#FFFFFF', muted='#9FB0CC',
               border='#22345A', accent='#FFC93C', track='#1B2A46')
@@ -217,6 +220,8 @@ def hm(seconds):
 def font(size=13, bold=False):
     value = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
     value.setPixelSize(size)
+    if hasattr(value, 'setFeature'):
+        value.setFeature(QFont.Tag('tnum'), 1)
     value.setWeight(QFont.Weight.DemiBold if bold else QFont.Weight.Normal)
     return value
 
@@ -241,10 +246,11 @@ class Plot(QWidget):
         self.message = ''
         self.scope = ''
         self.details = []
+        self.bar_color = None
         self.setMouseTracking(True)
         self.setMinimumWidth(120)
         self.setMinimumHeight(140)
-        self.setAccessibleName(tr('Chart; use the Table button for underlying numbers'))
+        self.setAccessibleName(tr('Chart; use Show data for underlying numbers'))
 
     def set_data(self, keys, values, overlay=None, dates=None, message=''):
         self.keys, self.values = list(keys), list(values)
@@ -257,7 +263,8 @@ class Plot(QWidget):
         self.update()
 
     def plot(self):
-        return QRectF(58, 24, max(1, self.width()-74), max(1, self.height()-53))
+        left = max(58, QFontMetrics(font()).horizontalAdvance(f'{self.scale():,.0f} '+tr('unit.hour'))+10)
+        return QRectF(left, 24, max(1, self.width()-left-16), max(1, self.height()-53))
 
     def display(self, value):
         if value is None:
@@ -303,16 +310,18 @@ class Plot(QWidget):
             p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y))
             p.setPen(QColor(TOKENS['muted']))
             value = maximum*fraction
-            tick = f'{value:,.0f}' if maximum >= 9 else f'{value:.1f}'
+            # Counts (events, cycles) are whole numbers: never "1.0 events".
+            whole = maximum >= 9 or getattr(self, 'unit', None) in ('events', 'cycles')
+            tick = f'{value:,.0f}' if whole else f'{value:.1f}'
             if self.unit == 'h':
                 tick += ' '+tr('unit.hour')
             elif self.unit != 'sessions':
                 tick += self.unit if self.unit == '%' else ''
-            p.drawText(QRectF(0, y-9, 50, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, tick)
+            p.drawText(QRectF(0, y-9, r.left()-8, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, tick)
         xs = self.positions(r)
         ys = [r.bottom()-r.height()*v/maximum if v is not None else None for v in self.values]
         if self.kind in ('line', 'spark'):
-            self.draw_line(p, xs, ys, r, area=self.kind == 'line')
+            self.draw_line(p, xs, ys, r, area=self.kind == 'line', color=self.bar_color)
         else:
             step = r.width()/len(self.values)
             width = min(18, max(.5, step-2))
@@ -329,7 +338,7 @@ class Plot(QWidget):
                 if self.values[j] == 0:
                     continue
                 is_today = bool(self.dates and self.dates[j] == self.today)
-                color = QColor(TOKENS['accent'] if self.kind != 'daily' or is_today else '#9D8237')
+                color = QColor(self.bar_color or TOKENS['accent'])   # every bar in brand yellow
                 bar = QRectF(xs[j]-width/2, ys[j], width, max(.6, r.bottom()-ys[j]))
                 p.setBrush(color)
                 # Clip a round rectangle below the baseline: only the data
@@ -351,7 +360,20 @@ class Plot(QWidget):
         # Sparse ticks selected by pixel width rather than data length.
         count = min(len(xs), max(2, int(r.width()/115)))
         indices = sorted(set(round(i*(len(xs)-1)/max(1, count-1)) for i in range(count)))
-        if self.kind == 'bars' and len(xs) <= 24:
+        if self.kind == 'line':
+            # Health capacity samples may be weekly then daily. Choose ticks
+            # by their painted positions so clustered dates cannot overlap.
+            candidates = sorted(set(min(range(len(xs)), key=lambda j: abs(xs[j]-(r.left()+i*r.width()/max(1, count-1))))
+                                    for i in range(count)))
+            indices = []
+            for i in candidates:
+                center = min(max(xs[i], r.left()+50), r.right()-50)
+                previous = min(max(xs[indices[-1]], r.left()+50), r.right()-50) if indices else None
+                if previous is None or center-previous >= 105:
+                    indices.append(i)
+                elif i == candidates[-1]:
+                    indices[-1] = i
+        if self.kind == 'bars' and len(xs) <= 24 and r.width()/len(xs) >= 54:
             indices = list(range(len(xs))) if len(xs) <= 7 else list(range(0, len(xs), 4))
         p.setPen(QColor(TOKENS['muted']))
         for i in ([] if self.kind == 'spark' else indices):
@@ -435,15 +457,15 @@ class Plot(QWidget):
             ratio = (event.position().x()-rect.left())/rect.width()
             index = round(ratio*(len(self.values)-1)) if self.kind in ('line', 'spark') else int(ratio*len(self.values))
             self.hover = min(len(self.values)-1, max(0, index))
-            QToolTip.showText(event.globalPosition().toPoint(), self.tooltip(self.hover), self)
+            bounded_tooltip(self, event.globalPosition().toPoint(), self.tooltip(self.hover))
         else:
             self.hover = None
-            QToolTip.hideText()
+            hide_tooltip(self)
         self.update()
 
     def leaveEvent(self, event):
         self.hover = None
-        QToolTip.hideText()
+        hide_tooltip(self)
         self.update()
         super().leaveEvent(event)
 
@@ -517,9 +539,9 @@ class Calendar(Plot):
         day = self.origin+dt.timedelta(days=week*7+row)
         if event.position().x() >= left and event.position().y() >= top and 0 <= week < self.weeks and 0 <= row < 7 and self.start <= day <= self.end:
             value = self.daily.get(day)
-            QToolTip.showText(event.globalPosition().toPoint(), date_text(day)+'\n'+(hm(value) if value is not None else tr('No recorded data')), self)
+            bounded_tooltip(self, event.globalPosition().toPoint(), date_text(day)+'\n'+(hm(value) if value is not None else tr('No recorded data')))
         else:
-            QToolTip.hideText()
+            hide_tooltip(self)
 
 
 class HeatScale(QWidget):
@@ -540,6 +562,112 @@ class HeatScale(QWidget):
             p.drawText(QRectF(195, 1, self.width()-195, 22), Qt.AlignmentFlag.AlignVCenter, tr('Outline = no record'))
 
 
+def motion_reduced():
+    gui = sys.modules.get('lifetime_gui')
+    return (os.environ.get('LIFETIME_REDUCE_MOTION') == '1' or
+            os.environ.get('REDUCE_MOTION') == '1' or bool(getattr(gui, 'REDUCE_MOTION', False)))
+
+
+def bounded_tooltip(widget, position, text):
+    """Clamp the entire native tooltip to the application window."""
+    window = widget.window()
+    tip = getattr(window, '_chart_tooltip', None)
+    if tip is None:
+        tip = QLabel(window)
+        tip.setObjectName('chartTooltip')
+        tip.setWordWrap(True)
+        tip.setStyleSheet(f'background:{TOKENS["track"]}; color:{TOKENS["text"]}; border:1px solid {TOKENS["border"]}; padding:8px; font-size:13px;')
+        tip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        window._chart_tooltip = tip
+    tip.setText(text)
+    tip.setFixedWidth(min(320, max(120, window.width()-24)))
+    tip.adjustSize()
+    point = window.mapFromGlobal(position)
+    tip.move(max(8, min(point.x()+12, window.width()-tip.width()-8)),
+             max(8, min(point.y()+16, window.height()-tip.height()-8)))
+    tip.show()
+    tip.raise_()
+
+
+def hide_tooltip(widget):
+    tip = getattr(widget.window(), '_chart_tooltip', None)
+    if tip:
+        tip.hide()
+
+
+class RangeSegments(QWidget):
+    currentIndexChanged = pyqtSignal(int)
+
+    def __init__(self):
+        super().__init__()
+        self.index = 0
+        self.indicator = QRectF()
+        self.animation = QVariantAnimation(self)
+        self.animation.setDuration(260)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.valueChanged.connect(self.move_indicator)
+        self.group = QButtonGroup(self)
+        box = QHBoxLayout(self)
+        box.setContentsMargins(4, 4, 4, 4)
+        box.setSpacing(0)
+        self.buttons = []
+        for index, key in enumerate(RANGES):
+            button = QPushButton(tr(key))
+            button.setCheckable(True)
+            button.setFixedHeight(36)
+            button.setStyleSheet('QPushButton {background:transparent; border:0; padding:4px 12px; font-size:13px;} QPushButton:focus {border:1px solid #FFC93C;} QPushButton:hover {color:#FFFFFF;}')
+            self.group.addButton(button, index)
+            box.addWidget(button)
+            self.buttons.append(button)
+        self.buttons[0].setChecked(True)
+        self.group.idClicked.connect(self.setCurrentIndex)
+        self.setAccessibleName(tr('Insights date range; applies to every chart'))
+
+    def move_indicator(self, rect):
+        self.indicator = rect
+        self.update()
+
+    def setCurrentIndex(self, index):
+        if not 0 <= index < len(RANGES):
+            return
+        self.animation.stop()
+        changed = index != self.index
+        self.index = index
+        self.buttons[index].setChecked(True)
+        target = QRectF(self.buttons[index].geometry())
+        if motion_reduced() or self.indicator.isEmpty():
+            self.move_indicator(target)
+        else:
+            self.animation.setStartValue(self.indicator)
+            self.animation.setEndValue(target)
+            self.animation.start()
+        if changed:
+            self.currentIndexChanged.emit(index)
+
+    def setCurrentText(self, text):
+        for index, key in enumerate(RANGES):
+            if text in (key, tr(key)):
+                self.setCurrentIndex(index)
+                break
+
+    def setItemText(self, index, text):
+        self.buttons[index].setText(text)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.animation.stop()
+        self.move_indicator(QRectF(self.buttons[self.index].geometry()))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(TOKENS['card']))
+        painter.drawRoundedRect(QRectF(self.rect()), PANEL_RADIUS, PANEL_RADIUS)
+        painter.setBrush(QColor(TOKENS['track']))
+        painter.drawRoundedRect(self.indicator, CONTROL_RADIUS, CONTROL_RADIUS)
+
+
 class ChartCard(QFrame):
     def __init__(self, title, subtitle, chart):
         super().__init__()
@@ -552,15 +680,9 @@ class ChartCard(QFrame):
         row = QHBoxLayout()
         self.title = QLabel(title)
         self.title.setWordWrap(True)
-        self.title.setFont(font(17, True))
-        self.title.setStyleSheet('font-size:17px; font-weight:600;')
+        self.title.setFont(font(18, True))
+        self.title.setStyleSheet('font-size:18px; font-weight:600;')
         row.addWidget(self.title, 1)
-        self.toggle = QPushButton(tr('Table'))
-        self.toggle.setCheckable(True)
-        self.toggle.setAccessibleName(tr('Show table: ')+title)
-        self.toggle.setFixedHeight(32)
-        self.toggle.setStyleSheet('QPushButton {font-size:13px; padding:4px 9px; border-radius:5px;}')
-        row.addWidget(self.toggle)
         self.box.addLayout(row)
         self.subtitle = caption(subtitle)
         self.subtitle.setMinimumHeight(36)
@@ -568,7 +690,6 @@ class ChartCard(QFrame):
         self.chart = chart
         self.extra = None
         if isinstance(chart, Calendar):
-            self.subtitle.setMinimumHeight(18)
             self.viewport = QScrollArea()
             self.viewport.setFrameShape(QFrame.Shape.NoFrame)
             self.viewport.setStyleSheet(f'QScrollArea, QScrollArea > QWidget > QWidget {{background:{TOKENS["card"]};}}')
@@ -591,12 +712,12 @@ class ChartCard(QFrame):
         self.table.setStyleSheet(f'QTableWidget {{background:{TOKENS["card"]}; gridline-color:{TOKENS["border"]}; font-size:13px;}} QHeaderView::section {{background:{TOKENS["track"]}; color:{TOKENS["muted"]}; border:0; padding:5px;}}')
         self.box.addWidget(self.table, 1)
         self.table.hide()
-        self.toggle.toggled.connect(self.show_table)
+        self.data_visible = False
         self.headers, self.rows = [], []
 
     def set_table(self, headers, rows):
         self.headers, self.rows = headers, rows
-        if self.toggle.isChecked():
+        if self.data_visible:
             self.populate_table()
 
     def populate_table(self):
@@ -606,7 +727,11 @@ class ChartCard(QFrame):
         self.table.setRowCount(len(self.rows))
         for row, values in enumerate(self.rows):
             for col, value in enumerate(values):
-                self.table.setItem(row, col, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                item.setFont(font(13))
+                if col > 0:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table.setItem(row, col, item)
         self.table.setUpdatesEnabled(True)
 
     def show_table(self, checked):
@@ -614,10 +739,9 @@ class ChartCard(QFrame):
         if self.extra:
             self.extra.setVisible(not checked)
         self.table.setVisible(checked)
-        self.toggle.setText(tr('Chart') if checked else tr('Table'))
+        self.data_visible = checked
         if checked:
             self.populate_table()
-            self.table.setFocus()
 
 
 class Insights(QWidget):
@@ -627,25 +751,57 @@ class Insights(QWidget):
         self.selection = '30 days'
         self.fingerprint = None
         box = QVBoxLayout(self)
-        box.setContentsMargins(0, 12, 0, 0)
+        box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(16)
         row = QHBoxLayout()
-        title = QLabel(tr('Insights'))
+        title = QLabel(tr('Activity'))
         title.setObjectName('pageTitle')
         row.addWidget(title)
         row.addStretch()
-        row.addWidget(caption(tr('Range')))
-        self.ranges = QComboBox()
-        self.ranges.addItems([tr(key) for key in RANGES])
-        self.ranges.setAccessibleName(tr('Insights date range; applies to every chart'))
-        self.ranges.setMinimumWidth(120)
-        self.ranges.setFixedHeight(38)
-        self.ranges.setStyleSheet(f'QComboBox {{background:{TOKENS["card"]}; border:1px solid {TOKENS["border"]}; border-radius:6px; padding:5px 12px;}} QComboBox QAbstractItemView {{background:{TOKENS["card"]}; selection-background-color:{TOKENS["track"]};}}')
+        self.ranges = RangeSegments()
         row.addWidget(self.ranges)
+        self.data_toggle = QPushButton(tr('Show data'))
+        self.data_toggle.setCheckable(True)
+        self.data_toggle.setAccessibleName(tr('Show data for all charts'))
+        self.data_toggle.setFixedHeight(40)
+        self.data_toggle.setStyleSheet('QPushButton:checked {background:#1B2A46;}')
+        row.addWidget(self.data_toggle)
         self.ranges.currentIndexChanged.connect(lambda index: self.set_range(RANGES[index]))
         box.addLayout(row)
-        self.scope = caption('')
-        box.addWidget(self.scope)
+        figures = QHBoxLayout()
+        figures.setSpacing(32)
+        self.figures = []
+        for key in ('Range', 'Recorded days', 'Awake'):
+            group = QVBoxLayout()
+            group.setSpacing(4)
+            value = QLabel('')
+            value.setWordWrap(True)
+            value.setFont(font(20))
+            value.setStyleSheet('font-size:20px; font-weight:500;')
+            group.addWidget(value)
+            group.addWidget(caption(tr(key)))
+            figures.addLayout(group, 2 if key == 'Range' else 1)
+            self.figures.append(value)
+        box.addLayout(figures)
+        self.counting_toggle = DisclosureButton(tr('How this is counted'))
+        self.counting_toggle.setCheckable(True)
+        self.counting_toggle.setFixedHeight(36)
+        self.counting_toggle.setStyleSheet('QPushButton {text-align:left; background:transparent; border:0; padding:4px 28px 4px 0; font-size:13px;} QPushButton:focus {border-bottom:1px solid #FFC93C;}')
+        box.addWidget(self.counting_toggle)
+        self.sources = caption('')
+        self.source_panel = QWidget()
+        source_box = QVBoxLayout(self.source_panel)
+        source_box.setContentsMargins(0, 0, 0, 0)
+        source_box.addWidget(self.sources)
+        self.source_panel.setMaximumHeight(0)
+        self.source_panel.hide()
+        box.addWidget(self.source_panel)
+        self.counting_animation = QVariantAnimation(self)
+        self.counting_animation.setDuration(200)
+        self.counting_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.counting_animation.valueChanged.connect(lambda height: self.source_panel.setMaximumHeight(round(height)))
+        self.counting_animation.finished.connect(self.finish_counting)
+        self.counting_toggle.toggled.connect(self.toggle_counting)
         self.grid = QGridLayout()
         self.grid.setSpacing(16)
         box.addLayout(self.grid)
@@ -662,12 +818,38 @@ class Insights(QWidget):
             ChartCard(tr('Hour-of-day profile'), tr('Average awake hours in each local hour slot'), self.profile),
             ChartCard(tr('Weekday average'), tr('Average per recorded weekday; today is a partial day'), self.weekdays),
             ChartCard(tr('Session length distribution'), tr('Retained sessions, grouped by local start date'), self.distribution)]
+        for index, card in enumerate(self.cards):
+            card.setFixedHeight(330 if index < 2 else 280)
+        self.data_toggle.toggled.connect(self.show_data)
         self.columns = 0
         self.set_columns(2)
         self.note = caption(tr('history.note'))
         box.addWidget(self.note)
         self.set_ledger({})
         on_language_change(self.retranslate_content)
+
+    def toggle_counting(self, expanded):
+        self.counting_animation.stop()
+        self.source_panel.show()
+        self.source_panel.layout().activate()
+        target = max(self.sources.sizeHint().height(), self.sources.heightForWidth(self.source_panel.width())) if expanded else 0
+        if motion_reduced():
+            self.source_panel.setMaximumHeight(target)
+            self.finish_counting()
+        else:
+            self.counting_animation.setStartValue(float(self.source_panel.height()))
+            self.counting_animation.setEndValue(float(target))
+            self.counting_animation.start()
+
+    def finish_counting(self):
+        if self.counting_toggle.isChecked():
+            self.source_panel.setMaximumHeight(16777215)
+        else:
+            self.source_panel.hide()
+
+    def show_data(self, checked):
+        for card in self.cards:
+            card.show_table(checked)
 
     def retranslate_content(self):
         self.ranges.blockSignals(True)
@@ -695,7 +877,7 @@ class Insights(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.set_columns(2 if self.width() >= 920 else 1)
+        self.set_columns(2 if self.width() >= 820 else 1)
 
     def set_range(self, selection):
         self.selection = selection
@@ -715,7 +897,13 @@ class Insights(QWidget):
         start, end = range_bounds(daily, self.selection)
         selected = filter_range(daily, start, end)
         scope = tr('date.range', start=date_text(start), end=date_text(end))
-        self.scope.setText(tr('scope', start=date_text(start), end=date_text(end), days=len(selected), duration=hm(sum(selected.values()))))
+        for label, text in zip(self.figures, (scope, str(len(selected)), hm(sum(selected.values())))):
+            label.setText(text)
+        from lifetime_reports import source_totals
+        totals = source_totals(ledger)
+        shown = lambda value: hm(value) if value is not None else tr('Not available')
+        self.sources.setText(tr('All-data sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}',
+            measured=shown(totals['measured_seconds']), imported=shown(totals['imported_seconds']), baseline=shown(totals['baseline_seconds'])))
         estimated = (ledger.get('daily_repair') or {}).get('estimated') or (ledger.get('daily_allocation') or {}).get('estimated')
         provenance = tr('history.estimated') if estimated else tr('history.logged') if ledger.get('daily_repair_version') or ledger.get('daily_allocation') else ''
         self.note.setText(tr('history.note')+('\n'+provenance if provenance else ''))
@@ -781,7 +969,22 @@ class Sparkline(Plot):
     def __init__(self, unit):
         super().__init__('spark', unit)
         self.buffer = SampleBuffer()
-        self.setMinimumHeight(85)
+        self.setFixedSize(120, 28)
+
+    def plot(self):
+        return QRectF(2, 3, self.width()-4, self.height()-6)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.plot()
+        painter.setPen(QPen(QColor(TOKENS['border']), 1))
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        if sum(v is not None for v in self.values) < 2:
+            return
+        maximum = self.scale()
+        ys = [rect.bottom()-rect.height()*v/maximum if v is not None else None for v in self.values]
+        self.draw_line(painter, self.positions(rect), ys, rect, color=TOKENS['muted'])
 
     def positions(self, rect):
         now = time.monotonic()
@@ -791,7 +994,7 @@ class Sparkline(Plot):
         self.buffer.prune()
         rows = list(self.buffer.samples)
         self.set_data([time_text(wall, seconds=True) for _, wall, _ in rows], [v for _, _, v in rows],
-                      message=tr('Collecting live samples') if sum(v is not None for _, _, v in rows) < 2 else '')
+                      message='')
 
     def mouseMoveEvent(self, event):
         rect = self.plot()
@@ -799,15 +1002,15 @@ class Sparkline(Plot):
             xs = self.positions(rect)
             if event.position().x() < xs[0]-8 or event.position().x() > xs[-1]+8:
                 self.hover = None
-                QToolTip.hideText()
+                hide_tooltip(self)
                 self.update()
                 return
             self.hover = min(range(len(xs)), key=lambda i: abs(xs[i]-event.position().x()))
             wall = self.buffer.samples[self.hover][1]
-            QToolTip.showText(event.globalPosition().toPoint(), datetime_text(wall)+'\n'+self.display(self.values[self.hover]), self)
+            bounded_tooltip(self, event.globalPosition().toPoint(), datetime_text(wall)+'\n'+self.display(self.values[self.hover]))
         else:
             self.hover = None
-            QToolTip.hideText()
+            hide_tooltip(self)
         self.update()
 
 
@@ -819,7 +1022,6 @@ class LiveSparklines(QWidget):
         self.box = QVBoxLayout(self)
         self.box.setContentsMargins(0, 0, 0, 0)
         self.box.setSpacing(10)
-        self.box.addWidget(caption(tr('Last 5 minutes · samples stay in memory')))
         self.grid = QGridLayout()
         self.grid.setSpacing(16)
         self.box.addLayout(self.grid)
@@ -829,7 +1031,10 @@ class LiveSparklines(QWidget):
                                  ('down', tr('Download'), 'KiB/s'), ('up', tr('Upload'), 'KiB/s')]:
             chart = Sparkline(unit)
             card = ChartCard(title, tr('Waiting for a local reading'), chart)
-            card.setFixedHeight(195)
+            card.setFixedHeight(200)
+            card.show_table(True)
+            chart.setParent(self)
+            chart.hide()
             card.subtitle.setMinimumHeight(18)
             self.charts[key], self.cards[key] = chart, card
         self.columns = 0
@@ -860,6 +1065,7 @@ class LiveSparklines(QWidget):
             enabled = bool(settings.get(category))
             self.cards[key].setVisible(enabled)
             if not enabled:
+                hide_tooltip(self.charts[key])
                 self.charts[key].buffer.samples.clear()
                 self.charts[key].set_data([], [])
                 self.cards[key].set_table([tr('Local time'), self.charts[key].unit], [])
@@ -887,6 +1093,6 @@ class LiveSparklines(QWidget):
             chart.buffer.append(value)
             chart.refresh()
             if value is None and not any(v is not None for _, _, v in chart.buffer.samples):
-                chart.message = tr('Not available from this system')
+                chart.message = ''
             self.cards[key].subtitle.setText(tr('Not available') if value is None else tr('live.latest', value=value, unit=chart.unit))
-            self.cards[key].set_table([tr('Local time'), chart.unit], [(datetime_text(wall), f'{v:.3f}' if v is not None else tr('Unavailable')) for _, wall, v in chart.buffer.samples])
+            self.cards[key].set_table([tr('Local time'), chart.unit], [(date_text(wall.date())+' '+time_text(wall, seconds=True), f'{v:.3f}' if v is not None else tr('Unavailable')) for _, wall, v in chart.buffer.samples])

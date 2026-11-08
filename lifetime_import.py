@@ -196,6 +196,7 @@ def allocate(start, end, daily, hourly, tz=None):
 
 
 def rebuild(boots, current_start, ledger, tz=None):
+    _check_saved_import(ledger)
     old = ledger.get('imported') or {}
     original = old.get('original', {})
     tracking = original.get('tracking_started', ledger.get('tracking_started'))
@@ -226,11 +227,34 @@ def rebuild(boots, current_start, ledger, tz=None):
                 boots_found=len(boots), skipped_boots=len(boots)-len(eligible))
 
 
+def _check_saved_import(ledger):
+    """An incomplete legacy marker is readable, but cannot authorize reimport."""
+    tracker.validate_ledger(ledger)
+    if 'imported' in ledger:
+        marker = ledger['imported']
+        required = {'seconds', 'boots', 'daily', 'hourly', 'sessions',
+                    'longest_session_seconds', 'original'}
+        original = marker.get('original', {})
+        if (not required.issubset(marker) or
+                not {'first_seen', 'tracking_started', 'history_started',
+                     'longest_session_seconds'}.issubset(original)):
+            raise ValueError('Incomplete imported accounting marker; refusing reimport to avoid double counting')
+
+
 def merge(ledger, imported):
+    _check_saved_import(ledger)
+    from lifetime_ledger import validate
+    required = {'seconds', 'boots', 'daily', 'hourly', 'sessions',
+                'longest_session_seconds', 'first_day'}
+    if not isinstance(imported, dict) or not required.issubset(imported):
+        raise ValueError('Incomplete imported contribution')
+    validate(dict(total_seconds=imported['seconds'], boots=imported['boots'], imported=imported))
     result = copy.deepcopy(ledger)
     old = result.get('imported') or {}
     original = old.get('original') or {k: result.get(k) for k in
-                ('first_seen', 'tracking_started', 'history_started', 'longest_session_seconds')}
+                ('first_seen', 'first_seen_source', 'tracking_started', 'history_started', 'longest_session_seconds')}
+    # Legacy markers predate provenance; do not attribute their date to the OS.
+    original['first_seen_source'] = original.get('first_seen_source') or 'unknown'
     result['total_seconds'] = result.get('total_seconds', 0) - old.get('seconds', 0) + imported['seconds']
     result['boots'] = result.get('boots', 0) - old.get('boots', 0) + imported['boots']
     daily = result.setdefault('daily', {})
@@ -248,6 +272,11 @@ def merge(ledger, imported):
     for key in ('first_seen', 'tracking_started', 'history_started'):
         dates = [v for v in (original.get(key), imported['first_day']) if v]
         result[key] = min(dates) if dates else None
+    first = original.get('first_seen')
+    if imported['first_day'] and (not first or imported['first_day'] < first):
+        result['first_seen_source'] = 'imported-log'
+    else:
+        result['first_seen_source'] = original.get('first_seen_source') or 'unknown'
     live_longest = result.get('longest_session_seconds', 0)
     if old and live_longest <= old.get('longest_session_seconds', 0):
         live_longest = max(original.get('longest_session_seconds') or 0,
@@ -261,12 +290,7 @@ def merge(ledger, imported):
 
 def read_path(path):
     # Custom filenames use precisely the same schema defaults as the tracker.
-    value = json.loads(path.read_text())
-    if not isinstance(value, dict):
-        raise ValueError('Ledger must be a JSON object')
-    ledger = tracker.new_ledger()
-    ledger.update(value)
-    return ledger
+    return tracker.load_ledger(path)
 
 
 def report(result):

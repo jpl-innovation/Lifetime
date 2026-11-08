@@ -8,8 +8,8 @@ import time
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor
-from PyQt6.QtWidgets import QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QProgressBar, QSizePolicy
-from lifetime_i18n_qt import QLabel, QWidget, QFrame
+from PyQt6.QtWidgets import QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QProgressBar, QSizePolicy, QPushButton
+from lifetime_i18n_qt import QLabel, QWidget, QFrame, QPushButton
 from lifetime_i18n import duration, ui_text
 
 import lifetime_signals as signals
@@ -173,7 +173,7 @@ class SignalCard(QFrame):
         self.setObjectName('signalCard')
         self.box = QVBoxLayout(self)
         self.box.setContentsMargins(20, 12, 20, 14)
-        self.box.setSpacing(10)
+        self.box.setSpacing(16)
         heading = QLabel(tr(title))
         heading.setWordWrap(True)
         heading.setObjectName('groupTitle')
@@ -182,16 +182,19 @@ class SignalCard(QFrame):
         self.grid = QGridLayout(self.rows)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setHorizontalSpacing(16)
-        self.grid.setVerticalSpacing(4)
-        self.grid.setColumnStretch(0, 2)
-        self.grid.setColumnStretch(1, 3)
+        self.grid.setVerticalSpacing(8)
+        self.grid.setColumnStretch(0, 1)
+        self.grid.setColumnStretch(1, 1)
         self.box.addWidget(self.rows)
         self.box.addStretch()
         self.fields = {}
+        self.sparks = {}
 
     def set_rows(self, rows, tokens):
         keys = [r[0] for r in rows]
         if list(self.fields) != keys:
+            for chart in self.sparks.values():
+                chart.setParent(self)
             while self.grid.count():
                 self.grid.takeAt(0).widget().deleteLater()
             self.fields = {}
@@ -202,17 +205,28 @@ class SignalCard(QFrame):
                 title.setWordWrap(True)
                 value = QLabel()
                 value.setObjectName('signalValue')
-                value.setWordWrap(True)
+                value.setWordWrap(False)        # short readings: never split "1000 Mbps" across lines
                 value.setTextFormat(Qt.TextFormat.RichText)
                 value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+                value.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+                value.setMaximumWidth(360)
                 font = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
                 font.setPixelSize(15)
                 if hasattr(font, 'setFeature'):
                     font.setFeature(QFont.Tag('tnum'), 1)
                 value.setFont(font)
                 self.grid.addWidget(title, position, 0)
-                self.grid.addWidget(value, position, 1)
+                trailing = QWidget()
+                trailing_box = QHBoxLayout(trailing)
+                trailing_box.setContentsMargins(0, 0, 0, 0)
+                trailing_box.setSpacing(16)
+                trailing_box.addStretch()
+                chart = self.sparks.get(key)
+                if chart is not None:
+                    trailing_box.addWidget(chart)
+                    chart.show()
+                trailing_box.addWidget(value)
+                self.grid.addWidget(trailing, position, 1)
                 meter = QProgressBar()
                 meter.setTextVisible(False)
                 meter.setRange(0, 1000)
@@ -239,8 +253,8 @@ class SystemDashboard(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 12, 0, 0)
-        layout.setSpacing(14)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
         header = QHBoxLayout()
         title = QLabel(tr('System'))
         title.setObjectName('pageTitle')
@@ -248,34 +262,49 @@ class SystemDashboard(QWidget):
         header.addStretch()
         self.freshness = QLabel(tr('Reading local system…'))
         self.freshness.setObjectName('caption')
-        header.addWidget(self.freshness)
+        self.data_toggle = QPushButton(tr('Show data'))
+        self.data_toggle.setCheckable(True)
+        self.data_toggle.setAccessibleName(tr('Show data for all live series'))
+        self.data_toggle.setFixedHeight(40)
+        self.data_toggle.setStyleSheet('QPushButton:checked {background:#1B2A46;}')
+        header.addWidget(self.data_toggle)
         layout.addLayout(header)
+        layout.addWidget(self.freshness)
         self.empty = QLabel(tr('System readings are off. Choose what to collect in Settings.'))
         self.empty.setObjectName('caption')
         self.empty.setWordWrap(True)
         self.empty.hide()
         layout.addWidget(self.empty)
         self.sparklines = LiveSparklines()
-        layout.addWidget(self.sparklines)
+        self.sparklines.hide()
+        self.data_toggle.toggled.connect(self.show_data)
         self.grid = QGridLayout()
         self.grid.setSpacing(16)
         self.cards = [SignalCard(title) for title in (tr('Power'), tr('Network'), tr('Graphics'), tr('Computer'))]
         self.columns = 0
         layout.addLayout(self.grid)
-        self.set_columns(2)
+        self.set_columns(1)
+        layout.addWidget(self.sparklines)
         self.settings = dict(battery=True, network=True, wifi_name=True, graphics=True, resources=True)
+
+    def show_data(self, checked):
+        self.sparklines.setVisible(checked and any(self.settings.values()))
 
     def set_settings(self, settings):
         self.settings = settings
         self.sparklines.set_settings(settings)
         any_enabled = any(settings.get(key) for key in ('battery', 'network', 'wifi_name', 'graphics', 'resources'))
         self.empty.setVisible(not any_enabled)
+        self.data_toggle.setVisible(any_enabled)
+        self.sparklines.setVisible(any_enabled and self.data_toggle.isChecked())
         self.freshness.setVisible(any_enabled)
         for card, visible in zip(self.cards, (settings.get('battery'), settings.get('network') or settings.get('wifi_name'),
                                               settings.get('graphics'), settings.get('resources'))):
             card.setVisible(bool(visible))
 
     def set_columns(self, count):
+        # Two columns on wide windows keep each label close to its value (full-width rows were ~1400 px
+        # apart and hard to scan); reading order stays Power, Network / Graphics, Computer.
         if count == self.columns:
             return
         for card in self.cards:
@@ -321,6 +350,9 @@ class SystemDashboard(QWidget):
                     ('Wi-Fi transmit', fmt(wifi.get('tx_mbps'), 'Mbps'), None)]
         if not self.settings.get('wifi_name'):
             network = [row for row in network if not row[0].startswith(('Wi-Fi', 'Band /'))]
+        elif not wifi:
+            # Not connected to Wi-Fi: one honest row instead of four "Not available" lines.
+            network = [row for row in network if row[0] not in ('Wi-Fi signal', 'Band / channel', 'Wi-Fi receive', 'Wi-Fi transmit')]
         elif not self.settings.get('network'):
             network = [row for row in network if row[0].startswith(('Wi-Fi', 'Band /'))]
         if self.settings.get('wifi_name') and data.get('wifi') == []:
@@ -352,6 +384,16 @@ class SystemDashboard(QWidget):
                      ('Awake since boot', span(clocks.get('awake')), None),
                      ('Last boot', datetime_text(dt.datetime.fromtimestamp(boot)) if boot else None, None),
                      ('Fast Startup', 'On' if clocks.get('fast_startup') else 'Off' if clocks.get('fast_startup') is False else None, None)]
-        for card, rows in zip(self.cards, (power, network, graphics, computer)):
+        chart = self.sparklines.charts
+        mappings = [{'Power': chart['watts']}, {'Download': chart['down'], 'Upload': chart['up']},
+                    {tr('gpu.field', prefix='', field=tr('Power')): chart['gpu']},
+                    {'CPU': chart['cpu'], 'RAM': chart['ram']}]
+        if len(data.get('gpu') or []) > 1:
+            watts = [gpu.get('watts') for gpu in data['gpu']]
+            total = sum(watts) if all(value is not None for value in watts) else None
+            graphics.insert(0, (tr('Total GPU power'), fmt(total, 'W'), None))
+            mappings[2] = {tr('Total GPU power'): chart['gpu']}
+        for card, rows, mapping in zip(self.cards, (power, network, graphics, computer), mappings):
+            card.sparks = mapping
             card.set_rows(rows, tokens)
         self.freshness.setText(tr('Local readings · 2 s / 10 s'))

@@ -33,11 +33,14 @@ if (-not $Admin -and $ElevationAttempted) { Write-Host 'Continuing per-user; his
 $InstallDir = Join-Path $OriginalLocalAppData 'Lifetime'
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 if ($ExePackage) {
-    $Names = @('Lifetime.exe', 'LifetimeTracker.exe', 'LifetimeImport.exe')
+    $Names = @('Lifetime.exe', 'LifetimeTracker.exe', 'LifetimeImport.exe', 'LifetimeAgent.exe',
+               'install_agent_windows.ps1', 'uninstall_agent_windows.ps1')
 } else {
-    $Names = @('lifetime_tracker.py', 'lifetime_gui.py', 'lifetime_signals.py', 'lifetime_dashboard.py',
+    $Names = @('lifetime_tracker.py', 'lifetime_gui.py', 'lifetime_health.py', 'lifetime_health_gui.py', 'lifetime_shell.py', 'lifetime_signals.py', 'lifetime_dashboard.py',
                'lifetime_settings.py', 'lifetime_setup.py', 'lifetime_import.py', 'lifetime_import_windows.py',
-               'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py')
+               'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py',
+               'lifetime_reports.py', 'lifetime_technician.py', 'lifetime_ledger.py', 'lifetime_identity.py', 'lifetime_theme.py',
+               'lifetime_tasks.py', 'lifetime_company.py', 'lifetime_connect.py', 'lifetime_agent.py', 'lifetime_live.py', 'lifetime_client.py', 'lifetime_protocol.py', 'lifetime_tls.py', 'lifetime_permissions.py', 'lifetime_connection.py', 'lifetime_discovery.py')
 }
 foreach ($Name in $Names) {
     $Source = Join-Path $PSScriptRoot $Name
@@ -52,7 +55,7 @@ if ($ExePackage) {
     $TaskAction = New-ScheduledTaskAction -Execute $Tracker -Argument '--run' -WorkingDirectory $InstallDir
 } else {
     New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'assets') | Out-Null
-    foreach ($Name in @('lifetime.png', 'lifetime.ico')) {
+    foreach ($Name in @('lifetime.png', 'lifetime.ico', 'jpl_innovation.png')) {
         $Source = Join-Path $PSScriptRoot "assets\$Name"
         $Target = Join-Path $InstallDir "assets\$Name"
         if ([IO.Path]::GetFullPath($Source) -ne [IO.Path]::GetFullPath($Target)) {

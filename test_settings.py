@@ -18,6 +18,12 @@ from qt_test_support import qt_app
 
 
 class SettingsTests(unittest.TestCase):
+    def test_remote_power_defaults_off_and_requires_explicit_true(self):
+        import lifetime_settings as settings
+        self.assertFalse(settings.defaults()['remote_power'])
+        self.assertFalse(settings.normalize({'remote_power': 1})['remote_power'])
+        self.assertTrue(settings.normalize({'remote_power': True})['remote_power'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

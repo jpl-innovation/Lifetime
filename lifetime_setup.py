@@ -12,11 +12,13 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QHBoxLayout, QLab
                             QStackedWidget, QVBoxLayout, QWidget, QStyle, QStyleOptionButton)
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, QRadioButton
 
-from lifetime_settings import defaults, delete_history, normalize, save_settings
+from lifetime_theme import stylesheet, install
+from lifetime_settings import defaults, delete_history, normalize, save_settings, load_settings, update_settings
 
 CHOICES = (
     ('awake', 'Awake time', 'Required. Counts time while this computer is awake.'),
     ('history', 'Daily and hourly history', 'Shows when and how long you use this computer.'),
+    ('health', 'Health and stability', 'Reads system shutdown and sleep events, battery capacity and machine dates.'),
     ('battery', 'Battery and power', 'Shows charge, power use and battery condition.'),
     ('network', 'Network', 'Shows connection type, link speed and transfer speed.'),
     ('wifi_name', 'Wi-Fi network name', 'Optional. Network names can reveal your location.'),
@@ -28,31 +30,20 @@ CHOICES = (
 def setup_style(tokens):
     t = tokens
     family = 'Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans'
-    return f"""
+    return stylesheet() + f"""
         QDialog, QScrollArea, QStackedWidget, QWidget#page {{ background: {t['bg']}; }}
         QWidget {{ color: {t['text']}; font-family: '{family}'; font-size: 15px; }}
         QLabel {{ background: transparent; }}
         QLabel#title {{ font-size: 26px; font-weight: 600; }}
         QLabel#description, QLabel#progress {{ color: {t['muted']}; font-size: 13px; }}
-        QLabel#summary {{ background: {t['card']}; padding: 20px; border-radius: 6px; }}
-        QPushButton {{ background: {t['card']}; border: 1px solid {t['border']};
-            border-radius: 8px; padding: 10px 18px; min-height: 22px; }}
-        QPushButton:focus, QPushButton:hover {{ border-color: {t['accent']}; }}
-        QPushButton:pressed {{ background: {t['track']}; }}
-        QPushButton:disabled {{ color: {t['muted']}; }}
-        QPushButton#primary {{ background: {t['accent']}; color: {t['bg']}; font-weight: 600; }}
-        QPushButton#primary:hover {{ background: {t['accent_hover']}; }}
+        QLabel#summary {{ background: {t['card']}; padding: 20px; }}
         QCheckBox, QRadioButton {{ spacing: 12px; min-height: 28px; }}
-        QCheckBox::indicator, QRadioButton::indicator {{ width: 20px; height: 20px;
-            background: {t['card']}; border: 1px solid {t['muted']}; border-radius: 4px; }}
-        QRadioButton::indicator {{ border-radius: 11px; }}
+        QCheckBox::indicator {{ width: 20px; height: 20px;
+            background: {t['card']}; border: 1px solid {t['muted']}; }}
         QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
             background: {t['accent']}; border: 1px solid {t['accent']}; }}
         QCheckBox:focus, QRadioButton:focus {{ color: {t['accent']}; }}
         QScrollArea {{ border: none; }}
-        QScrollBar:vertical {{ width: 8px; background: {t['bg']}; }}
-        QScrollBar::handle:vertical {{ background: {t['border']}; min-height: 24px; }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
     """
 
 
@@ -86,6 +77,7 @@ class SetupDialog(QDialog):
         set_language(self.initial['language'])
         self.result_settings = None
         self.setWindowTitle(tr('Lifetime settings') if self.initial['completed'] else tr('Set up Lifetime'))
+        install()
         self.setStyleSheet(setup_style(tokens))
         self.setMinimumSize(380, 400)
         self.resize(680, 850)
@@ -171,10 +163,9 @@ class SetupDialog(QDialog):
     def change_language(self, value):
         set_language(value)
         # Language is a preference, not consent to collect data.
-        preference = dict(self.initial, language=value)
         try:
-            save_settings(preference, self.directory)
-        except OSError as error:
+            update_settings({'language': value}, self.directory)
+        except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
         if self.parent() and hasattr(self.parent(), 'switch_language'):
             self.parent().switch_language(value)
@@ -214,7 +205,7 @@ class SetupDialog(QDialog):
     def choices(self):
         value = {key: box.isChecked() for key, box in self.checks.items()}
         value.update({key: yes.isChecked() for key, yes in self.answers.items()})
-        return normalize(dict(value, completed=True, language=language()))
+        return normalize(dict(load_settings(self.directory), **value, completed=True, language=language()))
 
     def go(self, index):
         self.pages.setCurrentIndex(index)
