@@ -17,6 +17,17 @@ from lifetime_theme import CONTROL_RADIUS, install
 GREEN = '#4CC38A'
 
 
+def shut_down(app, window):
+    """Delete the window and its tray while the application still exists, so Python's exit never tears Qt objects down in a random order."""
+    tray = getattr(window, 'tray', None)
+    if tray is not None:
+        tray.hide()
+        tray.deleteLater()
+    window.deleteLater()
+    app.processEvents()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def tray_available():
     return QSystemTrayIcon.isSystemTrayAvailable()
 
@@ -43,7 +54,7 @@ class AppTray(QSystemTrayIcon):
         self.win, self.name, self.status, self.t = window, name, status, translate
         self.quitting = self.told = False
         install()
-        self.menu = QMenu()
+        self.menu = QMenu(window)
         self.state = self.menu.addAction('')
         self.state.setEnabled(False)
         self.menu.addSeparator()

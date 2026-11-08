@@ -1,9 +1,11 @@
 """The persistent live socket: auth, streaming and rate push, command ack and dedupe, reconnect, fallback."""
+import socket
 import ssl
 import tempfile
 import threading
 import time
 import unittest
+import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -37,11 +39,23 @@ def until(condition, seconds=8):
     return condition()
 
 
+def free_ports():
+    """Two ports nothing is using now: the server and its loopback admin port."""
+    held = [socket.socket() for _ in range(2)]
+    try:
+        for sock in held:
+            sock.bind(('127.0.0.1', 0))
+        return [sock.getsockname()[1] for sock in held]
+    finally:
+        for sock in held:
+            sock.close()
+
+
 class SocketFixture(unittest.TestCase):
-    port = 18490
     control = False
 
     def setUp(self):
+        self.port, self.admin_port = free_ports()
         self.temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temporary.cleanup)
         self.enterContext(patch.object(permissions, 'windows_acl'))
@@ -51,10 +65,10 @@ class SocketFixture(unittest.TestCase):
         (root/'s').mkdir()
         (root/'a').mkdir()
         self.runtime = ServerRuntime(root/'s', address=f'https://127.0.0.1:{self.port}', host='127.0.0.1',
-                                     port=self.port, admin_port=self.port+1)
+                                     port=self.port, admin_port=self.admin_port)
         self.runtime.start()
         self.addCleanup(self.runtime.stop)
-        self.admin = AdminClient(root/'s', self.port+1)
+        self.admin = AdminClient(root/'s', self.admin_port)
         self.agent = la.MachineAgent.initialize(root/'a')
         self.addCleanup(self.agent.close)
         policy = dict(history=True, resources=True, health=False, control=self.control)
@@ -111,8 +125,11 @@ class SocketTests(SocketFixture):
         self.start_agent()
         self.assertTrue(until(lambda: self.runtime.hub.connected(self.device) and self.samples() >= 1))
         self.assertEqual(self.status(), 'reporting')
+        seen = []
+        self.runtime.hub.listeners.append(lambda event: seen.append(self.status()) if event.get('online') is False else None)
         self.runtime.hub.links[self.device].kill()
-        self.assertTrue(until(lambda: self.status() == 'report-overdue', 3))    # no waiting for a silence timer
+        self.assertTrue(until(lambda: seen, 3))
+        self.assertEqual(seen[0], 'report-overdue')                             # offline at the instant the link closed
         self.assertTrue(until(lambda: self.runtime.hub.connected(self.device), 8))
         self.assertTrue(until(lambda: self.status() == 'reporting', 8))
 
@@ -134,17 +151,16 @@ class SocketTests(SocketFixture):
 
 
 class AdminStreamTests(SocketFixture):
-    port = 18494
 
     def test_the_server_window_stream_pushes_samples_and_online_changes(self):
         self.start_agent()
         self.assertTrue(until(lambda: self.runtime.hub.connected(self.device) and self.samples() >= 1))
         token = (Path(self.temporary.name)/'s'/'admin-token').read_text(encoding='ascii').strip()
         with self.assertRaises(InvalidHandshake):    # no token, no stream
-            with connect(f'ws://127.0.0.1:{self.port+1}/v1/stream', open_timeout=3, proxy=None):
+            with connect(f'ws://127.0.0.1:{self.admin_port}/v1/stream', open_timeout=3, proxy=None):
                 pass
         events = []
-        with connect(f'ws://127.0.0.1:{self.port+1}/v1/stream', additional_headers={'Authorization': 'Bearer ' + token},
+        with connect(f'ws://127.0.0.1:{self.admin_port}/v1/stream', additional_headers={'Authorization': 'Bearer ' + token},
                      open_timeout=3, proxy=None) as stream:
             hello = ws.parse(stream.recv(timeout=3))
             self.assertEqual(hello['type'], 'hello')
@@ -171,7 +187,6 @@ class AdminStreamTests(SocketFixture):
 
 
 class HardeningTests(SocketFixture):
-    port = 18496
 
     def test_a_browser_origin_is_refused_on_both_sockets(self):
         context = ssl.create_default_context()
@@ -182,14 +197,14 @@ class HardeningTests(SocketFixture):
         self.assertEqual(caught.exception.response.status_code, 403)
         token = (Path(self.temporary.name)/'s'/'admin-token').read_text(encoding='ascii').strip()
         with self.assertRaises(InvalidStatus):
-            connect(f'ws://127.0.0.1:{self.port+1}/v1/stream', origin='https://evil.example',
+            connect(f'ws://127.0.0.1:{self.admin_port}/v1/stream', origin='https://evil.example',
                     additional_headers={'Authorization': 'Bearer ' + token}, open_timeout=3, proxy=None)
 
     def test_admin_api_refuses_a_foreign_host_header(self):
         import http.client
         token = (Path(self.temporary.name)/'s'/'admin-token').read_text(encoding='ascii').strip()
-        for host, expected in (('attacker.example:80', 403), (f'127.0.0.1:{self.port+1}', 200)):
-            connection = http.client.HTTPConnection('127.0.0.1', self.port+1, timeout=5)
+        for host, expected in (('attacker.example:80', 403), (f'127.0.0.1:{self.admin_port}', 200)):
+            connection = http.client.HTTPConnection('127.0.0.1', self.admin_port, timeout=5)
             connection.request('POST', '/v1/overview', '{}', {'Host': host, 'Authorization': 'Bearer ' + token,
                                                               'Content-Type': 'application/json'})
             self.assertEqual(connection.getresponse().status, expected)
@@ -213,7 +228,6 @@ class HardeningTests(SocketFixture):
 
 
 class CommandTests(SocketFixture):
-    port = 18492
     control = True
 
     def command(self, action):

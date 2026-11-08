@@ -40,7 +40,7 @@ if ($ExePackage) {
                'lifetime_settings.py', 'lifetime_setup.py', 'lifetime_import.py', 'lifetime_import_windows.py',
                'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py',
                'lifetime_reports.py', 'lifetime_technician.py', 'lifetime_ledger.py', 'lifetime_identity.py', 'lifetime_theme.py',
-               'lifetime_tasks.py', 'lifetime_company.py', 'lifetime_connect.py', 'lifetime_agent.py', 'lifetime_live.py', 'lifetime_client.py', 'lifetime_protocol.py', 'lifetime_tls.py', 'lifetime_permissions.py', 'lifetime_connection.py', 'lifetime_discovery.py')
+               'lifetime_tasks.py', 'lifetime_company.py', 'lifetime_connect.py', 'lifetime_agent.py', 'lifetime_live.py', 'lifetime_reveal.py', 'lifetime_ws.py', 'lifetime_ws_client.py', 'lifetime_client.py', 'lifetime_protocol.py', 'lifetime_tls.py', 'lifetime_permissions.py', 'lifetime_connection.py', 'lifetime_discovery.py')
 }
 foreach ($Name in $Names) {
     $Source = Join-Path $PSScriptRoot $Name

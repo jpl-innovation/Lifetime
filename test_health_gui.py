@@ -56,7 +56,7 @@ class HealthPageTests(unittest.TestCase):
 
     def test_loading_failure_empty_and_revocation_discards_late_results(self):
         self.page.set_settings(dict(completed=True,health=True))
-        self.assertEqual(self.jobs.call_count,4)
+        self.assertEqual(len(self.page.jobs),4)
         self.assertEqual(self.page.states['stability'].text(),'Loading…')
         generation=self.page.generation
         for number,(key,_) in list(self.page.jobs.items()):

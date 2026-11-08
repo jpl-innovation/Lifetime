@@ -292,3 +292,15 @@ def install():
     app._lifetime_surfaces = Surfaces(app)
     app.installEventFilter(app._lifetime_surfaces)
     app.setStyleSheet(stylesheet())
+
+    def release():
+        # The filter keeps Python wrappers of Qt-owned controls; let go of them while Qt can still tell
+        # they are alive, or Python's exit tears them down after the C++ objects are gone (a crash on close).
+        app.removeEventFilter(app._lifetime_surfaces)
+        for widget in list(app._lifetime_surfaces.controls.values()):
+            try:
+                del widget._lifetime_arrows
+            except (AttributeError, RuntimeError):
+                pass
+        app._lifetime_surfaces.controls.clear()
+    app.aboutToQuit.connect(release)

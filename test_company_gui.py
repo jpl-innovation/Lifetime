@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from unittest.mock import Mock, patch
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from PyQt6.QtTest import QTest

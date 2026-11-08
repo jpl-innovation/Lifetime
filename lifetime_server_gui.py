@@ -27,11 +27,12 @@ from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configu
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
-from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, status_dot, table_action
+from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
+from lifetime_reveal import reveal, count_up
 from lifetime_server_devices import (ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
-from lifetime_shell import PulseDot, install_tray, tray_available, tell_running_instance
+from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
 
@@ -102,6 +103,7 @@ class ServerWindow(QMainWindow):
         self._readings_busy = False
         self._live_busy = False
         self.stream = None
+        self._revealed = False
         self._paint_pending = False
         self._last_poll, self._poll_focus = 0.0, None
         self._live_items = {}
@@ -238,6 +240,7 @@ class ServerWindow(QMainWindow):
         self.table.verticalScrollBar().valueChanged.connect(lambda: self._readings_timer.start())
         self.table.verticalScrollBar().valueChanged.connect(lambda: self._paint_live())
         self.tabs.currentChanged.connect(lambda: self._readings_timer.start())
+        self.tabs.currentChanged.connect(self._reveal_current)
         self._fleet_timer = QTimer(self)
         self._fleet_timer.setSingleShot(True)
         self._fleet_timer.setInterval(250)
@@ -846,6 +849,27 @@ class ServerWindow(QMainWindow):
                 self._paint_live()
         if not self._submit(lambda: self.client.call('live', **({'device_id': focus} if focus else {})), ready, quiet=True):
             self._live_busy = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._revealed:
+            self._revealed = True
+            QTimer.singleShot(0, self._reveal_current)      # the first page is uncovered as the window opens
+
+    def _reveal_current(self, *unused):
+        """Wipe the cards of the page now showing, and let the Overview numbers land as it uncovers."""
+        if self._closed or not self.isVisible():
+            return
+        page = self.tabs.currentWidget()
+        inner = page.widget() if page is not None else None
+        if inner is None:
+            return
+        reduced = reduced_motion()
+        cards = [w for w in inner.findChildren(QWidget, 'panel') if not w.property('lifetimeScrollContent')]
+        reveal(cards, reduced)
+        if self.tabs.currentIndex() == 0:
+            for key in ('Connected', 'Offline', 'Pending approval'):
+                count_up(self.kpis[key], reduced)
 
     def start_stream(self):
         """Subscribe to pushed live data. Without it the window polls, as before."""
@@ -2506,7 +2530,9 @@ def main(argv=None):
         return 0
     window = ServerWindow(args.directory, args.admin_port, args.language)
     show_fitted(window)
-    return application.exec()
+    code = application.exec()
+    shut_down(application, window)
+    return code
 
 
 if __name__ == '__main__':

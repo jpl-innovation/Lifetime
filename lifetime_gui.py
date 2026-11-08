@@ -23,12 +23,13 @@ from lifetime_i18n import duration
 from lifetime_dashboard import ProbeWorker, SystemDashboard, RefreshGlyph
 from lifetime_charts import Insights, Plot, clean_daily, date_series
 from lifetime_health_gui import HealthPage
-from lifetime_shell import Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, tray_available, tell_running_instance, configure_tray_login
+from lifetime_shell import Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
 from lifetime_settings import load_settings, save_settings, update_settings
 from lifetime_setup import SetupDialog, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
+from lifetime_reveal import reveal, NUMBER_DELAY
 from lifetime_tasks import Tasks
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS
@@ -266,6 +267,7 @@ class StatCard(QFrame):
         self.hover = 0.0
         self.number = 0.0
         self.target = None
+        self.formatter = None
         self.effect = RiseEffect(self)
         self.setGraphicsEffect(self.effect)
         self.setMinimumWidth(0)
@@ -310,13 +312,29 @@ class StatCard(QFrame):
         if self.target is not None and formatter(value) != formatter(self.target):
             animate(self, 'value_fade', .65, 1, self.value.set_opacity, 150)
         self.target = value
+        self.formatter = formatter
         self.value.setAccessibleName(formatter(value))
-        def update(value):
-            self.number = value
-            self.value.setText(formatter(value))
-            if self.progress:
-                self.progress.setValue(min(2400, max(0, round(value * 100))))
-        animate(self, 'number_animation', self.number, value, update)
+        animate(self, 'number_animation', self.number, value, self._show_number)
+
+    def _show_number(self, value):
+        self.number = value
+        self.value.setText(self.formatter(value))
+        if self.progress:
+            self.progress.setValue(min(2400, max(0, round(value * 100))))
+
+    def replay_number(self, delay=NUMBER_DELAY):
+        """Count the number up again, starting just after the card's wipe does."""
+        timer = getattr(self, '_replay', None)
+        if timer is not None:
+            timer.stop()
+        if motion_reduced() or self.target is None or self.target <= 0 or getattr(self, 'formatter', None) is None:
+            return
+        self.number = 0.0
+        self._show_number(0.0)
+        self._replay = QTimer(self)
+        self._replay.setSingleShot(True)
+        self._replay.timeout.connect(lambda: animate(self, 'number_animation', 0, self.target, self._show_number, 700))
+        self._replay.start(int(delay))
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -958,6 +976,17 @@ class Window(QWidget):
             frame(0)
             self.page_animation.finished.connect(lambda: page.setGraphicsEffect(None))
         self.reflow()
+        self.reveal_page()
+
+    def reveal_page(self):
+        """Wipe the cards of the page now showing; their numbers count up just behind the wipe."""
+        page = self.pages.currentWidget()
+        if page is None or not self.isVisible():
+            return
+        cards = [f for f in page.findChildren(QFrame) if f.objectName() in ('signalCard', 'insetPanel')]
+        reveal(cards, motion_reduced())
+        for card in page.findChildren(StatCard):
+            card.replay_number()
 
     @property
     def palette_tokens(self):
@@ -1301,10 +1330,13 @@ if __name__ == '__main__':
             pass
     if not (window.tray and '--tray' in sys.argv and previous['completed']):
         window.show()
+        QTimer.singleShot(0, window.reveal_page)      # the first page is uncovered as the window opens
     window.status.setText(tr('Updating history'))
     window._set_export_ready(False)
     window.start_daily_repair()
     if not previous['completed']:
         window.apply_preferences(settings, previous)
         window.start_tracker()
-    sys.exit(app.exec())
+    code = app.exec()
+    shut_down(app, window)
+    sys.exit(code)

@@ -1,5 +1,6 @@
 """Machine accounting uses real temporary SQLite; only Windows ACLs are mocked."""
 import copy
+import errno
 import datetime as dt
 import json
 import os
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from unittest.mock import Mock, patch
 
 import lifetime_agent as agent
@@ -206,7 +208,7 @@ class MachineTests(AgentFixture):
         self.assertEqual(self.machine.ledger()['total_seconds'], 100)
 
     def test_reporting_lock_retries_busy_acquisition_until_success(self):
-        busy = OSError(13, 'sharing violation')
+        busy = OSError(13, 'sharing violation') if sys.platform == 'win32' else OSError(errno.EAGAIN, 'resource busy')
         (self.root / 'reporting.lock').touch()
         entered = []
         real_lock = tracker.file_lock
