@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QHBoxLayout, QLab
                             QStackedWidget, QVBoxLayout, QWidget, QStyle, QStyleOptionButton)
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, QRadioButton
 
-from lifetime_settings import defaults, delete_history, normalize, save_settings
+from lifetime_settings import defaults, delete_history, normalize, save_settings, load_settings, update_settings
 
 CHOICES = (
     ('awake', 'Awake time', 'Required. Counts time while this computer is awake.'),
@@ -171,10 +171,9 @@ class SetupDialog(QDialog):
     def change_language(self, value):
         set_language(value)
         # Language is a preference, not consent to collect data.
-        preference = dict(self.initial, language=value)
         try:
-            save_settings(preference, self.directory)
-        except OSError as error:
+            update_settings({'language': value}, self.directory)
+        except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
         if self.parent() and hasattr(self.parent(), 'switch_language'):
             self.parent().switch_language(value)
@@ -214,7 +213,7 @@ class SetupDialog(QDialog):
     def choices(self):
         value = {key: box.isChecked() for key, box in self.checks.items()}
         value.update({key: yes.isChecked() for key, yes in self.answers.items()})
-        return normalize(dict(value, completed=True, language=language()))
+        return normalize(dict(load_settings(self.directory), **value, completed=True, language=language()))
 
     def go(self, index):
         self.pages.setCurrentIndex(index)

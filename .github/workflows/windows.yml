@@ -67,7 +67,7 @@ jobs:
       - name: Bundle
         run: |
           mkdir -p Lifetime-Linux/assets
-          cp lifetime_*.py install_linux.sh README.md Lifetime-Linux/
+          cp lifetime_*.py install_linux.sh README.md TECHNICIAN_VERIFICATION.md Lifetime-Linux/
           cp assets/lifetime.png Lifetime-Linux/assets/
           chmod +x Lifetime-Linux/install_linux.sh
           tar -czf Lifetime-Linux.tar.gz Lifetime-Linux

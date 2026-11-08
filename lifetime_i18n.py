@@ -295,3 +295,824 @@ for index, name in enumerate(('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')):
     EN['weekday.'+str(index)] = name
     VI['weekday.'+str(index)] = 'T'+str(index+2) if index < 6 else 'CN'
 TABLES = {'en': EN, 'vi': VI}
+
+_RELEASE_TECHNICIAN_VI = {
+    'CSV output requires a .csv filename': 'Tên tệp CSV phải có đuôi .csv',
+    'PDF output requires a .pdf filename': 'Tên tệp PDF phải có đuôi .pdf',
+    'Earliest known date': 'Ngày sớm nhất được biết',
+    'Date source': 'Nguồn của ngày',
+    'OS installation date': 'Ngày cài đặt hệ điều hành',
+    'System file timestamp': 'Dấu thời gian tệp hệ thống',
+    'First observed by Lifetime': 'Lần đầu Lifetime ghi nhận',
+    'Recovered OS log record': 'Bản ghi hệ điều hành khôi phục được',
+    'Unknown source': 'Chưa rõ nguồn',
+    'Days since this date: {days}': 'Số ngày kể từ mốc này: {days}',
+    'Saved sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}': 'Nguồn đã lưu · đo trực tiếp: {measured} · nhật ký: {imported} · số giờ nền nhập tay: {baseline}',
+    'All-data sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}': 'Nguồn toàn bộ dữ liệu · đo trực tiếp: {measured} · nhật ký: {imported} · số giờ nền nhập tay: {baseline}',
+    'Directly measured awake time (seconds)': 'Thời gian thức đo trực tiếp (giây)',
+    'Reconstructed OS history (seconds)': 'Lịch sử khôi phục từ hệ điều hành (giây)',
+    'The PDF page layout is unavailable.': 'Không xác định được bố cục trang PDF.',
+    'PDF generation failed or produced no text.': 'Không tạo được PDF hoặc PDF không có nội dung chữ.',
+    'Awake time is the time the computer was running and awake. It does not measure human activity, component health or remaining lifespan.': 'Thời gian thức là thời gian máy tính đang chạy và không ngủ. Chỉ số này không đo hoạt động của người dùng, tình trạng linh kiện hoặc tuổi thọ còn lại.',
+    'OS date clue; true first use unknown': 'Mốc từ hệ điều hành; chưa rõ lần dùng đầu',
+    'Could not open details': 'Không mở được chi tiết',
+    'Live intervals are split across local days. Boot-time allocation uses retained sleep/resume evidence when available; otherwise its calendar distribution is estimated.': 'Các khoảng ghi trực tiếp được chia theo ngày địa phương. Thời gian khởi động được phân bổ theo bản ghi ngủ/thức còn lưu nếu có; nếu không, phân bố theo ngày là ước tính.',
+    'History collection is disabled in Settings. Dated history and retained session records are excluded, including previously stored records.': 'Thu thập lịch sử đang tắt trong Cài đặt. Báo cáo không gồm lịch sử theo ngày hoặc phiên còn lưu, kể cả bản ghi cũ.',
+    'History collection is disabled in Settings. Dated history is not included in reports.': 'Thu thập lịch sử đang tắt trong Cài đặt. Báo cáo không gồm lịch sử theo ngày.',
+    'System information is disabled in Settings. Export does not change that choice.': 'Thông tin hệ thống đang tắt trong Cài đặt. Xuất báo cáo không thay đổi lựa chọn này.',
+    'Daily allocation includes estimates; exact historical awake intervals cannot be recovered.': 'Phân bổ theo ngày có phần ước tính; không thể khôi phục chính xác các khoảng thức trong quá khứ.',
+    'Verify compares the current boot only. It cannot prove complete historical coverage or recover missing OS logs.': 'Kiểm tra chỉ đối chiếu lần khởi động hiện tại. Kết quả không chứng minh lịch sử đầy đủ hoặc khôi phục được nhật ký hệ điều hành bị thiếu.',
+    'Current-boot Verify difference (seconds)': 'Chênh lệch đối chiếu lần khởi động hiện tại (giây)',
+    'Verify comparison captured': 'Thời điểm đối chiếu Kiểm tra',
+    'Latest Verify (current boot only)': 'Kiểm tra gần nhất (chỉ lần khởi động hiện tại)',
+}
+VI.update(_RELEASE_TECHNICIAN_VI)
+EN.update({key: key for key in _RELEASE_TECHNICIAN_VI})
+
+
+# Optional technician identity, coverage and local report workflow.
+_TECHNICIAN_VI = {'Department / location': 'Phòng ban / vị trí',
+ 'None recorded': 'Chưa có bản ghi',
+ 'Export report': 'Xuất báo cáo',
+ 'Device identity': 'Thông tin nhận diện thiết bị',
+ 'Verify / Coverage details': 'Kiểm tra / Chi tiết dữ liệu',
+ 'Coverage details': 'Chi tiết dữ liệu',
+ 'Display name': 'Tên hiển thị',
+ 'Asset tag': 'Mã tài sản',
+ 'Department': 'Phòng ban',
+ 'Deployment date': 'Ngày đưa vào sử dụng',
+ 'Save': 'Lưu',
+ 'Preview': 'Xem trước',
+ 'Save PDF': 'Lưu PDF',
+ 'Save CSV': 'Lưu CSV',
+ 'All available history': 'Toàn bộ lịch sử hiện có',
+ 'Custom date range (inclusive)': 'Khoảng ngày tùy chọn (gồm cả hai ngày)',
+ 'Start date': 'Ngày bắt đầu',
+ 'End date': 'Ngày kết thúc',
+ 'Include identity fields': 'Kèm thông tin thiết bị',
+ 'Include system fields': 'Kèm thông tin hệ thống',
+ 'Operating system': 'Hệ điều hành',
+ 'OS version': 'Phiên bản hệ điều hành',
+ 'Architecture': 'Kiến trúc',
+ 'Python version': 'Phiên bản Python',
+ 'Directly tracked': 'Ghi trực tiếp',
+ 'Reconstructed from OS records': 'Khôi phục từ bản ghi hệ điều hành',
+ 'Tracked and reconstructed': 'Ghi trực tiếp và khôi phục',
+ 'Partial': 'Một phần',
+ 'Gap observations': 'Các mốc gián đoạn đã ghi',
+ 'Preview the current selection before saving.': 'Xem trước lựa chọn hiện tại trước khi lưu.',
+ 'Preview ready. Choose PDF or CSV to save.': 'Đã có bản xem trước. Chọn PDF hoặc CSV để lưu.',
+ 'Saved data or permissions changed. Review the updated preview, then save again.': 'Dữ liệu hoặc quyền đã '
+                                                                                    'thay đổi. Xem lại bản '
+                                                                                    'xem trước mới rồi lưu '
+                                                                                    'lại.',
+ 'System name': 'Tên hệ thống',
+ 'OS date estimate': 'Ngày hệ điều hành ước tính',
+ 'Optional. Leave blank to omit.': 'Không bắt buộc. Để trống nếu không dùng.',
+ 'Optional date: YYYY-MM-DD': 'Ngày không bắt buộc: YYYY-MM-DD',
+ 'Use an ISO date in YYYY-MM-DD format.': 'Nhập ngày theo định dạng YYYY-MM-DD.',
+ 'Start date must be on or before end date.': 'Ngày bắt đầu phải trước hoặc trùng ngày kết thúc.',
+ 'Could not save settings': 'Không thể lưu cài đặt',
+ 'Could not build report': 'Không thể tạo báo cáo',
+ 'Could not save report': 'Không thể lưu báo cáo',
+ 'Could not read coverage': 'Không thể đọc chi tiết dữ liệu',
+ 'Replace file?': 'Thay thế tệp?',
+ 'This file already exists. Replace it?': 'Tệp này đã tồn tại. Thay thế tệp?',
+ 'Report saved.': 'Đã lưu báo cáo.',
+ 'Choose fields, then preview or save. All fields are excluded by default.': 'Chọn thông tin, rồi xem trước '
+                                                                             'hoặc lưu. Mặc định không kèm '
+                                                                             'thông tin nào.',
+ 'Read-only evidence from saved records. No import or system scan is run.': 'Bằng chứng chỉ đọc từ dữ liệu '
+                                                                            'đã lưu. Không nhập dữ liệu hoặc '
+                                                                            'quét hệ thống.',
+ 'Source': 'Nguồn',
+ 'Status': 'Trạng thái',
+ 'Recording started': 'Bắt đầu ghi nhận',
+ 'Earliest record': 'Bản ghi sớm nhất',
+ 'First record': 'Bản ghi đầu tiên',
+ 'Last record': 'Bản ghi cuối cùng',
+ 'Notes': 'Ghi chú',
+ 'Coverage: {source} · {status}': 'Dữ liệu: {source} · {status}',
+ 'Report export is disabled by consent settings.': 'Cài đặt đồng ý đang tắt chức năng xuất báo cáo.',
+ 'Choose both start and end dates.': 'Chọn cả ngày bắt đầu và ngày kết thúc.',
+ 'Start date must not follow end date.': 'Ngày bắt đầu không được sau ngày kết thúc.',
+ 'Computer Awake-Time Report': 'Báo cáo thời gian máy tính thức',
+ 'Lifetime version': 'Phiên bản Lifetime',
+ 'Created': 'Ngày tạo',
+ 'Selected period': 'Khoảng thời gian đã chọn',
+ 'All available data': 'Tất cả dữ liệu hiện có',
+ 'Selected system information': 'Thông tin hệ thống đã chọn',
+ 'OS release': 'Phiên bản hệ điều hành',
+ 'Awake time (seconds)': 'Thời gian thức (giây)',
+ 'Manual baseline (seconds, not dated)': 'Số giờ nền nhập tay (giây, không có ngày)',
+ 'Retained session starts': 'Số lần bắt đầu phiên còn lưu',
+ 'Longest recorded session (seconds)': 'Phiên đã ghi dài nhất (giây)',
+ 'Observed boots (all available data)': 'Số lần khởi động đã ghi (tất cả dữ liệu)',
+ 'Coverage and sources': 'Phạm vi dữ liệu và nguồn',
+ 'Coverage': 'Phạm vi dữ liệu',
+ 'Recording began (proven timestamp)': 'Bắt đầu ghi (mốc thời gian có bằng chứng)',
+ 'Earliest recovered OS record': 'Bản ghi hệ điều hành sớm nhất khôi phục được',
+ 'First recorded date': 'Ngày có bản ghi đầu tiên',
+ 'Last recorded date': 'Ngày có bản ghi cuối cùng',
+ 'Limitations': 'Giới hạn',
+ 'Retained daily records': 'Bản ghi hằng ngày còn lưu',
+ 'Awake seconds': 'Số giây thức',
+ 'Awake time means the computer was running and awake. It does not measure human activity, productivity, component health or remaining lifespan.': 'Thời '
+                                                                                                                                                   'gian '
+                                                                                                                                                   'thức '
+                                                                                                                                                   'là '
+                                                                                                                                                   'thời '
+                                                                                                                                                   'gian '
+                                                                                                                                                   'máy '
+                                                                                                                                                   'tính '
+                                                                                                                                                   'đang '
+                                                                                                                                                   'chạy '
+                                                                                                                                                   'và '
+                                                                                                                                                   'không '
+                                                                                                                                                   'ngủ. '
+                                                                                                                                                   'Chỉ '
+                                                                                                                                                   'số '
+                                                                                                                                                   'này '
+                                                                                                                                                   'không '
+                                                                                                                                                   'đo '
+                                                                                                                                                   'hoạt '
+                                                                                                                                                   'động '
+                                                                                                                                                   'của '
+                                                                                                                                                   'người '
+                                                                                                                                                   'dùng, '
+                                                                                                                                                   'năng '
+                                                                                                                                                   'suất, '
+                                                                                                                                                   'tình '
+                                                                                                                                                   'trạng '
+                                                                                                                                                   'linh '
+                                                                                                                                                   'kiện '
+                                                                                                                                                   'hoặc '
+                                                                                                                                                   'tuổi '
+                                                                                                                                                   'thọ '
+                                                                                                                                                   'còn '
+                                                                                                                                                   'lại.',
+ 'Coverage cannot be proven complete. Missing or rotated logs, restricted permissions and time without tracking may leave unavailable history.': 'Không '
+                                                                                                                                                 'thể '
+                                                                                                                                                 'xác '
+                                                                                                                                                 'nhận '
+                                                                                                                                                 'dữ '
+                                                                                                                                                 'liệu '
+                                                                                                                                                 'đầy '
+                                                                                                                                                 'đủ. '
+                                                                                                                                                 'Nhật '
+                                                                                                                                                 'ký '
+                                                                                                                                                 'bị '
+                                                                                                                                                 'thiếu '
+                                                                                                                                                 'hoặc '
+                                                                                                                                                 'xoay '
+                                                                                                                                                 'vòng, '
+                                                                                                                                                 'quyền '
+                                                                                                                                                 'truy '
+                                                                                                                                                 'cập '
+                                                                                                                                                 'hạn '
+                                                                                                                                                 'chế '
+                                                                                                                                                 'và '
+                                                                                                                                                 'thời '
+                                                                                                                                                 'gian '
+                                                                                                                                                 'không '
+                                                                                                                                                 'ghi '
+                                                                                                                                                 'có '
+                                                                                                                                                 'thể '
+                                                                                                                                                 'làm '
+                                                                                                                                                 'thiếu '
+                                                                                                                                                 'lịch '
+                                                                                                                                                 'sử.',
+ 'OS dates are observations, not manufacture, purchase or true first-use dates.': 'Ngày từ hệ điều hành là '
+                                                                                  'mốc quan sát, không phải '
+                                                                                  'ngày sản xuất, mua hoặc '
+                                                                                  'sử dụng thực sự đầu tiên.',
+ 'Daily history is retained for up to 400 days; only the last 100 sessions are retained. Previously saved dates are not relabeled after timezone changes.': 'Lịch '
+                                                                                                                                                            'sử '
+                                                                                                                                                            'hằng '
+                                                                                                                                                            'ngày '
+                                                                                                                                                            'được '
+                                                                                                                                                            'giữ '
+                                                                                                                                                            'tối '
+                                                                                                                                                            'đa '
+                                                                                                                                                            '400 '
+                                                                                                                                                            'ngày; '
+                                                                                                                                                            'chỉ '
+                                                                                                                                                            'giữ '
+                                                                                                                                                            '100 '
+                                                                                                                                                            'phiên '
+                                                                                                                                                            'gần '
+                                                                                                                                                            'nhất. '
+                                                                                                                                                            'Ngày '
+                                                                                                                                                            'đã '
+                                                                                                                                                            'lưu '
+                                                                                                                                                            'không '
+                                                                                                                                                            'đổi '
+                                                                                                                                                            'khi '
+                                                                                                                                                            'thay '
+                                                                                                                                                            'đổi '
+                                                                                                                                                            'múi '
+                                                                                                                                                            'giờ.',
+ 'OS reconstruction is limited to retained accessible observations. Missing sleep/resume events, unclean ends and Windows Fast Startup can limit accuracy.': 'Việc '
+                                                                                                                                                             'khôi '
+                                                                                                                                                             'phục '
+                                                                                                                                                             'chỉ '
+                                                                                                                                                             'dựa '
+                                                                                                                                                             'trên '
+                                                                                                                                                             'bản '
+                                                                                                                                                             'ghi '
+                                                                                                                                                             'còn '
+                                                                                                                                                             'lưu '
+                                                                                                                                                             'và '
+                                                                                                                                                             'truy '
+                                                                                                                                                             'cập '
+                                                                                                                                                             'được. '
+                                                                                                                                                             'Thiếu '
+                                                                                                                                                             'sự '
+                                                                                                                                                             'kiện '
+                                                                                                                                                             'ngủ/thức, '
+                                                                                                                                                             'tắt '
+                                                                                                                                                             'máy '
+                                                                                                                                                             'không '
+                                                                                                                                                             'rõ '
+                                                                                                                                                             'ràng '
+                                                                                                                                                             'và '
+                                                                                                                                                             'Khởi '
+                                                                                                                                                             'động '
+                                                                                                                                                             'nhanh '
+                                                                                                                                                             'Windows '
+                                                                                                                                                             'có '
+                                                                                                                                                             'thể '
+                                                                                                                                                             'giảm '
+                                                                                                                                                             'độ '
+                                                                                                                                                             'chính '
+                                                                                                                                                             'xác.',
+ 'No recorded data is available for the selected period. This is not evidence of zero usage.': 'Không có bản '
+                                                                                               'ghi cho '
+                                                                                               'khoảng thời '
+                                                                                               'gian đã '
+                                                                                               'chọn. Điều '
+                                                                                               'này không '
+                                                                                               'chứng minh '
+                                                                                               'máy không '
+                                                                                               'được sử '
+                                                                                               'dụng.',
+ 'The requested range extends outside available recorded dates. Totals include only retained records in the range.': 'Khoảng '
+                                                                                                                     'đã '
+                                                                                                                     'chọn '
+                                                                                                                     'vượt '
+                                                                                                                     'ngoài '
+                                                                                                                     'các '
+                                                                                                                     'ngày '
+                                                                                                                     'có '
+                                                                                                                     'bản '
+                                                                                                                     'ghi. '
+                                                                                                                     'Tổng '
+                                                                                                                     'chỉ '
+                                                                                                                     'gồm '
+                                                                                                                     'bản '
+                                                                                                                     'ghi '
+                                                                                                                     'còn '
+                                                                                                                     'lưu '
+                                                                                                                     'trong '
+                                                                                                                     'khoảng '
+                                                                                                                     'này.',
+ 'Missing dates within the selected range are unavailable, not assumed to be zero.': 'Các ngày thiếu trong '
+                                                                                     'khoảng đã chọn là '
+                                                                                     'không có dữ liệu, '
+                                                                                     'không được coi là bằng '
+                                                                                     'không.',
+ 'Manual baseline hours have no recorded dates and are excluded from period totals.': 'Số giờ nền nhập tay '
+                                                                                      'không có ngày ghi và '
+                                                                                      'được loại khỏi tổng '
+                                                                                      'theo khoảng thời '
+                                                                                      'gian.',
+ 'Session starts are counted from retained records. Exact session durations inside a selected period cannot be reconstructed from aggregate session counters.': 'Số '
+                                                                                                                                                                'lần '
+                                                                                                                                                                'bắt '
+                                                                                                                                                                'đầu '
+                                                                                                                                                                'phiên '
+                                                                                                                                                                'được '
+                                                                                                                                                                'đếm '
+                                                                                                                                                                'từ '
+                                                                                                                                                                'bản '
+                                                                                                                                                                'ghi '
+                                                                                                                                                                'còn '
+                                                                                                                                                                'lưu. '
+                                                                                                                                                                'Không '
+                                                                                                                                                                'thể '
+                                                                                                                                                                'khôi '
+                                                                                                                                                                'phục '
+                                                                                                                                                                'chính '
+                                                                                                                                                                'xác '
+                                                                                                                                                                'thời '
+                                                                                                                                                                'lượng '
+                                                                                                                                                                'phiên '
+                                                                                                                                                                'trong '
+                                                                                                                                                                'khoảng '
+                                                                                                                                                                'đã '
+                                                                                                                                                                'chọn '
+                                                                                                                                                                'từ '
+                                                                                                                                                                'bộ '
+                                                                                                                                                                'đếm '
+                                                                                                                                                                'tổng '
+                                                                                                                                                                'hợp.',
+ 'The all-data awake total includes measured and imported counters, but excludes the separately listed manual baseline. Daily rows may cover a shorter retained span.': 'Tổng '
+                                                                                                                                                                        'thời '
+                                                                                                                                                                        'gian '
+                                                                                                                                                                        'thức '
+                                                                                                                                                                        'gồm '
+                                                                                                                                                                        'bộ '
+                                                                                                                                                                        'đếm '
+                                                                                                                                                                        'đo '
+                                                                                                                                                                        'trực '
+                                                                                                                                                                        'tiếp '
+                                                                                                                                                                        'và '
+                                                                                                                                                                        'nhập '
+                                                                                                                                                                        'từ '
+                                                                                                                                                                        'nhật '
+                                                                                                                                                                        'ký, '
+                                                                                                                                                                        'nhưng '
+                                                                                                                                                                        'không '
+                                                                                                                                                                        'gồm '
+                                                                                                                                                                        'số '
+                                                                                                                                                                        'giờ '
+                                                                                                                                                                        'nền '
+                                                                                                                                                                        'nhập '
+                                                                                                                                                                        'tay '
+                                                                                                                                                                        'được '
+                                                                                                                                                                        'liệt '
+                                                                                                                                                                        'kê '
+                                                                                                                                                                        'riêng. '
+                                                                                                                                                                        'Bảng '
+                                                                                                                                                                        'hằng '
+                                                                                                                                                                        'ngày '
+                                                                                                                                                                        'có '
+                                                                                                                                                                        'thể '
+                                                                                                                                                                        'chỉ '
+                                                                                                                                                                        'bao '
+                                                                                                                                                                        'phủ '
+                                                                                                                                                                        'khoảng '
+                                                                                                                                                                        'ngắn '
+                                                                                                                                                                        'hơn.',
+ 'Only the first 90 daily rows are shown in the preview and PDF. CSV contains every selected retained daily row.': 'Bản '
+                                                                                                                   'xem '
+                                                                                                                   'trước '
+                                                                                                                   'và '
+                                                                                                                   'PDF '
+                                                                                                                   'chỉ '
+                                                                                                                   'hiển '
+                                                                                                                   'thị '
+                                                                                                                   '90 '
+                                                                                                                   'ngày '
+                                                                                                                   'đầu. '
+                                                                                                                   'CSV '
+                                                                                                                   'chứa '
+                                                                                                                   'mọi '
+                                                                                                                   'bản '
+                                                                                                                   'ghi '
+                                                                                                                   'hằng '
+                                                                                                                   'ngày '
+                                                                                                                   'còn '
+                                                                                                                   'lưu '
+                                                                                                                   'trong '
+                                                                                                                   'khoảng '
+                                                                                                                   'đã '
+                                                                                                                   'chọn.',
+ 'Known awake-clock discontinuities were excluded from counting; their missing duration is unknown.': 'Các '
+                                                                                                      'đoạn '
+                                                                                                      'gián '
+                                                                                                      'đoạn '
+                                                                                                      'đồng '
+                                                                                                      'hồ '
+                                                                                                      'thức '
+                                                                                                      'đã '
+                                                                                                      'được '
+                                                                                                      'loại '
+                                                                                                      'khỏi '
+                                                                                                      'phép '
+                                                                                                      'đếm; '
+                                                                                                      'không '
+                                                                                                      'biết '
+                                                                                                      'thời '
+                                                                                                      'lượng '
+                                                                                                      'bị '
+                                                                                                      'thiếu.',
+ 'Clock changes were observed. Calendar attribution may be ambiguous; awake-clock totals were not adjusted using wall time.': 'Đã '
+                                                                                                                              'phát '
+                                                                                                                              'hiện '
+                                                                                                                              'thay '
+                                                                                                                              'đổi '
+                                                                                                                              'đồng '
+                                                                                                                              'hồ. '
+                                                                                                                              'Việc '
+                                                                                                                              'gán '
+                                                                                                                              'ngày '
+                                                                                                                              'có '
+                                                                                                                              'thể '
+                                                                                                                              'không '
+                                                                                                                              'rõ '
+                                                                                                                              'ràng; '
+                                                                                                                              'tổng '
+                                                                                                                              'thời '
+                                                                                                                              'gian '
+                                                                                                                              'thức '
+                                                                                                                              'không '
+                                                                                                                              'được '
+                                                                                                                              'điều '
+                                                                                                                              'chỉnh '
+                                                                                                                              'theo '
+                                                                                                                              'giờ '
+                                                                                                                              'hệ '
+                                                                                                                              'thống.',
+ 'No proven recording-start timestamp was saved by this installation.': 'Bản cài đặt này không lưu mốc bắt '
+                                                                        'đầu ghi có bằng chứng.',
+ 'Known gap observations (timestamps; duration unknown)': 'Mốc quan sát gián đoạn (không rõ thời lượng)',
+ 'Dates use saved local calendar labels; creation time includes the current UTC offset. Durations are seconds, not proof of continuous coverage.': 'Ngày '
+                                                                                                                                                   'dùng '
+                                                                                                                                                   'nhãn '
+                                                                                                                                                   'ngày '
+                                                                                                                                                   'địa '
+                                                                                                                                                   'phương '
+                                                                                                                                                   'đã '
+                                                                                                                                                   'lưu; '
+                                                                                                                                                   'thời '
+                                                                                                                                                   'điểm '
+                                                                                                                                                   'tạo '
+                                                                                                                                                   'có '
+                                                                                                                                                   'độ '
+                                                                                                                                                   'lệch '
+                                                                                                                                                   'UTC '
+                                                                                                                                                   'hiện '
+                                                                                                                                                   'tại. '
+                                                                                                                                                   'Thời '
+                                                                                                                                                   'lượng '
+                                                                                                                                                   'tính '
+                                                                                                                                                   'bằng '
+                                                                                                                                                   'giây, '
+                                                                                                                                                   'không '
+                                                                                                                                                   'chứng '
+                                                                                                                                                   'minh '
+                                                                                                                                                   'dữ '
+                                                                                                                                                   'liệu '
+                                                                                                                                                   'liên '
+                                                                                                                                                   'tục.',
+ 'Recording-start and earliest recovered dates describe this installation. Period totals use only selected retained date buckets.': 'Ngày '
+                                                                                                                                    'bắt '
+                                                                                                                                    'đầu '
+                                                                                                                                    'ghi '
+                                                                                                                                    'và '
+                                                                                                                                    'ngày '
+                                                                                                                                    'khôi '
+                                                                                                                                    'phục '
+                                                                                                                                    'sớm '
+                                                                                                                                    'nhất '
+                                                                                                                                    'mô '
+                                                                                                                                    'tả '
+                                                                                                                                    'bản '
+                                                                                                                                    'cài '
+                                                                                                                                    'đặt '
+                                                                                                                                    'này. '
+                                                                                                                                    'Tổng '
+                                                                                                                                    'theo '
+                                                                                                                                    'khoảng '
+                                                                                                                                    'thời '
+                                                                                                                                    'gian '
+                                                                                                                                    'chỉ '
+                                                                                                                                    'dùng '
+                                                                                                                                    'các '
+                                                                                                                                    'ngày '
+                                                                                                                                    'còn '
+                                                                                                                                    'lưu '
+                                                                                                                                    'đã '
+                                                                                                                                    'chọn.'}
+for _key, _text in _TECHNICIAN_VI.items():
+    VI.setdefault(_key, _text)
+    EN.setdefault(_key, _key)
+EN['Location'] = 'Location'
+VI['Location'] = 'Vị trí'
+for _key, _text in {
+    'Updating history': 'Đang cập nhật lịch sử',
+    'History updated': 'Đã cập nhật lịch sử',
+    'History update failed': 'Cập nhật lịch sử không thành công',
+    'Calendar history could not be updated. Restart Lifetime to retry. Report export remains unavailable.': 'Không thể cập nhật lịch sử theo ngày. Khởi động lại Lifetime để thử lại. Chức năng xuất báo cáo hiện chưa khả dụng.',
+}.items():
+    EN[_key] = _key
+    VI[_key] = _text
+_SERVER_VI = {
+    'Report scope': 'Phạm vi báo cáo',
+    'One server device': 'Một máy tính trên máy chủ',
+    'Fleet summary': 'Tổng hợp các máy tính',
+    'Client observation time': 'Thời điểm ghi nhận trên máy tính',
+    'Server receipt time': 'Thời điểm máy chủ nhận dữ liệu',
+    'System reading time': 'Thời điểm ghi nhận thông tin hệ thống',
+    'Selected devices': 'Số máy tính đã chọn',
+    'Devices with available totals': 'Số máy có tổng thời gian khả dụng',
+    'Devices with unavailable totals': 'Số máy không có tổng thời gian khả dụng',
+    'Device awake seconds': 'Thời gian máy chạy và thức (giây)',
+    'Device': 'Máy tính',
+    'Server reports use the latest permitted client snapshot. Missing dates are unavailable, not evidence of zero usage.': 'Báo cáo máy chủ dùng bản ghi gần nhất được phép từ máy tính. Ngày thiếu dữ liệu là không khả dụng, không có nghĩa thời gian sử dụng bằng không.',
+    'The server receipt time and the client observation time are different. A stopped report stream does not prove shutdown or sleep.': 'Thời điểm máy chủ nhận và thời điểm máy tính ghi nhận là khác nhau. Ngừng nhận báo cáo không chứng minh máy đã tắt hoặc ngủ.',
+    'Daily labels use the recording computer’s saved local dates. Clock and timezone changes can affect calendar attribution.': 'Nhãn ngày dùng ngày địa phương đã lưu trên máy ghi nhận. Thay đổi đồng hồ và múi giờ có thể ảnh hưởng việc phân bổ theo ngày.',
+    'Session statistics were not transmitted and are not available.': 'Thống kê phiên không được truyền và không khả dụng.',
+    'Server retention removed earlier detail; the latest cumulative snapshot can describe a longer period than retained daily rows.': 'Chính sách lưu giữ trên máy chủ đã xóa chi tiết cũ; tổng tích lũy gần nhất có thể bao gồm khoảng thời gian dài hơn các ngày còn lưu.',
+    'Fleet totals sum one latest snapshot per selected device, never overlapping cumulative snapshots. Devices without available totals are excluded from the known subtotal.': 'Tổng nhóm máy cộng một bản ghi tích lũy gần nhất của mỗi máy đã chọn. Các máy không có tổng khả dụng được loại khỏi tổng phụ đã biết.',
+    'Fleet daily rows sum matching device-local date labels; different timezones do not describe one shared UTC day. Missing contributions remain unavailable.': 'Các dòng theo ngày cộng những nhãn ngày địa phương trùng nhau trên từng máy; các múi giờ khác nhau không đại diện cho cùng một ngày UTC. Phần dữ liệu thiếu vẫn không khả dụng.',
+    'Coverage is unknown. Summing devices does not establish continuous recording, productivity or hardware condition.': 'Chưa xác định độ bao phủ. Cộng dữ liệu các máy không chứng minh việc ghi nhận liên tục, năng suất hay tình trạng phần cứng.',
+}
+for _key, _text in _SERVER_VI.items():
+    EN[_key] = _key
+    VI[_key] = _text
+_COMPANY_VI = {
+    'Company server': 'Máy chủ công ty',
+    'Company reporting is optional. Standalone Lifetime sends no company-server requests.': 'Báo cáo về công ty là tùy chọn. Lifetime độc lập không gửi yêu cầu đến máy chủ công ty.',
+    'Pairing sends awake-time totals to the selected server. History and system information are optional. No employee account is required.': 'Ghép nối gửi tổng thời gian máy chạy và thức đến máy chủ đã chọn. Lịch sử và thông tin hệ thống là tùy chọn. Nhân viên không cần tài khoản.',
+    'Reading local status…': 'Đang đọc trạng thái trên máy…',
+    'Enrollment bundle': 'Gói ghép nối',
+    'Paste an enrollment bundle or open its file.': 'Dán gói ghép nối hoặc mở tệp chứa gói.',
+    'Open enrollment file': 'Mở tệp ghép nối',
+    'Send dated awake-time history': 'Gửi lịch sử thời gian chạy và thức theo ngày',
+    'Send basic system information': 'Gửi thông tin hệ thống cơ bản',
+    'Include saved device identity when pairing': 'Kèm thông tin nhận diện máy đã lưu khi ghép nối',
+    'Enable reporting to this company server': 'Bật báo cáo đến máy chủ công ty này',
+    'Review the server address and fingerprint before pairing.': 'Kiểm tra địa chỉ máy chủ và dấu vân tay chứng chỉ trước khi ghép nối.',
+    'Pair computer': 'Ghép nối máy tính',
+    'Check enrollment': 'Kiểm tra ghép nối',
+    'Refresh local status': 'Làm mới trạng thái trên máy',
+    'Stop company reporting': 'Dừng báo cáo về công ty',
+    'Pairing and reporting changes require a technician with administrator rights. Install the machine-agent startup task for background recording and reporting.': 'Ghép nối và thay đổi báo cáo cần kỹ thuật viên có quyền quản trị. Cài tác vụ khởi động của bộ ghi máy để ghi nhận và báo cáo trong nền.',
+    'Stopping reporting prevents future requests. Data already stored on the server must be managed by its administrator or retention policy.': 'Dừng báo cáo sẽ ngăn các yêu cầu tiếp theo. Dữ liệu đã lưu trên máy chủ cần được quản trị viên hoặc chính sách lưu giữ của máy chủ xử lý.',
+    'Server: {server}\nCertificate SHA-256: {fingerprint}': 'Máy chủ: {server}\nSHA-256 chứng chỉ: {fingerprint}',
+    'Enter a valid enrollment bundle to review the server.': 'Nhập gói ghép nối hợp lệ để kiểm tra máy chủ.',
+    'Reporting enabled': 'Đã bật báo cáo',
+    'Server address': 'Địa chỉ máy chủ',
+    'Reporting status': 'Trạng thái báo cáo',
+    'Last successful sync': 'Lần đồng bộ thành công gần nhất',
+    'Pending records': 'Bản ghi chờ gửi',
+    'Discarded records': 'Bản ghi đã loại bỏ',
+    'Company reporting could not be updated. Check administrator access, the server address and its connection, then try again.': 'Không thể cập nhật báo cáo về công ty. Kiểm tra quyền quản trị, địa chỉ máy chủ và kết nối rồi thử lại.',
+    'All files (*)': 'Tất cả tệp (*)',
+    'disabled': 'Đã tắt', 'enrolling': 'Đang gửi yêu cầu ghép nối',
+    'pending': 'Chờ phê duyệt', 'approved': 'Đã phê duyệt', 'connected': 'Đã kết nối',
+    'offline': 'Ngoại tuyến', 'denied': 'Bị từ chối', 'revoked': 'Đã thu hồi',
+}
+for _key, _text in _COMPANY_VI.items():
+    EN[_key] = _key
+    VI[_key] = _text
+for _key, _text in {
+    'Server exports use current reporting permissions. Optional system fields remain excluded unless selected and permitted by the device.': 'Báo cáo máy chủ dùng quyền báo cáo hiện tại. Các trường hệ thống tùy chọn chỉ được kèm khi đã chọn và máy tính cho phép.',
+    'Preparing report…': 'Đang chuẩn bị báo cáo…',
+    'Could not export the server report. Check the local service, administrator access and output folder, then try again.': 'Không thể xuất báo cáo máy chủ. Kiểm tra dịch vụ trên máy, quyền quản trị và thư mục lưu rồi thử lại.',
+    'unreachable': 'Không thể liên lạc', 'conflict': 'Xung đột dữ liệu',
+}.items():
+    EN[_key] = _key
+    VI[_key] = _text
+
+SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
+ 'Devices': 'Thiết bị',
+ 'Administration': 'Quản trị',
+ 'Refresh': 'Làm mới',
+ 'Language': 'Ngôn ngữ',
+ 'Local administration': 'Quản trị cục bộ',
+ 'Loading…': 'Đang tải…',
+ 'Ready': 'Sẵn sàng',
+ 'Request failed. Check the service, admin port and administrator permissions, then refresh.': 'Yêu '
+                                                                                               'cầu '
+                                                                                               'thất '
+                                                                                               'bại. '
+                                                                                               'Kiểm '
+                                                                                               'tra '
+                                                                                               'dịch '
+                                                                                               'vụ, '
+                                                                                               'cổng '
+                                                                                               'quản '
+                                                                                               'trị '
+                                                                                               'và '
+                                                                                               'quyền '
+                                                                                               'quản '
+                                                                                               'trị '
+                                                                                               'viên, '
+                                                                                               'rồi '
+                                                                                               'làm '
+                                                                                               'mới.',
+ 'Working…': 'Đang xử lý…',
+ 'Changes saved.': 'Đã lưu thay đổi.',
+ 'Loaded page only; filters apply. Counts are not fleet totals.': 'Chỉ trang đã tải, có áp dụng bộ '
+                                                                  'lọc. Số lượng không phải tổng '
+                                                                  'toàn bộ thiết bị.',
+ 'Loaded devices': 'Thiết bị đã tải',
+ 'Reporting': 'Đang báo cáo',
+ 'Report overdue': 'Quá hạn báo cáo',
+ 'Pending approval': 'Chờ phê duyệt',
+ 'Revoked': 'Đã thu hồi',
+ 'Approved': 'Đã phê duyệt',
+ 'Denied': 'Đã từ chối',
+ 'Unavailable': 'Chưa có dữ liệu',
+ 'All statuses': 'Tất cả trạng thái',
+ 'Search': 'Tìm kiếm',
+ 'Search name or asset tag': 'Tìm tên hoặc mã tài sản',
+ 'Group': 'Nhóm',
+ 'All groups (exact department filter)': 'Tất cả nhóm (lọc chính xác phòng ban)',
+ 'Status': 'Trạng thái',
+ 'Page size': 'Số dòng mỗi trang',
+ 'Previous': 'Trước',
+ 'Next': 'Tiếp',
+ 'Page {page} · {count} devices': 'Trang {page} · {count} thiết bị',
+ 'Last report received': 'Lần nhận báo cáo gần nhất',
+ 'Device ID': 'Mã thiết bị',
+ 'No devices match. Create a pairing code in Administration to enroll a computer.': 'Không có '
+                                                                                    'thiết bị phù '
+                                                                                    'hợp. Tạo mã '
+                                                                                    'ghép nối '
+                                                                                    'trong Quản '
+                                                                                    'trị để đăng '
+                                                                                    'ký máy tính.',
+ 'Select a device to view its usage, permissions and server-owned identity.': 'Chọn thiết bị để '
+                                                                              'xem thời gian sử '
+                                                                              'dụng, quyền và '
+                                                                              'thông tin do máy '
+                                                                              'chủ quản lý.',
+ 'Device details': 'Chi tiết thiết bị',
+ 'Server-owned identity': 'Thông tin do máy chủ quản lý',
+ 'Save identity': 'Lưu thông tin',
+ 'Revoke credential': 'Thu hồi thông tin xác thực',
+ 'Enrollment requests': 'Yêu cầu đăng ký',
+ 'Approve': 'Phê duyệt',
+ 'Deny': 'Từ chối',
+ 'Export selected': 'Xuất thiết bị đã chọn',
+ 'Export fleet': 'Xuất toàn bộ thiết bị',
+ 'Usage snapshots (hours; never added together)': 'Thời gian tích lũy (giờ; không cộng các bản '
+                                                  'chụp)',
+ 'Measured': 'Đo trực tiếp',
+ 'Imported': 'Nhập từ nhật ký',
+ 'Baseline': 'Ước tính ban đầu',
+ 'Coverage': 'Độ đầy đủ',
+ 'Unknown': 'Chưa xác định',
+ 'Not available': 'Chưa có dữ liệu',
+ 'Optional system readings': 'Thông tin hệ thống tùy chọn',
+ 'Not permitted': 'Không được cho phép',
+ 'Observed at': 'Thời điểm ghi nhận',
+ 'Received at': 'Thời điểm nhận',
+ 'Current report': 'Báo cáo hiện tại',
+ 'Stale report': 'Báo cáo đã cũ',
+ 'Reading age is unknown.': 'Chưa xác định độ cũ của thông tin.',
+ 'Optional history': 'Lịch sử tùy chọn',
+ 'Available': 'Có dữ liệu',
+ 'Pair a computer': 'Ghép nối máy tính',
+ 'Server HTTPS address': 'Địa chỉ HTTPS của máy chủ',
+ 'Code lifetime (seconds)': 'Thời hạn mã (giây)',
+ 'Allowed uses': 'Số lần sử dụng',
+ 'Create enrollment bundle': 'Tạo gói đăng ký',
+ 'Enrollment bundle': 'Gói đăng ký',
+ 'Share this bundle only with the technician pairing the computer. Approval is still required.': 'Chỉ '
+                                                                                                 'chia '
+                                                                                                 'sẻ '
+                                                                                                 'gói '
+                                                                                                 'này '
+                                                                                                 'với '
+                                                                                                 'kỹ '
+                                                                                                 'thuật '
+                                                                                                 'viên '
+                                                                                                 'ghép '
+                                                                                                 'nối '
+                                                                                                 'máy '
+                                                                                                 'tính. '
+                                                                                                 'Vẫn '
+                                                                                                 'cần '
+                                                                                                 'phê '
+                                                                                                 'duyệt.',
+ 'Expires at {time}': 'Hết hạn lúc {time}',
+ 'Retention': 'Lưu giữ dữ liệu',
+ 'Delete records before (UTC)': 'Xóa bản ghi trước ngày (UTC)',
+ 'Apply retention': 'Áp dụng thời hạn lưu',
+ 'Backup and restore': 'Sao lưu và khôi phục',
+ 'Save backup': 'Lưu bản sao',
+ 'Restore backup': 'Khôi phục bản sao',
+ 'Restore invalidates every device credential, pairing code and polling token. Computers must enroll again.': 'Khôi '
+                                                                                                              'phục '
+                                                                                                              'vô '
+                                                                                                              'hiệu '
+                                                                                                              'hóa '
+                                                                                                              'mọi '
+                                                                                                              'thông '
+                                                                                                              'tin '
+                                                                                                              'xác '
+                                                                                                              'thực '
+                                                                                                              'thiết '
+                                                                                                              'bị, '
+                                                                                                              'mã '
+                                                                                                              'ghép '
+                                                                                                              'nối '
+                                                                                                              'và '
+                                                                                                              'mã '
+                                                                                                              'thăm '
+                                                                                                              'dò. '
+                                                                                                              'Máy '
+                                                                                                              'tính '
+                                                                                                              'phải '
+                                                                                                              'đăng '
+                                                                                                              'ký '
+                                                                                                              'lại.',
+ 'Continue?': 'Tiếp tục?',
+ 'Delete older records permanently? Latest totals remain, with their original timestamps.': 'Xóa '
+                                                                                            'vĩnh '
+                                                                                            'viễn '
+                                                                                            'các '
+                                                                                            'bản '
+                                                                                            'ghi '
+                                                                                            'cũ? '
+                                                                                            'Tổng '
+                                                                                            'gần '
+                                                                                            'nhất '
+                                                                                            'vẫn '
+                                                                                            'được '
+                                                                                            'giữ '
+                                                                                            'cùng '
+                                                                                            'thời '
+                                                                                            'điểm '
+                                                                                            'gốc.',
+ 'Immediately reject this device credential? Re-enrollment requires approval.': 'Từ chối ngay '
+                                                                                'thông tin xác '
+                                                                                'thực của thiết '
+                                                                                'bị? Đăng ký lại '
+                                                                                'cần phê duyệt.',
+ 'Identity is invalid. Use an optional YYYY-MM-DD deployment date.': 'Thông tin không hợp lệ. Ngày '
+                                                                     'đưa vào sử dụng là tùy chọn, '
+                                                                     'theo dạng NNNN-TT-NN.',
+ 'SQLite backups (*.sqlite *.db);;All files (*)': 'Bản sao SQLite (*.sqlite *.db);;Tất cả tệp (*)',
+ 'Export could not open. Check the reporting components and try again.': 'Không thể mở chức năng '
+                                                                         'xuất. Kiểm tra các thành '
+                                                                         'phần báo cáo rồi thử '
+                                                                         'lại.',
+ 'Pending requests': 'Yêu cầu đang chờ',
+ 'System': 'Hệ thống',
+ 'Release': 'Phiên bản hệ thống',
+ 'Machine': 'Kiến trúc',
+ 'Python version': 'Phiên bản Python',
+ 'Reporting interval (seconds)': 'Khoảng thời gian báo cáo (giây)',
+ 'Save reporting interval': 'Lưu khoảng thời gian báo cáo',
+ 'Request fresh report': 'Yêu cầu báo cáo mới',
+ 'A request is delivered on the next sync; this does not contact or control the computer.': 'Yêu '
+                                                                                            'cầu '
+                                                                                            'được '
+                                                                                            'gửi '
+                                                                                            'trong '
+                                                                                            'lần '
+                                                                                            'đồng '
+                                                                                            'bộ '
+                                                                                            'tiếp '
+                                                                                            'theo; '
+                                                                                            'không '
+                                                                                            'kết '
+                                                                                            'nối '
+                                                                                            'hoặc '
+                                                                                            'điều '
+                                                                                            'khiển '
+                                                                                            'máy '
+                                                                                            'tính.',
+ 'Interval not loaded. Refresh to retry.': 'Chưa tải được khoảng thời gian. Làm mới để thử lại.',
+ 'No pending requests': 'Không có yêu cầu đang chờ',
+ 'Configuration': 'Cấu hình',
+ 'No report has been received.': 'Chưa nhận được báo cáo nào.',
+ 'Current boundary (UTC): {time}': 'Mốc lưu giữ hiện tại (UTC): {time}',
+ 'All devices': 'Tất cả thiết bị',
+ 'Fleet overview; independent of the device search and filters.': 'Tổng quan toàn bộ thiết bị; độc '
+                                                                  'lập với tìm kiếm và bộ lọc '
+                                                                  'thiết bị.',
+ 'Latest cumulative snapshots (hours)': 'Tổng tích lũy gần nhất (giờ)',
+ 'One latest snapshot per device; snapshots are not added over time.': 'Một bản chụp gần nhất cho '
+                                                                       'mỗi thiết bị; không cộng '
+                                                                       'các bản chụp theo thời '
+                                                                       'gian.',
+ '{known} devices have snapshots; {unknown} have no snapshot. Totals include known devices only.': '{known} '
+                                                                                                   'thiết '
+                                                                                                   'bị '
+                                                                                                   'có '
+                                                                                                   'bản '
+                                                                                                   'chụp; '
+                                                                                                   '{unknown} '
+                                                                                                   'thiết '
+                                                                                                   'bị '
+                                                                                                   'chưa '
+                                                                                                   'có. '
+                                                                                                   'Tổng '
+                                                                                                   'chỉ '
+                                                                                                   'gồm '
+                                                                                                   'thiết '
+                                                                                                   'bị '
+                                                                                                   'có '
+                                                                                                   'dữ '
+                                                                                                   'liệu.',
+ 'Recent events': 'Sự kiện gần đây',
+ 'Event': 'Sự kiện',
+ 'Time': 'Thời điểm',
+ 'Report received': 'Đã nhận báo cáo',
+ 'Enrollment pending': 'Đăng ký đang chờ',
+ 'Service available · schema {version} · server time {time}': 'Dịch vụ khả dụng · cấu trúc '
+                                                              '{version} · thời gian máy chủ '
+                                                              '{time}',
+ 'Overview unavailable. Showing the last successful data, if any.': 'Không tải được tổng quan. '
+                                                                    'Hiển thị dữ liệu tải thành '
+                                                                    'công gần nhất, nếu có.'}
+for _key, _text in SERVER_DASHBOARD_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)

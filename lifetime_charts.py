@@ -646,6 +646,8 @@ class Insights(QWidget):
         box.addLayout(row)
         self.scope = caption('')
         box.addWidget(self.scope)
+        self.sources = caption('')
+        box.addWidget(self.sources)
         self.grid = QGridLayout()
         self.grid.setSpacing(16)
         box.addLayout(self.grid)
@@ -716,6 +718,11 @@ class Insights(QWidget):
         selected = filter_range(daily, start, end)
         scope = tr('date.range', start=date_text(start), end=date_text(end))
         self.scope.setText(tr('scope', start=date_text(start), end=date_text(end), days=len(selected), duration=hm(sum(selected.values()))))
+        from lifetime_reports import source_totals
+        totals = source_totals(ledger)
+        shown = lambda value: hm(value) if value is not None else tr('Not available')
+        self.sources.setText(tr('All-data sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}',
+            measured=shown(totals['measured_seconds']), imported=shown(totals['imported_seconds']), baseline=shown(totals['baseline_seconds'])))
         estimated = (ledger.get('daily_repair') or {}).get('estimated') or (ledger.get('daily_allocation') or {}).get('estimated')
         provenance = tr('history.estimated') if estimated else tr('history.logged') if ledger.get('daily_repair_version') or ledger.get('daily_allocation') else ''
         self.note.setText(tr('history.note')+('\n'+provenance if provenance else ''))

@@ -7,3 +7,8 @@ build/
 dist/
 package/
 *.spec
+.qa/
+.venv-server/
+server-package-*/
+/docs/IMPLEMENTATION_STATUS.md
+/Lifetime-*-local.zip

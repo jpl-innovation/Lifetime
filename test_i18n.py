@@ -67,7 +67,8 @@ class LiveLanguageTests(unittest.TestCase):
             ledger = tracker.new_ledger()
             ledger['daily'] = {dt.date.today().isoformat(): 3600}
             tracker.atomic_json(Path(root)/'ledger.json', ledger)
-            window = gui.Window(settings.normalize(dict(completed=True, history=True, battery=True, language='en')))
+            settings.save_settings(dict(completed=True, history=True, battery=True, language='en'), root)
+            window = gui.Window(settings.load_settings(root))
             window.worker.timer.stop()
             window.timer.stop()
             window.resize(760, 560)
@@ -86,7 +87,7 @@ class LiveLanguageTests(unittest.TestCase):
             self.assertEqual(self.app.translate('QPlatformTheme', '&Yes'), '&Có')
             self.assertEqual(window.history.ranges.itemText(0), '30 ngày')
             self.assertEqual(window.history.cards[0].table.horizontalHeaderItem(0).text(), 'Ngày địa phương')
-            self.assertTrue(any(label.text() == 'Ngày bắt đầu sử dụng' for label in window.findChildren(QLabel)))
+            self.assertTrue(any(label.text() == str(i18n.tr('Earliest known date')) for label in window.findChildren(QLabel)))
             self.assertEqual(settings.load_settings(root)['language'], 'vi')
             self.assertGreaterEqual(window.language_control.group.button(1).width(), 40)
             window.scroll.verticalScrollBar().setValue(window.scroll.verticalScrollBar().maximum())

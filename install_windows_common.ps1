@@ -37,7 +37,9 @@ if ($ExePackage) {
 } else {
     $Names = @('lifetime_tracker.py', 'lifetime_gui.py', 'lifetime_signals.py', 'lifetime_dashboard.py',
                'lifetime_settings.py', 'lifetime_setup.py', 'lifetime_import.py', 'lifetime_import_windows.py',
-               'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py')
+               'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py',
+               'lifetime_reports.py', 'lifetime_technician.py', 'lifetime_ledger.py', 'lifetime_identity.py', 'lifetime_theme.py',
+               'lifetime_tasks.py', 'lifetime_company.py', 'lifetime_agent.py', 'lifetime_client.py', 'lifetime_protocol.py', 'lifetime_tls.py', 'lifetime_permissions.py')
 }
 foreach ($Name in $Names) {
     $Source = Join-Path $PSScriptRoot $Name

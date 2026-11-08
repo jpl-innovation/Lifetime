@@ -9,6 +9,7 @@ import subprocess
 import sys
 import statistics
 import time
+import platform
 
 from PyQt6.QtCore import QEvent, Qt, QTimer, QRectF, QVariantAnimation, QEasingCurve, QPointF, QProcess
 from PyQt6.QtGui import QColor, QIcon, QPalette, QPainter, QPen, QFont
@@ -17,20 +18,18 @@ from PyQt6.QtWidgets import (QApplication, QAbstractSpinBox, QDoubleSpinBox,
                             QProgressBar, QPushButton, QButtonGroup, QToolTip, QScrollArea, QVBoxLayout, QWidget)
 from PyQt6.QtWidgets import QSizePolicy
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QDoubleSpinBox
-from lifetime_tracker import average_awake, data_dir, read_ledger, set_baseline, repair_daily
+from lifetime_tracker import average_awake, data_dir, read_ledger, set_baseline, repair_daily, awake_clock, MAX_DELTA
 from lifetime_i18n import duration
 from lifetime_dashboard import ProbeWorker, SystemDashboard, RefreshGlyph
 from lifetime_charts import Insights
-from lifetime_settings import load_settings, save_settings
+from lifetime_settings import load_settings, save_settings, update_settings
 from lifetime_setup import SetupDialog, configure_login
+from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
+from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
+from lifetime_company import CompanyDialog
+from lifetime_tasks import Tasks
 
-THEMES = {
-    'dark': dict(bg='#0B1426', card='#12203A', text='#FFFFFF',
-                 muted='#9FB0CC', border='#22345A', accent='#FFC93C', accent_hover='#FFD761', track='#1B2A46'),
-    # Retained for callers that inspect available legacy theme keys; never selected.
-    'light': dict(bg='#F3F4F1', card='#FCFCFA', text='#252D2D',
-                  muted='#626E6C', border='#D8DEDA', accent='#52796D', track='#E1E6E1'),
-}
+from lifetime_theme import THEMES
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
@@ -47,7 +46,7 @@ def format_gap(seconds):
     return f'{minutes} m {secs:02d} s' if minutes else f'{secs} s'
 
 
-def animate(owner, name, start, end, callback, milliseconds=360):
+def animate(owner, name, start, end, callback, milliseconds=150):
     previous = getattr(owner, name, None)
     if previous is not None:
         previous.stop()
@@ -290,7 +289,7 @@ class StatCard(QFrame):
         if value == self.target:
             return
         if self.target is not None and formatter(value) != formatter(self.target):
-            animate(self, 'value_fade', .65, 1, self.value.set_opacity, 180)
+            animate(self, 'value_fade', .65, 1, self.value.set_opacity, 150)
         self.target = value
         self.value.setAccessibleName(formatter(value))
         def update(value):
@@ -449,6 +448,8 @@ class Window(QWidget):
     def __init__(self, settings=None):
         super().__init__()
         self.settings = settings if settings is not None else load_settings(data_dir())
+        self.last_verification = None
+        self.daily_repair_complete = True
         set_language(self.settings.get('language', language()))
         self.theme = None
         self.initialized = False
@@ -505,6 +506,9 @@ class Window(QWidget):
         page_layout.addWidget(self.overview)
         layout = overview_layout
         self.hero = Hero()
+        self.source_breakdown = label('', 'caption')
+        self.source_breakdown.setWordWrap(True)
+        self.source_breakdown.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         total_row = QHBoxLayout()
         total_row.addWidget(self.hero, 1)
         self.verify_glyph = RefreshGlyph()
@@ -515,6 +519,7 @@ class Window(QWidget):
         total_row.addWidget(self.verify_glyph)
         total_row.addWidget(self.verify_button)
         layout.addLayout(total_row)
+        layout.addWidget(self.source_breakdown)
         self.verification = label(tr('verify.intro', log=self.log_name), 'caption')
         self.verification.setWordWrap(True)
         layout.addWidget(self.verification)
@@ -524,7 +529,7 @@ class Window(QWidget):
         grid.setSpacing(16)
         self.cards = {}
         for i, (key, title, kind) in enumerate((
-            ('first', tr('First used'), 'calendar'), ('boots', tr('Boots observed'), 'restart'),
+            ('first', tr('Earliest known date'), 'calendar'), ('boots', tr('Boots observed'), 'restart'),
             ('current', tr('Current session'), 'clock'), ('longest', tr('Longest session'), 'longest'),
             ('average', tr('Average awake / day'), 'average'))):
             card = StatCard(tr(title), kind, i == 4)
@@ -535,6 +540,9 @@ class Window(QWidget):
         layout.addLayout(grid)
         note = label(tr('Sleep and hibernation are not counted.'), 'caption')
         note.setWordWrap(True)
+        self.awake_note = label(tr('Awake time is the time the computer was running and awake. It does not measure human activity, component health or remaining lifespan.'), 'caption')
+        self.awake_note.setWordWrap(True)
+        layout.addWidget(self.awake_note)
         actions = QHBoxLayout()
         actions.addWidget(note, 1)
         self.import_toggle = QPushButton(tr('+  Import starting hours'))
@@ -582,6 +590,29 @@ class Window(QWidget):
         self.start.clicked.connect(self.start_tracker)
         tracker.addWidget(self.start)
         layout.addLayout(tracker)
+        self.device_name = label('', 'caption')
+        self.device_name.setWordWrap(True)
+        self.device_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.device_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.device_name)
+        self.coverage_summary = label('', 'caption')
+        self.coverage_summary.setWordWrap(True)
+        layout.addWidget(self.coverage_summary)
+        self.technician_actions = {}
+        technician = QGridLayout()
+        for index, (text, dialog) in enumerate((('Device identity', IdentityDialog),
+                                               ('Export report', ExportDialog), ('Coverage details', CoverageDialog),
+                                               ('Company server', CompanyDialog))):
+            button = QPushButton(tr(text))
+            button.setAccessibleName(tr(text))
+            button.clicked.connect(lambda checked=False, cls=dialog: self.open_technician(cls))
+            technician.addWidget(button, index//2, index%2)
+            self.technician_actions[text] = button
+        layout.addLayout(technician)
+        self.repair_notice = label('', 'caption')
+        self.repair_notice.setWordWrap(True)
+        self.repair_notice.hide()
+        layout.addWidget(self.repair_notice)
         self.apply_theme()
         QApplication.instance().paletteChanged.connect(self.apply_theme)
         self.refresh()
@@ -595,16 +626,45 @@ class Window(QWidget):
         self.apply_visibility()
         on_language_change(self.retranslate_content)
 
+    def start_daily_repair(self, repair=repair_daily):
+        self._set_export_ready(False)
+        self.repair_notice.setText(tr('Updating history'))
+        self.repair_notice.show()
+        self.daily_repair_tasks = Tasks(self)
+        self.daily_repair_tasks.completed.connect(self._daily_repair_done)
+        self.daily_repair_tasks.failed.connect(self._daily_repair_failed)
+        self.daily_repair_tasks.submit(repair)
+
+    def _set_export_ready(self, ready):
+        self.daily_repair_complete = ready
+        self.technician_actions['Export report'].setEnabled(
+            ready and self.settings.get('completed', False))
+
+    def _daily_repair_done(self, _number, _result):
+        self._set_export_ready(True)
+        self.status.setText(tr('History updated'))
+        self.repair_notice.hide()
+        self.refresh()
+
+    def _daily_repair_failed(self, _number, error):
+        self._set_export_ready(False)
+        self.status.setText(tr('History update failed'))
+        self.repair_notice.setText(tr('Calendar history could not be updated. Restart Lifetime to retry. Report export remains unavailable.'))
+        self.repair_notice.show()
+
     def switch_language(self, value):
         previous = self.settings.get('language')
         self.settings['language'] = value
         try:
-            save_settings(self.settings, data_dir())
-        except OSError as error:
+            saved = update_settings({'language': value}, data_dir())
+            self.settings['identity'] = saved['identity']
+        except (OSError, ValueError) as error:
             self.settings['language'] = previous
             QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
             return
         set_language(value)
+        self.worker.set_settings(self.settings)
+        self.apply_visibility()
         self.language_control.group.button(('en', 'vi').index(value)).setChecked(True)
 
     def retranslate_content(self):
@@ -621,6 +681,9 @@ class Window(QWidget):
 
     def apply_visibility(self):
         enabled = self.settings.get('completed', False)
+        for button in self.technician_actions.values():
+            button.setEnabled(enabled)
+        self.technician_actions['Export report'].setEnabled(enabled and self.daily_repair_complete)
         self.navigation.group.button(2).setVisible(enabled and self.settings.get('history', False))
         self.system.set_settings(self.settings if enabled else {})
         self.verify_button.setEnabled(enabled)
@@ -633,6 +696,19 @@ class Window(QWidget):
         if dialog.exec() == dialog.DialogCode.Accepted:
             self.apply_preferences(dialog.result_settings, self.settings)
             self.refresh()
+
+    def open_technician(self, cls):
+        try:
+            dialog = cls(self, directory=data_dir(), language=language())
+            dialog.exec()
+            # Identity is a preference edit, not a request to configure tracking.
+            # Refresh choices without invoking apply_preferences/autostart/import.
+            self.settings = load_settings(data_dir())
+            self.worker.set_settings(self.settings)
+            self.apply_visibility()
+            self.refresh()
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            QMessageBox.warning(self, tr('Could not open details'), str(error))
 
     def apply_preferences(self, settings, previous):
         if not settings['rebuild']:
@@ -718,6 +794,7 @@ class Window(QWidget):
         if result.get('ledger') is not None:
             self.display_ledger(result['ledger'])
         verification = result.get('verification') or {}
+        self.last_verification = {**verification, 'captured': dt.datetime.now().astimezone().isoformat(timespec='seconds')}
         if verification.get('event_seconds') is not None:
             seconds = verification['difference']
             difference = seconds/3600
@@ -755,6 +832,8 @@ class Window(QWidget):
             effect = widget.effect
             effect.setOpacity(0)
             def begin(w=widget, e=effect):
+                if not self.isVisible():
+                    return
                 def frame(value):
                     try:
                         e.setOpacity(value)
@@ -772,6 +851,9 @@ class Window(QWidget):
         super().hideEvent(event)
         if hasattr(self, 'timer'):
             self.timer.stop()
+        for animation in self.findChildren(QVariantAnimation):
+            animation.setCurrentTime(animation.duration())
+            animation.stop()
 
     def apply_theme(self):
         self.theme = 'dark'
@@ -829,6 +911,7 @@ class Window(QWidget):
         super().resizeEvent(event)
         if not hasattr(self, 'cards'):
             return
+        self.status.setVisible(self.width() >= 600)
         short = self.height() < 620 and self.width() >= 700
         columns = 3 if self.width() >= 700 else 2
         if columns != self.columns:
@@ -854,7 +937,7 @@ class Window(QWidget):
         def update_height(value):
             self.import_panel.setMaximumHeight(round(value))
         animate(self, 'import_animation', self.import_panel.height() if self.import_panel.maximumHeight() else 0,
-                target, update_height, 180)
+                target, update_height, 150)
         if self.import_animation:
             self.import_animation.finished.connect(lambda: self.import_panel.setVisible(self.import_toggle.isChecked()))
         else:
@@ -875,6 +958,15 @@ class Window(QWidget):
 
     def display_ledger(self, ledger):
         try:
+            evidence = coverage(ledger, self.settings)
+            self.coverage_summary.setText(tr('Coverage: {source} · {status}', source=tr(SOURCES[evidence['source']]),
+                status=tr('Partial' if evidence['status'] == 'partial' else 'Unknown')))
+            name = self.settings.get('identity', {}).get('display_name', '')
+            if not name and self.settings.get('completed') and self.settings.get('resources'):
+                name = str(tr('System name'))+': '+(platform.node() or str(tr('Not available')))
+            self.device_name.setText('\u200b'.join(name[i:i+32] for i in range(0, len(name), 32)))
+            self.device_name.setAccessibleName(name)
+            self.device_name.setVisible(bool(name))
             self.history.set_ledger(ledger)
             try:
                 status = json.loads((data_dir() / 'status.json').read_text(encoding='utf-8-sig'))
@@ -882,24 +974,37 @@ class Window(QWidget):
             except (OSError, ValueError, KeyError, TypeError):
                 running = False
             total = ledger['total_seconds'] + ledger['baseline_seconds']
-            # The tracker saves every 30 s; while it runs, count on from its last heartbeat so seconds tick live.
-            if running:
-                total += min(max(time.time() - status['heartbeat'], 0), 60)
+            # Interpolate with the same awake-only clock, never wall time (sleep
+            # and clock adjustments must not inflate the displayed live total).
+            if running and ledger.get('last_clock') is not None:
+                try:
+                    delta = awake_clock()-ledger['last_clock']
+                    if 0 <= delta <= MAX_DELTA:
+                        total += min(delta, 60)
+                except OSError:
+                    pass
+            parts = source_totals(ledger)
+            def component(value):
+                return duration(value) if value is not None else tr('Not available')
+            self.source_breakdown.setText(tr('Saved sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}',
+                measured=component(parts['measured_seconds']), imported=component(parts['imported_seconds']), baseline=component(parts['baseline_seconds'])))
             if not self.initialized or abs(total - self.hero.target) > 5:
                 self.hero.set_total(total)
             else:
                 self.hero.target = self.hero.seconds = total
                 self.hero.update()
-            first = dt.date.fromisoformat(ledger['first_seen'])
-            pretty_date = date_text(first)
-            days = max(1, (dt.date.today() - first).days + 1)
+            first = dt.date.fromisoformat(ledger['first_seen']) if ledger.get('first_seen') else None
+            pretty_date = date_text(first) if first else tr('Not available')
             average = average_awake(ledger)
             self.cards['first'].value.setText(pretty_date)
             self.cards['boots'].set_number(ledger['boots'], lambda v: f'{round(v):,}')
             for key, field in (('current', 'current_session_seconds'), ('longest', 'longest_session_seconds')):
                 self.cards[key].set_number(ledger[field], lambda v: duration(v) if v >= 86400 else duration(v, days=False))
             self.cards['average'].set_number(-1 if average is None else average, lambda v: '—' if v < 0 else tr('hours.value', value=v))
-            captions = (tr('days.in_use', days=days), tr('Since tracking began'),
+            source = tr(FIRST_SEEN_SOURCES.get(ledger.get('first_seen_source', 'unknown'), 'Unknown source'))
+            since = tr('Days since this date: {days}', days=(dt.date.today()-first).days) if first and first <= dt.date.today() else tr('Not available')
+            self.cards['first'].setToolTip(str(source)+' · '+str(since))
+            captions = (source, tr('Since tracking began'),
                         tr('Awake this session'), tr('Longest recorded session'), tr('Needs 1 day of data') if average is None else tr('since tracking began'))
             for card, caption in zip(self.cards.values(), captions):
                 card.caption.setText(caption)
@@ -965,12 +1070,11 @@ if __name__ == '__main__':
         if setup.exec() != setup.DialogCode.Accepted:
             sys.exit(0)
         settings = setup.result_settings
-    try:
-        repair_daily()
-    except (OSError, ValueError) as error:
-        QMessageBox.warning(None, tr('Ledger unavailable'), tr('ledger.error', error=error))
     window = Window(settings)
     window.show()
+    window.status.setText(tr('Updating history'))
+    window._set_export_ready(False)
+    window.start_daily_repair()
     if not previous['completed']:
         window.apply_preferences(settings, previous)
         window.start_tracker()

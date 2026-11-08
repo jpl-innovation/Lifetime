@@ -32,7 +32,7 @@ if command -v journalctl >/dev/null 2>&1; then
     fi
 fi
 mkdir -p "$install_dir/assets" "$HOME/.config/systemd/user" "$HOME/.local/share/applications"
-for file in lifetime_tracker.py lifetime_gui.py lifetime_signals.py lifetime_dashboard.py lifetime_charts.py lifetime_settings.py lifetime_setup.py lifetime_import.py lifetime_import_windows.py lifetime_daily.py lifetime_i18n.py lifetime_i18n_qt.py; do
+for file in lifetime_tracker.py lifetime_gui.py lifetime_signals.py lifetime_dashboard.py lifetime_charts.py lifetime_settings.py lifetime_setup.py lifetime_import.py lifetime_import_windows.py lifetime_daily.py lifetime_i18n.py lifetime_i18n_qt.py lifetime_reports.py lifetime_technician.py lifetime_ledger.py lifetime_identity.py lifetime_theme.py lifetime_tasks.py lifetime_company.py lifetime_agent.py lifetime_client.py lifetime_protocol.py lifetime_tls.py lifetime_permissions.py; do
     if [[ "$source_dir/$file" != "$install_dir/$file" ]]; then
         install -m 644 "$source_dir/$file" "$install_dir/$file"
     fi
