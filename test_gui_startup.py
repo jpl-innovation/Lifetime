@@ -51,4 +51,7 @@ if __name__ == '__main__' and '--child' in sys.argv:
     assert 'failed' in w.status.text().lower()
     assert 'private detail' not in w.status.text()
     w.close()
+    from lifetime_shell import shut_down
+    app.aboutToQuit.emit()
+    shut_down(app, w)
     app.quit()

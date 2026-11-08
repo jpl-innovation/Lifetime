@@ -18,7 +18,7 @@ Made by [JPL Innovation](https://github.com/jpl-innovation).
 | Edition | For | Download |
 |---|---|---|
 | **Lifetime for Windows** | Windows 10 / 11 laptops and desktops | `Lifetime-Windows.zip` |
-| **Lifetime for Linux** | Linux with systemd and Python 3.10+ | `Lifetime-Linux.tar.gz` |
+| **Lifetime for Linux** | Linux with systemd and Python 3.11+ | `Lifetime-Linux.tar.gz` |
 | **Lifetime Server** | Windows Server, for IT teams that look after many computers | `Lifetime-Server-Windows.zip` |
 
 The Windows and Linux editions work fully on their own. Connecting a computer to a Lifetime Server is optional and only happens when someone chooses to. A connected computer streams live readings over one encrypted socket and can be restarted, put to sleep or shut down from the server, only if its owner allowed it.
@@ -47,7 +47,7 @@ Every release also contains **SHA256SUMS.txt**. To check a download, run `sha256
 
 The downloaded programs are not code-signed, so Windows SmartScreen may say "Windows protected your PC". Click **More info → Run anyway**. **Smart App Control** (on by default on new Windows 11 PCs) blocks unsigned programs outright, with no "Run anyway" button. **Install Lifetime.cmd** detects this and automatically installs the Python version of Lifetime instead; if Python is missing it offers to install it with winget. You do not need to turn Smart App Control off.
 
-**Python route** (works anywhere Python 3.10+ is installed):
+**Python route** (works anywhere Python 3.11+ is installed):
 
 ```powershell
 python -m pip install PyQt6
@@ -112,7 +112,7 @@ Windows executables: `./build_windows.ps1` (needs `pyinstaller`, produces `packa
 
 ## Supported systems
 
-Windows 10 and 11 (x64 and ARM64), and Linux with systemd and Python 3.10+. Desktops without a battery or without an NVIDIA GPU are handled. Windows 10, ARM64, non-English Windows and Linux paths are covered by automated tests but have had less real-world testing than Windows 11 x64.
+Windows 10 and 11 (x64 and ARM64), and Linux with systemd and Python 3.11+. Desktops without a battery or without an NVIDIA GPU are handled. Windows 10, ARM64, non-English Windows and Linux paths are covered by automated tests but have had less real-world testing than Windows 11 x64.
 
 ## Troubleshooting and known issues
 

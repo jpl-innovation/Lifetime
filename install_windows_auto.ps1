@@ -15,7 +15,7 @@ function Find-Python {
     foreach ($candidate in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) {
         if ($candidate.Source -like '*\WindowsApps\*') { continue }   # the Microsoft Store stub is not a real Python
         $version = & $candidate.Source -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $version -and [version]$version -ge [version]'3.10') { return $candidate.Source }
+        if ($LASTEXITCODE -eq 0 -and $version -and [version]$version -ge [version]'3.11') { return $candidate.Source }
     }
     return $null
 }
@@ -33,7 +33,7 @@ Write-Host 'Lifetime will be installed to run with Python instead, which Smart A
 $python = Find-Python
 if (-not $python) {
     Write-Host ''
-    Write-Host 'Python 3.10 or newer was not found.'
+    Write-Host 'Python 3.11 or newer was not found.'
     if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
         $answer = Read-Host 'Install Python 3.12 now with winget (about 30 MB, no administrator rights needed)? (y/N)'
         if ($answer -match '^[yY]') {
