@@ -24,7 +24,7 @@ def iso_date(value: str) -> dt.date:
 
 
 def defaults():
-    return dict(version=1, language=default_language(), completed=False, awake=True, rebuild=False,
+    return dict(version=1, language=default_language(), theme='auto', completed=False, awake=True, rebuild=False,
                 autostart=False, identity={key: '' for key in IDENTITY_FIELDS},
                 **{key: False for key in CATEGORIES})
 
@@ -39,6 +39,7 @@ def normalize(value):
         result['language'] = defaults()['language']
         if value.get('language') in ('en', 'vi'):
             result['language'] = value['language']
+        result['theme'] = value.get('theme') if value.get('theme') in ('auto', 'light', 'dark') else 'auto'
         for key in (*CATEGORIES, 'completed', 'rebuild', 'autostart'):
             result[key] = value.get(key) is True
         result['identity'] = normalize_identity(value.get('identity', {}))
@@ -104,7 +105,7 @@ def save_settings(value, directory=None):
     with file_lock(directory, 'ledger.lock'):
         existing = _existing(directory)
         merged = _merge(existing, value if isinstance(value, dict) else {})
-        for key in (*CATEGORIES, 'completed', 'rebuild', 'autostart', 'awake', 'language'):
+        for key in (*CATEGORIES, 'completed', 'rebuild', 'autostart', 'awake', 'language', 'theme'):
             merged[key] = normalized[key]
         atomic_json(directory / 'settings.json', normalize(merged))
 

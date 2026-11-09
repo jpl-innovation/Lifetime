@@ -20,13 +20,14 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget
 from lifetime_i18n import duration, time_text
 from lifetime_shell import DisclosureButton
-from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS
+from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, Tokens
 
-TOKENS = dict(bg='#0B1426', card='#12203A', text='#FFFFFF', muted='#9FB0CC',
-              border='#22345A', accent='#FFC93C', track='#1B2A46')
+TOKENS = Tokens()   # follows the active (light or dark) palette
 # A single warm hue mixed into the navy ground. Relative luminance increases
 # at every step (including at the transition out of the navy-tinted low end).
-HEAT_RAMP = ('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')
+def heat_ramp():
+    return TOKENS['heat']
+
 RANGES = ('30 days', '90 days', '1 year', 'All')
 BIN_LABELS = ('<15m', '15–60m', '1–3h', '3–6h', '6–12h', '12h+')
 BIN_LIMITS = (900, 3600, 10800, 21600, 43200)
@@ -525,7 +526,7 @@ class Calendar(Plot):
                 else:
                     level = min(4, int(value/3600/24*5))
                     p.setPen(Qt.PenStyle.NoPen)
-                    p.setBrush(QColor(HEAT_RAMP[level]))
+                    p.setBrush(QColor(heat_ramp()[level]))
                 p.drawRoundedRect(rect, 2, 2)
                 if date == self.today:
                     p.setBrush(Qt.BrushStyle.NoBrush)
@@ -555,7 +556,7 @@ class HeatScale(QWidget):
         p.setFont(font())
         p.setPen(QColor(TOKENS['muted']))
         p.drawText(QRectF(0, 1, 28, 22), Qt.AlignmentFlag.AlignVCenter, tr('0 h'))
-        for i, color in enumerate(HEAT_RAMP):
+        for i, color in enumerate(heat_ramp()):
             p.fillRect(QRectF(33+i*21, 6, 19, 12), QColor(color))
         p.drawText(QRectF(145, 1, 38, 22), Qt.AlignmentFlag.AlignVCenter, tr('24 h'))
         if self.width() >= 360:
@@ -615,7 +616,7 @@ class RangeSegments(QWidget):
             button = QPushButton(tr(key))
             button.setCheckable(True)
             button.setFixedHeight(36)
-            button.setStyleSheet('QPushButton {background:transparent; border:0; padding:4px 12px; font-size:13px;} QPushButton:focus {border:1px solid #FFC93C;} QPushButton:hover {color:#FFFFFF;}')
+            button.setStyleSheet('QPushButton {background:transparent; border:0; padding:4px 12px; font-size:13px;} QPushButton:focus {border:1px solid ' + TOKENS['accent'] + ';} QPushButton:hover {color:' + TOKENS['text'] + ';}')
             self.group.addButton(button, index)
             box.addWidget(button)
             self.buttons.append(button)
@@ -764,7 +765,7 @@ class Insights(QWidget):
         self.data_toggle.setCheckable(True)
         self.data_toggle.setAccessibleName(tr('Show data for all charts'))
         self.data_toggle.setFixedHeight(40)
-        self.data_toggle.setStyleSheet('QPushButton:checked {background:#1B2A46;}')
+        self.data_toggle.setStyleSheet('QPushButton:checked {background:' + TOKENS['track'] + ';}')
         row.addWidget(self.data_toggle)
         self.ranges.currentIndexChanged.connect(lambda index: self.set_range(RANGES[index]))
         box.addLayout(row)
@@ -786,7 +787,7 @@ class Insights(QWidget):
         self.counting_toggle = DisclosureButton(tr('How this is counted'))
         self.counting_toggle.setCheckable(True)
         self.counting_toggle.setFixedHeight(36)
-        self.counting_toggle.setStyleSheet('QPushButton {text-align:left; background:transparent; border:0; padding:4px 28px 4px 0; font-size:13px;} QPushButton:focus {border-bottom:1px solid #FFC93C;}')
+        self.counting_toggle.setStyleSheet('QPushButton {text-align:left; background:transparent; border:0; padding:4px 28px 4px 0; font-size:13px;} QPushButton:focus {border-bottom:1px solid ' + TOKENS['accent'] + ';}')
         box.addWidget(self.counting_toggle)
         self.sources = caption('')
         self.source_panel = QWidget()
@@ -812,8 +813,8 @@ class Insights(QWidget):
         self.weekdays = Plot()
         self.distribution = Plot(unit='sessions')
         self.cards = [
-            ChartCard(tr('Calendar · awake hours'), tr('Local days · white outline: today'), self.heatmap),
-            ChartCard(tr('Daily awake hours'), tr('Daily hours incl. boot credit · white: trailing 7-day average'), self.daily),
+            ChartCard(tr('Calendar · awake hours'), tr('Local days · outlined: today'), self.heatmap),
+            ChartCard(tr('Daily awake hours'), tr('Daily hours incl. boot credit · line: trailing 7-day average'), self.daily),
             ChartCard(tr('Cumulative lifetime hours'), tr('Includes imported history and the opening balance'), self.running),
             ChartCard(tr('Hour-of-day profile'), tr('Average awake hours in each local hour slot'), self.profile),
             ChartCard(tr('Weekday average'), tr('Average per recorded weekday; today is a partial day'), self.weekdays),

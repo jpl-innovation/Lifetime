@@ -8,9 +8,10 @@ from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit,
                             QPushButton, QTabBar, QVBoxLayout, QWidget)
 
-from lifetime_theme import THEMES, install
+from lifetime_theme import THEMES, install, T
 
-C = THEMES['dark']
+from lifetime_theme import Tokens
+C = Tokens()   # follows the active palette
 
 
 def more_icon():
@@ -150,7 +151,7 @@ class DailyChart(QLabel):
                 p.setClipRect(bounds.adjusted(0, -2, 0, 0))
                 p.setRenderHint(QPainter.RenderHint.Antialiasing)
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor(C['accent'] if index == len(self.samples) - 1 else '#3A5688'))
+                p.setBrush(QColor(C['accent'] if index == len(self.samples) - 1 else T(T('#3A5688'))))
                 width = min(pitch*.5, 44)
                 p.drawRoundedRect(QRectF(x-width/2, bounds.bottom()-max(1, height), width, max(1, height)+8), 6, 6)
                 p.restore()

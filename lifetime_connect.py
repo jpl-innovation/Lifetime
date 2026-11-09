@@ -18,6 +18,7 @@ from lifetime_i18n import tr, TABLES
 from lifetime_i18n_qt import QLabel, QPushButton
 from lifetime_company import read_status
 from lifetime_settings import read_settings
+from lifetime_theme import tokens
 
 NO_SERVER = 'No server found with this code. Check that the server is on and that this computer is on the same network.'
 PERMISSION = 'Windows permission is needed to finish.'
@@ -132,13 +133,13 @@ class SharingSwitch(QCheckBox):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setOpacity(1.0 if self.isEnabled() else 0.5)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor('#FFC93C' if self.isChecked() else '#34445E'))
+        p.setBrush(QColor(tokens()['accent'] if self.isChecked() else tokens()['line']))
         p.drawRoundedRect(QRectF(2, 10, 40, 24), 12, 12)
-        p.setBrush(QColor('#0B1220' if self.isChecked() else '#FFFFFF'))
+        p.setBrush(QColor(tokens()['bg'] if self.isChecked() else '#FFFFFF'))
         p.drawEllipse(QRectF(24 if self.isChecked() else 6, 14, 16, 16))
         if self.hasFocus():
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(QColor('#9FB0CC'), 1))
+            p.setPen(QPen(QColor(tokens()['muted']), 1))
             p.drawRoundedRect(QRectF(0.5, 7.5, 43, 29), 14, 14)
 
 
@@ -158,10 +159,10 @@ class StageMark(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.state == 1:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor('#FFC93C'))
+            p.setBrush(QColor(tokens()['accent']))
             p.drawEllipse(QPointF(11, 11), 4, 4)
         elif self.state == 2:
-            pen = QPen(QColor('#4CC38A'), 2.4)
+            pen = QPen(QColor(tokens()['good']), 2.4)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             p.setPen(pen)
@@ -201,13 +202,13 @@ class PacketFlight(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         middle, left, right = self.height() / 2, 74.0, self.width() - 74.0
-        line = QPen(QColor('#34445E'), 2, Qt.PenStyle.DashLine)
+        line = QPen(QColor(tokens()['line']), 2, Qt.PenStyle.DashLine)
         p.setPen(line)
         p.drawLine(QPointF(left, middle), QPointF(right, middle))
-        outline = QPen(QColor('#FFFFFF'), 2)
+        outline = QPen(QColor(tokens()['text']), 2)
         outline.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(outline)
-        p.setBrush(QColor('#0B1426'))
+        p.setBrush(QColor(tokens()['bg']))
         # This computer
         p.drawRoundedRect(QRectF(24, middle - 24, 46, 32), 4, 4)
         p.drawLine(QPointF(16, middle + 16), QPointF(78, middle + 16))
@@ -216,11 +217,11 @@ class PacketFlight(QWidget):
         for row in range(3):
             y = middle - 28 + row * 19
             p.setPen(outline)
-            p.setBrush(QColor('#0B1426'))
+            p.setBrush(QColor(tokens()['bg']))
             p.drawRoundedRect(QRectF(x, y, 46, 16), 4, 4)
             p.setPen(Qt.PenStyle.NoPen)
             lit = int(self.phase * 6) % 3 == row
-            p.setBrush(QColor('#4CC38A' if lit else '#34445E'))
+            p.setBrush(QColor(tokens()['good'] if lit else tokens()['line']))
             p.drawEllipse(QPointF(x + 37, y + 8), 2.5, 2.5)
         span = right - left
         p.setPen(Qt.PenStyle.NoPen)
@@ -228,15 +229,15 @@ class PacketFlight(QWidget):
             t = (self.phase + index / self.PARCELS) % 1.0
             eased = t * t * (3 - 2 * t)
             p.setOpacity(min(1.0, min(t, 1 - t) * 8))
-            p.setBrush(QColor('#FFC93C'))
+            p.setBrush(QColor(tokens()['accent']))
             cx = left + span * eased
             hop = 10 * (4 * eased * (1 - eased))
             p.drawRoundedRect(QRectF(cx - 7, middle - 7 - hop, 14, 14), 3, 3)
-            p.setBrush(QColor('#0B1426'))
+            p.setBrush(QColor(tokens()['bg']))
             p.drawRect(QRectF(cx - 1, middle - 7 - hop, 2, 14))     # the parcel's tape
         reply = (self.phase * 2) % 1.0
         p.setOpacity(min(1.0, min(reply, 1 - reply) * 8))
-        p.setBrush(QColor('#4CC38A'))
+        p.setBrush(QColor(tokens()['good']))
         p.drawEllipse(QPointF(right - span * reply, middle + 13), 4, 4)
         p.setOpacity(1.0)
 
@@ -248,7 +249,7 @@ class ConnectPage(QWidget):
         install()
         self.setObjectName('connectPage')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet('QWidget#connectPage {background: #0B1220;}')
+        self.setStyleSheet('QWidget#connectPage {background: ' + tokens()['bg'] + ';}')
         self.directory, self.machine_root, self.language = directory, machine_root, language
         self._busy = False
         self._operation = None
@@ -303,7 +304,7 @@ class ConnectPage(QWidget):
         self.code.setMaxLength(2300)
         self.code.setPlaceholderText('LTS-XXXX-XXXX-XXXX-XXXX-XXXX')
         self.code.setAccessibleName(self.t('Connection code'))
-        self.code.setStyleSheet('QLineEdit {font-family: Consolas, monospace; font-size: 26px; color: #FFC93C; background: #0B1220; border: 1px solid #34445E; padding: 14px 8px;}')
+        self.code.setStyleSheet('QLineEdit {font-family: Consolas, monospace; font-size: 26px; color: ' + tokens()['accent'] + '; background: ' + tokens()['card'] + '; border: 1px solid ' + tokens()['line'] + '; padding: 14px 8px;}')
         f.addWidget(self.code)
         self.connect_button = self.button(f, 'Connect', self.connect_server, True)
         self.connect_button.setEnabled(False)
@@ -480,7 +481,7 @@ class ConnectPage(QWidget):
         for index, (mark, text) in enumerate(self.stage_rows):
             done, current = index < stage, index == stage
             mark.set_state(2 if done else 1 if current else 0)
-            text.setStyleSheet('color: #FFFFFF;' if current else 'color: #9FB0CC;')
+            text.setStyleSheet('color: ' + (tokens()['text'] if current else tokens()['muted']) + ';')
 
     def format_input(self):
         from lifetime_connection import PREFIX, parse, normalize, format_code

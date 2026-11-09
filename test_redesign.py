@@ -100,6 +100,18 @@ class DashboardShellTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.history_banner.isVisible())
 
+    def test_theme_choice_is_saved_then_the_app_restarts_itself(self):
+        self.assertEqual([b.text() for b in self.w.theme_control.group.buttons()], ['Auto', 'Light', 'Dark'])
+        self.assertTrue(self.w.theme_control.group.button(0).isChecked())
+        with patch.object(gui, 'update_settings') as save, patch.object(self.w, 'relaunch') as relaunch:
+            self.w.theme_control.group.button(1).click()
+            save.assert_called_once_with({'theme': 'light'}, self.directory)
+            relaunch.assert_called_once()
+        with patch.object(gui, 'update_settings') as save, patch.object(self.w, 'relaunch') as relaunch:
+            self.w.switch_theme('light')                    # already light: nothing to do
+            save.assert_not_called()
+            relaunch.assert_not_called()
+
     def test_both_reduced_motion_paths_are_instant(self):
         for flag, environment in ((True, '0'), (False, '1')):
             with patch.object(gui, 'REDUCE_MOTION', flag), patch.dict(os.environ, LIFETIME_REDUCE_MOTION=environment):

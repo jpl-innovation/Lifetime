@@ -48,8 +48,8 @@ class ScrollDialog(QDialog):
         self.resize(590, 620)
         self.setMinimumSize(300, 300)
         # Reuse the release palette; report/evidence panes remain readable paper.
-        from lifetime_theme import THEMES, stylesheet, install
-        tokens = THEMES['dark']
+        from lifetime_theme import THEMES, stylesheet, install, active_theme
+        tokens = THEMES[active_theme()]
         install()
         self.setStyleSheet(stylesheet() + """
             QTextBrowser { background: #FFFFFF; color: #252D2D; }

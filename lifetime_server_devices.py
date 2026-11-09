@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayo
                             QStyleOptionViewItem, QGraphicsOpacityEffect)
 
 from lifetime_server_widgets import reduced_motion, status_dot, more_icon
-from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS
+from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T
 
 
 class SegmentedBar(QTabBar):
@@ -65,11 +65,11 @@ class SegmentedBar(QTabBar):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         from PyQt6.QtGui import QPen
-        painter.setPen(QPen(QColor('#22345A'), 1))
-        painter.setBrush(QColor('#0F1A30'))
+        painter.setPen(QPen(QColor(T('#22345A')), 1))
+        painter.setBrush(QColor(T('#0F1A30')))
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), self.height() / 2, self.height() / 2)
-        painter.setPen(QPen(QColor('#3A5688'), 1))
-        painter.setBrush(QColor('#243C63'))
+        painter.setPen(QPen(QColor(T('#3A5688')), 1))
+        painter.setBrush(QColor(T('#243C63')))
         painter.drawRoundedRect(self.indicator.geometry().adjusted(0, 0, -1, -1), self.indicator.height() / 2, self.indicator.height() / 2)
         painter.setPen(Qt.PenStyle.NoPen)
         for index in range(self.count()):
@@ -170,9 +170,9 @@ class Skeleton(QWidget):
         painter.setOpacity(self.opacity)
         painter.setPen(Qt.PenStyle.NoPen)
         area = QRectF(self.rect()).adjusted(self.inset, self.inset, -self.inset, -self.inset)
-        painter.setBrush(QColor(self.fill))
+        painter.setBrush(QColor(T(self.fill)))
         painter.drawRoundedRect(area, CONTROL_RADIUS, CONTROL_RADIUS)
-        low, high = QColor('#263A60'), QColor('#34507F')
+        low, high = QColor(T('#263A60')), QColor(T('#34507F'))
         tone = QColor(*(round(a + (b - a) * self.level) for a, b in zip(low.getRgb()[:3], high.getRgb()[:3])))
         left, top, width = area.left(), area.top(), area.width()
         if self.shape == 'value':
@@ -190,7 +190,7 @@ class Skeleton(QWidget):
                 y = top + index * (168 + self.GAP)
                 if y > area.bottom():
                     break
-                painter.setBrush(QColor('#182944'))
+                painter.setBrush(QColor(T('#182944')))
                 painter.drawRoundedRect(QRectF(left, y, width, 168), SOFT_RADIUS, SOFT_RADIUS)
                 painter.setBrush(tone)
                 self._bar(painter, left + 18, y + 20, min(200, width * .4), 16)
@@ -257,10 +257,10 @@ class LoadingBar(QWidget):
             return
         painter = QPainter(self)
         if reduced_motion():
-            painter.fillRect(self.rect(), QColor('#FFC93C'))
+            painter.fillRect(self.rect(), QColor(T('#FFC93C')))
             return
         span = self.width() * .24
-        painter.fillRect(QRectF(-span + (self.width() + span) * self.position, 0, span, 2), QColor('#FFC93C'))
+        painter.fillRect(QRectF(-span + (self.width() + span) * self.position, 0, span, 2), QColor(T('#FFC93C')))
 
 
 class StatusNotice(QLabel):
@@ -287,7 +287,7 @@ class TileIcon(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.scale(1.6, 1.6)
-        pen = QPen(QColor('#FFFFFF'), 1.2)
+        pen = QPen(QColor(T('#FFFFFF')), 1.2)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
@@ -333,7 +333,7 @@ class FleetGauge(QWidget):
         lit = round(self.value * self.TICKS)
         for index in range(self.TICKS):
             angle = math.pi * (1 - index / (self.TICKS - 1))
-            pen = QPen(QColor('#FFC93C' if index < lit else '#22345A'), 6)
+            pen = QPen(QColor(T('#FFC93C') if index < lit else T(T('#22345A'))), 6)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             painter.drawLine(QPointF(middle + inner * math.cos(angle), base - inner * math.sin(angle)),
@@ -342,7 +342,7 @@ class FleetGauge(QWidget):
         font.setPixelSize(52)
         font.setWeight(QFont.Weight.Light)
         painter.setFont(font)
-        painter.setPen(QColor('#FFFFFF'))
+        painter.setPen(QColor(T('#FFFFFF')))
         painter.drawText(QRectF(0, base - 70, self.width(), 78), Qt.AlignmentFlag.AlignCenter, str(self.connected))
 
 
@@ -383,8 +383,8 @@ class RowDelegate(QStyledItemDelegate):
             painter.save()
             painter.setClipRect(option.rect)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setPen(QPen(QColor('#FFC93C'), 1) if focused else Qt.PenStyle.NoPen)
-            painter.setBrush(QColor('#243C63' if selected else '#182944'))
+            painter.setPen(QPen(QColor(T('#FFC93C')), 1) if focused else Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(T('#243C63') if selected else T(T('#182944'))))
             painter.drawRoundedRect(rect, CONTROL_RADIUS, CONTROL_RADIUS)
             painter.restore()
         plain = QStyleOptionViewItem(option)
@@ -545,8 +545,8 @@ class DeviceBox(QWidget):
         codes = problems(device)
         status = device.get('reporting_status') if device.get('status') == 'approved' else device.get('status')
         self.status.setText(window._fleet_status(status))
-        color = '#FF8A8A' if any(c in codes for c in ('hot', 'disk_low', 'unstable')) else '#FFC93C' if codes else '#4CC38A' if status == 'reporting' else '#9FB0CC'
-        status_color = '#4CC38A' if status == 'reporting' else '#FFC93C' if status in ('pending', 'report-overdue') else '#9FB0CC'
+        color = T(T('#FF8A8A')) if any(c in codes for c in ('hot', 'disk_low', 'unstable')) else T(T('#FFC93C')) if codes else T(T('#4CC38A')) if status == 'reporting' else T(T('#9FB0CC'))
+        status_color = T(T('#4CC38A')) if status == 'reporting' else T(T('#FFC93C')) if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))
         self.dot.setPixmap(status_dot(status_color).pixmap(16, 16))
         self.attention.setText(' · '.join(t('Pending approval' if c == 'approval' else ATTENTION.get(c, 'Needs attention')) for c in codes if c != 'offline'))
         self.attention.setStyleSheet(f'color:{color}; font-size:13px;')
@@ -581,8 +581,8 @@ class DeviceBox(QWidget):
         from PyQt6.QtGui import QPainter, QPen
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor('#1E3254' if self.underMouse() else '#182944'))   # lighter than its panel: each computer reads as its own box
-        painter.setPen(QPen(QColor('#FFC93C' if self.hasFocus() or self.property('selected') else '#2A3E66'), 1))
+        painter.setBrush(QColor(T('#1E3254') if self.underMouse() else T(T('#182944'))))   # lighter than its panel: each computer reads as its own box
+        painter.setPen(QPen(QColor(T('#FFC93C') if self.hasFocus() or self.property('selected') else T(T('#2A3E66'))), 1))
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -11), SOFT_RADIUS, SOFT_RADIUS)
 
     def enterEvent(self, event):

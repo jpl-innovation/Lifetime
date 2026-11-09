@@ -11,6 +11,16 @@ Track how long your computer has really been awake, excluding sleep and hibernat
 Windows may show a SmartScreen warning because the programs are not code-signed: choose **More info -> Run anyway**.
 Check your download against `SHA256SUMS.txt`.
 
+### Updated build of 1.1.0
+
+The files attached to this release were refreshed (same version number, new checksums in `SHA256SUMS.txt`):
+
+- **Light theme** for Lifetime on Windows and Linux and for Lifetime Server. Choose **Auto** (follows your system), **Light** or **Dark** at the bottom of the sidebar (Server: Administration > Theme). Lifetime restarts itself to apply it.
+- **Add earlier usage**: a new computer used to show only the time since its last start. Setup now offers (and pre-selects) adding the time before Lifetime was installed, and the Overview has an **Add earlier usage** button until it is done. The wording no longer talks about "rebuilding" or "logs".
+- **Select all** on the "What would you like to track?" step.
+- **Verify** counts suspend-then-hibernate correctly on Linux (it showed a false gap of days after a long hibernate).
+- Tests no longer fail when the optional `websockets` package is missing.
+
 ### What is new in 1.1.0
 
 - **Three editions:** Lifetime for Windows, Lifetime for Linux, and **Lifetime Server**, a fleet dashboard for IT teams that sees every connected computer's specs, performance and health, and can restart, sleep, shut down or wake them.

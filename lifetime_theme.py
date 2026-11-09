@@ -2,11 +2,89 @@
 import sys
 THEMES = {
     'dark': dict(bg='#0B1426', card='#12203A', text='#FFFFFF',
-                 muted='#9FB0CC', border='#22345A', accent='#FFC93C', accent_hover='#FFD761', track='#1B2A46'),
-    # Compatibility for existing callers; this is not a selectable edition theme.
+                 muted='#9FB0CC', border='#22345A', accent='#FFC93C', accent_hover='#FFD761', track='#1B2A46',
+                 bar='#3A5688', line='#34445E', sidebar='#08101F', danger='#FF8A8A', bg2='#0F1A30', raise_='#243C63', skel_a='#263A60', skel_b='#34507F', tile='#182944', tile_hover='#1E3254', tile_border='#2A3E66', border2='#223959', good='#4CC38A', heat=('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')),
+    # Light mode: the same layout in a calm paper palette. The amber is darkened so it stays readable as text and lines.
     'light': dict(bg='#F3F4F1', card='#FCFCFA', text='#252D2D',
-                  muted='#626E6C', border='#D8DEDA', accent='#52796D', track='#E1E6E1'),
+                  muted='#5F6B69', border='#D3D9D5', accent='#9A5B00', accent_hover='#7F4A00', track='#E1E6E1',
+                  bar='#B8C4D6', line='#C5CDC8', sidebar='#E8EBE6', danger='#B3261E', bg2='#ECEEEA', raise_='#DDE3EB', skel_a='#E4E7E2', skel_b='#D5DAD3', tile='#F7F8F5', tile_hover='#EEF0EB', tile_border='#CBD2CC', border2='#D3D9D5', good='#2E8B57', heat=('#E9E5D6', '#E0CE98', '#D2B25A', '#B98A1F', '#9A5B00')),
 }
+
+_active = 'dark'
+
+
+def set_theme(name):
+    """Choose the palette every shared surface and control uses ('dark' or 'light')."""
+    global _active
+    _active = name if name in THEMES else 'dark'
+    return _active
+
+
+def active_theme():
+    return _active
+
+
+def tokens():
+    return THEMES[_active]
+
+
+class Tokens:
+    """Dict-like view of the ACTIVE palette, for modules that used to read THEMES['dark'] once at import time."""
+    def __getitem__(self, key):
+        return THEMES[_active][key]
+
+    def get(self, key, default=None):
+        return THEMES[_active].get(key, default)
+
+    def __iter__(self):
+        return iter(THEMES[_active])
+
+    def keys(self):
+        return THEMES[_active].keys()
+
+    def items(self):
+        return THEMES[_active].items()
+
+
+# The dark palette's literal colours, by token name. Anything still written as one of these hex values in a
+# stylesheet, HTML snippet or QColor call is re-tinted to the ACTIVE palette (identity in dark mode).
+_DARK_LITERALS = {
+    '#0B1426': 'bg', '#0B1220': 'bg', '#12203A': 'card', '#FFFFFF': 'text', '#9FB0CC': 'muted', '#22345A': 'border',
+    '#FFC93C': 'accent', '#FFD761': 'accent_hover', '#1B2A46': 'track', '#3A5688': 'bar', '#34445E': 'line',
+    '#08101F': 'sidebar', '#4CC38A': 'good', '#65D782': 'good', '#FF8A8A': 'danger', '#0F1A30': 'bg2',
+    '#243C63': 'raise_', '#263A60': 'skel_a', '#34507F': 'skel_b', '#182944': 'tile', '#1E3254': 'tile_hover',
+    '#2A3E66': 'tile_border', '#223959': 'border2',
+}
+
+
+def T(text):
+    """Re-tint dark-palette hex colours inside `text` (a colour or a stylesheet/HTML string) to the active theme."""
+    if _active == 'dark' or not isinstance(text, str):
+        return text
+    import re
+    palette = THEMES[_active]
+    return re.sub(r'#[0-9A-Fa-f]{6}', lambda m: palette.get(_DARK_LITERALS.get(m.group(0).upper()), m.group(0)), text)
+
+
+def resolve_theme(preference):
+    """'light' / 'dark' as chosen; 'auto' follows the operating system (dark when it cannot be detected)."""
+    if preference in ('light', 'dark'):
+        return preference
+    try:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QGuiApplication
+        hints = QGuiApplication.styleHints()
+        if hints is not None and hasattr(hints, 'colorScheme'):
+            scheme = hints.colorScheme()
+            if scheme == Qt.ColorScheme.Light:
+                return 'light'
+            if scheme == Qt.ColorScheme.Dark:
+                return 'dark'
+        from PyQt6.QtGui import QPalette
+        window = QGuiApplication.palette().color(QPalette.ColorRole.Window)
+        return 'light' if window.lightness() > 140 else 'dark'
+    except Exception:
+        return 'dark'
 
 
 CONTROL_RADIUS = 8
@@ -19,7 +97,7 @@ METER_RADIUS = 2
 
 def controls():
     """The complete control sheet. No platform-native subcontrol may paint an edge."""
-    c = THEMES['dark']
+    c = tokens()
     sheet = f"""
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QDateTimeEdit,
         QTextEdit, QPlainTextEdit, QAbstractItemView {{
@@ -121,7 +199,7 @@ def controls():
 
 
 def stylesheet():
-    c = THEMES['dark']
+    c = tokens()
     family = 'Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans'
     return f"""
         QWidget {{ background: transparent; color: {c['text']}; font-family: '{family}'; font-size: 15px; }}
@@ -188,9 +266,9 @@ def install():
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setPen(Qt.PenStyle.NoPen)
-            color = THEMES['dark']['accent' if control.hasFocus() or control.underMouse() else 'muted']
+            color = tokens()['accent' if control.hasFocus() or control.underMouse() else 'muted']
             if not control.isEnabled():
-                color = THEMES['dark']['border']
+                color = tokens()['border']
             painter.setBrush(QColor(color))
             if isinstance(control, QHeaderView):
                 if not control.isSortIndicatorShown():
@@ -246,8 +324,8 @@ def install():
             if event.type() == QEvent.Type.Paint and widget.property('lifetimePopup') and not isinstance(widget, QMenu):
                 painter = QPainter(widget)
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                painter.setBrush(QColor(THEMES['dark']['card']))
-                painter.setPen(QPen(QColor(THEMES['dark']['border']), 1))
+                painter.setBrush(QColor(tokens()['card']))
+                painter.setPen(QPen(QColor(tokens()['border']), 1))
                 painter.drawRoundedRect(QRectF(widget.rect()).adjusted(.5, .5, -.5, -.5), PANEL_RADIUS, PANEL_RADIUS)
                 painter.end()
             if event.type() in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.FocusIn,
@@ -304,3 +382,22 @@ def install():
                 pass
         app._lifetime_surfaces.controls.clear()
     app.aboutToQuit.connect(release)
+
+
+def _retint_style_sheets():
+    """Every widget stylesheet goes through T(), so literal dark-palette colours follow the active theme."""
+    try:
+        from PyQt6.QtWidgets import QWidget
+    except ImportError:
+        return
+    if getattr(QWidget.setStyleSheet, '_retinted', False):
+        return
+    original = QWidget.setStyleSheet
+
+    def setStyleSheet(self, text):
+        original(self, T(text))
+    setStyleSheet._retinted = True
+    QWidget.setStyleSheet = setStyleSheet
+
+
+_retint_style_sheets()

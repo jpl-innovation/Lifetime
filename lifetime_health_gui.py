@@ -7,7 +7,7 @@ from lifetime_i18n import tr, date_text, datetime_text, on_language_change
 from lifetime_charts import Plot, RangeSegments, range_bounds, weekly
 from lifetime_tasks import Tasks
 import lifetime_health as health
-from lifetime_theme import install
+from lifetime_theme import install, tokens
 from PyQt6.QtGui import QColor, QPainter
 
 
@@ -39,7 +39,7 @@ class GoodDot(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor('#4CC38A'))
+        painter.setBrush(QColor(tokens()['good']))
         painter.drawEllipse(1, 1, 8, 8)
 
 
@@ -147,7 +147,7 @@ class HealthPage(QWidget):
     def chart(self, layout, title, unit, kind='bars'):
         layout.addWidget(text(tr(title), 'caption'))
         plot = HealthPlot(kind, unit)
-        plot.bar_color = '#FFC93C'
+        plot.bar_color = tokens()['accent']
         plot.setMinimumWidth(0)
         plot.setFixedHeight(150)
         plot.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
