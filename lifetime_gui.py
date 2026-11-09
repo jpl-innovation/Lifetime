@@ -23,7 +23,7 @@ from lifetime_i18n import duration
 from lifetime_dashboard import ProbeWorker, SystemDashboard, RefreshGlyph
 from lifetime_charts import Insights, Plot, clean_daily, date_series
 from lifetime_health_gui import HealthPage
-from lifetime_shell import Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
+from lifetime_shell import ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
 from lifetime_settings import load_settings, save_settings, update_settings
 from lifetime_setup import SetupDialog, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
@@ -32,7 +32,7 @@ from lifetime_connect import ConnectPage
 from lifetime_reveal import reveal, NUMBER_DELAY
 from lifetime_tasks import Tasks
 
-from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme
+from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
@@ -526,18 +526,15 @@ class Window(QWidget):
         outer.setSpacing(0)
         self.status = label('', 'status')
         self.status_dot = LiveDot()
-        self.language_control = segments([tr('EN'), tr('VI')],
-                                         lambda index: self.switch_language(('en', 'vi')[index]))
+        self.language_control = ModeSwitch([tr('EN'), tr('VI')],
+                                           lambda index: self.switch_language(('en', 'vi')[index]), globe=True)
         self.language_control.group.button(('en', 'vi').index(language())).setChecked(True)
-        for button in self.language_control.group.buttons():
-            button.setMinimumSize(40, 36)       # tall enough for the button's padding, so its corners are never cut
         self.language_control.setAccessibleName(tr('Language'))
-        self.theme_control = segments([tr('Auto'), tr('Light'), tr('Dark')],
-                                      lambda index: self.switch_theme(('auto', 'light', 'dark')[index]))
+        self.theme_control = ModeSwitch([tr('Auto'), tr('Light'), tr('Dark')],
+                                        lambda index: self.switch_theme(('auto', 'light', 'dark')[index]),
+                                        icons=('auto', 'light', 'dark'))
         saved_theme = self.settings.get('theme', 'auto')
         self.theme_control.group.button(('auto', 'light', 'dark').index(saved_theme if saved_theme in ('auto', 'light', 'dark') else 'auto')).setChecked(True)
-        for button in self.theme_control.group.buttons():
-            button.setMinimumSize(40, 36)
         self.theme_control.setAccessibleName(tr('Theme'))
         self.sidebar = Sidebar(self.select_page, self.open_settings, motion_reduced,
                                self.language_control, self.status, self.status_dot, self.theme_control)
@@ -791,6 +788,9 @@ class Window(QWidget):
         self.reflow()
         self.apply_theme()
         QApplication.instance().paletteChanged.connect(self.apply_theme)
+        hints = QApplication.instance().styleHints()
+        if hasattr(hints, 'colorSchemeChanged'):
+            hints.colorSchemeChanged.connect(self.system_theme_changed)
         self.refresh()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
@@ -844,7 +844,7 @@ class Window(QWidget):
         self.language_control.group.button(('en', 'vi').index(value)).setChecked(True)
 
     def switch_theme(self, value):
-        """Light / dark / follow the system. Saved first, then Lifetime restarts itself so every surface repaints cleanly."""
+        """Light / dark / follow the system. Changes in place: the new theme spreads out from the control."""
         previous = self.settings.get('theme', 'auto')
         if value == previous:
             return
@@ -855,24 +855,24 @@ class Window(QWidget):
             self.theme_control.group.button(('auto', 'light', 'dark').index(previous)).setChecked(True)
             return
         self.settings['theme'] = value
-        self.relaunch()
+        button = self.theme_control.group.button(('auto', 'light', 'dark').index(value))
+        self.reveal_theme(resolve_theme(value), button.mapTo(self, button.rect().center()))
 
-    def relaunch(self):
-        from PyQt6.QtCore import QProcessEnvironment
-        environment = QProcessEnvironment.systemEnvironment()
-        environment.insert('LIFETIME_RELAUNCH', '1')   # tells the new copy not to hand over to this one
-        process = QProcess()
-        process.setProgram(sys.executable)
-        process.setArguments(list(sys.argv[1:] if getattr(sys, 'frozen', False) else sys.argv))
-        process.setProcessEnvironment(environment)
-        started = process.startDetached()
-        if not (started[0] if isinstance(started, tuple) else started):
-            QMessageBox.information(self, tr('Theme saved'), tr('Close and reopen Lifetime to apply the new theme.'))
-            return
-        if self.tray:
-            self.tray.quit()
-        else:
-            QApplication.quit()
+    def reveal_theme(self, name, origin):
+        if name != active_theme():
+            theme_reveal(self, origin, lambda: self.apply_live_theme(name))
+
+    def apply_live_theme(self, name):
+        set_theme(name)
+        retint_all()
+        self.apply_theme()
+        self.sidebar.refresh_theme()
+        self.system.update_values(self.worker.values, THEMES[self.theme])
+        self.refresh()
+
+    def system_theme_changed(self, *_):
+        if self.settings.get('theme', 'auto') == 'auto':
+            self.reveal_theme(resolve_theme('auto'), self.rect().center())
 
     def retranslate_content(self):
         self.log_name = tr('Windows event log') if sys.platform == 'win32' else tr('system journal')
@@ -1367,8 +1367,7 @@ if __name__ == '__main__':
         if candidate.exists():
             app.setWindowIcon(QIcon(str(candidate)))
             break
-    relaunched = os.environ.pop('LIFETIME_RELAUNCH', None)
-    if tray_available() and not relaunched and tell_running_instance('lifetime-gui'):
+    if tray_available() and tell_running_instance('lifetime-gui'):
         sys.exit(0)
     settings = load_settings()
     set_language(settings['language'])

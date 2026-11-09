@@ -83,7 +83,7 @@ class HealthPageTests(unittest.TestCase):
         set_language('vi'); self.app.processEvents()
         self.assertIn('chu kỳ',self.page.battery_details.text().lower())
         for _, plot in self.page.power_widgets:
-            self.assertEqual(plot.bar_color,'#FFC93C')
+            self.assertIsNone(plot.bar_color)   # None = the active theme's accent
             self.assertEqual(plot.overlay,[])
 
     def test_server_health_rows_and_text_hint(self):
