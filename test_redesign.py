@@ -24,7 +24,7 @@ class DashboardShellTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.directory = Path(self.temp.name)
-        self.ledger = new_ledger()
+        self.ledger = dict(new_ledger(), imported={'seconds': 0})   # a user whose past history was already rebuilt
         self.patches = [patch.object(gui, 'data_dir', return_value=self.directory),
                         patch.object(gui, 'read_ledger', return_value=self.ledger)]
         for p in self.patches:
@@ -87,6 +87,18 @@ class DashboardShellTests(unittest.TestCase):
         self.w.select_page(0)
         QTest.qWait(300)
         self.assertEqual(self.w.scroll.verticalScrollBar().maximum(), 0)
+
+    def test_rebuild_banner_shows_only_until_history_is_imported(self):
+        self.assertFalse(self.w.history_banner.isVisible())
+        self.w.display_ledger(dict(self.ledger, imported=None))
+        self.app.processEvents()
+        self.assertTrue(self.w.history_banner.isVisible())
+        with patch.object(self.w, 'rebuild_history') as action:
+            QTest.mouseClick(self.w.rebuild_button, Qt.MouseButton.LeftButton)
+            action.assert_called_once()
+        self.w.display_ledger(self.ledger)
+        self.app.processEvents()
+        self.assertFalse(self.w.history_banner.isVisible())
 
     def test_both_reduced_motion_paths_are_instant(self):
         for flag, environment in ((True, '0'), (False, '1')):

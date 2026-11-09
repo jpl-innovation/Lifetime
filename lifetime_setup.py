@@ -130,8 +130,11 @@ class SetupDialog(QDialog):
             no = QRadioButton(tr('No, start with current tracking') if key == 'rebuild' else tr('No, I will start it myself'))
             group.addButton(yes)
             group.addButton(no)
-            yes.setChecked(self.initial[key])
-            no.setChecked(not self.initial[key])
+            # First run: pre-select "rebuild past history" so a new user gets their real total without asking anyone.
+            # The explanation above says exactly what is read; picking No is one click.
+            wanted = self.initial[key] or (key == 'rebuild' and not self.initial['completed'])
+            yes.setChecked(wanted)
+            no.setChecked(not wanted)
             page.addWidget(yes)
             page.addWidget(no)
             page.addStretch()
