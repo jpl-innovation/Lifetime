@@ -146,6 +146,7 @@ VI = {
     'Known hours before tracking. Replaces the existing baseline.': 'Số giờ đã sử dụng trước khi theo dõi. Giá trị này sẽ thay thế số giờ ban đầu hiện có.',
     'Starting hours': 'Số giờ ban đầu', 'Set baseline': 'Lưu số giờ ban đầu',
     'Add earlier usage': 'Thêm thời gian đã dùng trước đó',
+    'Select all': 'Chọn tất cả',
     'history.banner': 'Lifetime hiện chỉ tính thời gian từ lần khởi động gần nhất. Thêm thời gian đã dùng trước đó để tổng thể hiện đúng máy đã được dùng bao lâu. Việc này đọc nhật ký của chính máy; không có dữ liệu nào rời khỏi máy.',
     'Start tracker': 'Bắt đầu theo dõi', 'Tracking active': 'Đang theo dõi', 'Tracker offline': 'Đã dừng theo dõi',
     'Ledger unavailable': 'Không đọc được dữ liệu',
