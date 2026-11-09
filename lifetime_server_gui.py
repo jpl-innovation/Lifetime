@@ -23,7 +23,9 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEd
 from lifetime_admin import AdminClient
 import lifetime_i18n as catalog
 from lifetime_protocol import CLIENT_VERSION, IDENTITY_FIELDS, validate_identity
-from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi
+from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, set_theme, resolve_theme
+import json
+import os
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
@@ -32,7 +34,7 @@ from lifetime_reveal import reveal, count_up
 from lifetime_server_devices import (ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
-from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance
+from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
 
@@ -187,7 +189,7 @@ class ServerWindow(QMainWindow):
         self.refresh_button.setMinimumWidth(132)
         actions.addWidget(self.refresh_button)
         self.credit = QLabel()
-        self.credit.setPixmap(QPixmap(str(Path(__file__).parent / 'assets/jpl_innovation.png')).scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.bind(self.credit, 'Made by JPL Innovation', 'setToolTip')
         actions.addWidget(self.credit)
         self.language_choice = QComboBox()
@@ -197,6 +199,15 @@ class ServerWindow(QMainWindow):
         self.language_choice.setAccessibleName(self.t('Language'))
         self.language_choice.setMinimumWidth(164)
         self.language_choice.setMaximumWidth(180)
+        self.theme_choice = QComboBox()
+        for key, name in (('auto', 'Auto'), ('light', 'Light'), ('dark', 'Dark')):
+            self.theme_choice.addItem(self.t(name), key)
+        saved = read_theme_preference(self.directory)
+        self.theme_choice.setCurrentIndex(('auto', 'light', 'dark').index(saved))
+        self.theme_choice.setAccessibleName(self.t('Theme'))
+        self.theme_choice.setMinimumWidth(164)
+        self.theme_choice.setMaximumWidth(180)
+        self.theme_choice.currentIndexChanged.connect(self._theme_changed)
         self.tabs = ServerPages()
         layout.addWidget(self.chrome)
         self.loading_bar = LoadingBar()
@@ -676,7 +687,7 @@ class ServerWindow(QMainWindow):
         for field, key, unit in (('cpu_percent', 'CPU', '%'), ('ram_percent', 'RAM', '%'), ('battery_percent', 'Battery', '%'), ('temperature_c', 'Temperature', '°C')):
             detail_layout.addWidget(self.label(key))
             plot = Plot('line', unit)
-            plot.bar_color = '#FFC93C'
+            plot.bar_color = T(T('#FFC93C'))
             plot.setFixedHeight(155)
             self.performance_plots[field] = plot
             detail_layout.addWidget(plot)
@@ -942,7 +953,7 @@ class ServerWindow(QMainWindow):
             self._detail['last_received_at'] = item['sample']['observed_at']
             self._detail['reporting_status'] = 'reporting'
             self.detail_status.setText(self._fleet_status('reporting'))
-            self.detail_dot.setPixmap(status_dot('#4CC38A').pixmap(20, 20))
+            self.detail_dot.setPixmap(status_dot(T('#4CC38A')).pixmap(20, 20))
             self._power_state(self._detail)
         marker = self.t('Live: {seconds}s ago' if fresh else 'Last seen: {seconds}s ago', seconds=int(age)) if age is not None else self.t('Last seen')
         if self.live_marker.text() != marker:
@@ -1323,6 +1334,9 @@ class ServerWindow(QMainWindow):
         language_panel, language_layout = self._section('Language')
         language_layout.addWidget(self.language_choice, 0, Qt.AlignmentFlag.AlignLeft)
         self.admin_layout.addWidget(language_panel)
+        theme_panel, theme_layout = self._section('Theme')
+        theme_layout.addWidget(self.theme_choice, 0, Qt.AlignmentFlag.AlignLeft)
+        self.admin_layout.addWidget(theme_panel)
         backups, layout = self._section('Backup and restore')
         self.backup_button = self.button('Save backup', self.backup)
         self.restore_button = self.button('Restore backup', self.restore)
@@ -1358,6 +1372,25 @@ class ServerWindow(QMainWindow):
 
     def _mark_identity_dirty(self):
         self._identity_dirty = True
+
+    def _theme_changed(self):
+        """Save the choice, then restart the dashboard so every surface repaints in the new theme."""
+        from PyQt6.QtCore import QProcess, QProcessEnvironment
+        write_theme_preference(self.directory, self.theme_choice.currentData())
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert('LIFETIME_RELAUNCH', '1')
+        process = QProcess()
+        process.setProgram(sys.executable)
+        process.setArguments(list(sys.argv[1:] if getattr(sys, 'frozen', False) else sys.argv))
+        process.setProcessEnvironment(environment)
+        started = process.startDetached()
+        if not (started[0] if isinstance(started, tuple) else started):
+            return
+        tray = getattr(self, 'tray', None)
+        if tray is not None and hasattr(tray, 'quit'):
+            tray.quit()
+        else:
+            QApplication.quit()
 
     def _language_changed(self):
         self.language = self.language_choice.currentData()
@@ -1666,8 +1699,8 @@ class ServerWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, device['device_id'])
                 item.setData(Qt.ItemDataRole.UserRole + 1, device.get('today') if column == 3 else str(value).casefold())
                 if column == 2:
-                    item.setIcon(status_dot('#FFC93C' if unstable else '#4CC38A' if status == 'reporting' else '#FFC93C'
-                                            if status in ('pending', 'report-overdue') else '#9FB0CC'))
+                    item.setIcon(status_dot(T('#FFC93C') if unstable else T(T('#4CC38A')) if status == 'reporting' else T(T('#FFC93C'))
+                                            if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))))
                 if column == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if column == 4:
@@ -1830,8 +1863,8 @@ class ServerWindow(QMainWindow):
         self.detail_group.show()
         self.detail_group.setText(identity.get('department') or self.t('No group'))
         self.detail_status.setText(self._fleet_status(status))
-        self.detail_dot.setPixmap(status_dot('#4CC38A' if status == 'reporting' else '#FFC93C'
-            if status in ('pending', 'report-overdue') else '#9FB0CC').pixmap(20, 20))
+        self.detail_dot.setPixmap(status_dot(T('#4CC38A') if status == 'reporting' else T(T('#FFC93C'))
+            if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))).pixmap(20, 20))
         total = None if not totals else totals.get('measured_seconds', 0) + totals.get('imported_seconds', 0)
         self.detail_total.setText(missing if total is None else self.t('{hours} h', hours=f'{total / 3600:,.1f}'))
         history_data = device.get('history') if (device.get('policy') or {}).get('history') is True else None
@@ -1847,7 +1880,7 @@ class ServerWindow(QMainWindow):
                   ('Tracking since', self._date(tracking) if tracking else missing)]
         def table(rows):
             return '<table width="100%" cellspacing="0" cellpadding="4">' + ''.join(
-                '<tr><td style="color:#9FB0CC;">' + e(self.t(key)) +
+                T('<tr><td style="color:#9FB0CC;">') + e(self.t(key)) +
                 '</td><td>' + e(value) + '</td></tr>' for key, value in rows) + '</table>'   # no colons, as on Overview
         contents = table(fields)
         health = device.get('health') or {}
@@ -2057,7 +2090,7 @@ class ServerWindow(QMainWindow):
 
     def _style_kpis(self):
         for key, value in self.kpis.items():
-            color = '#FFC93C' if key in self._kpi_alerts else '#FFFFFF'
+            color = T(T('#FFC93C')) if key in self._kpi_alerts else T(T('#FFFFFF'))
             value.setStyleSheet(f'font-size: 28px; font-weight: 600; color: {color};')
 
     def _make_skeletons(self):
@@ -2232,8 +2265,8 @@ class ServerWindow(QMainWindow):
                 item.setToolTip(str(value) if column != 4 else (row['last'] or value))
                 if column == 2:
                     # Colour lives on the dot; the word stays in normal text colour for readability.
-                    item.setIcon(status_dot('#FFC93C' if row.get('unstable') else '#4CC38A' if row['status'] == 'reporting' else '#FFC93C'
-                                            if row['status'] in ('pending', 'report-overdue') else '#9FB0CC'))
+                    item.setIcon(status_dot(T('#FFC93C') if row.get('unstable') else T(T('#4CC38A')) if row['status'] == 'reporting' else T(T('#FFC93C'))
+                                            if row['status'] in ('pending', 'report-overdue') else T(T('#9FB0CC'))))
                 if column == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(row_index, column, item)
@@ -2283,18 +2316,18 @@ class ServerWindow(QMainWindow):
                   ('Coverage', self.t('Partial') if row['coverage'] == 'partial' else self.t('Unknown')),
                   ('Tracking since', self._date(row['tracking_since']) if row.get('tracking_since') else self.t('Not available')))
         contents = '<h2 style="margin:0 0 4px 0">' + e(row['name']) + '</h2>'
-        contents += '<p style="color:#9FB0CC;margin:4px 0">' + e(row['group'] or self.t('No group')) + ' · ' + e(self._fleet_status(row['status'])) + '</p>'
-        contents += '<p style="font-size:32px;font-weight:600;margin:8px 0 2px">' + e(hours) + '</p><p style="color:#9FB0CC;margin:2px 0 8px">' + e(self.t('Recorded awake time')) + '</p>'
+        contents += T('<p style="color:#9FB0CC;margin:4px 0">') + e(row['group'] or self.t('No group')) + ' · ' + e(self._fleet_status(row['status'])) + '</p>'
+        contents += '<p style="font-size:32px;font-weight:600;margin:8px 0 2px">' + e(hours) + T('</p><p style="color:#9FB0CC;margin:2px 0 8px">') + e(self.t('Recorded awake time')) + '</p>'
         contents += '<table width="100%" cellspacing="0" cellpadding="3">'
         for key, value in fields:
-            contents += '<tr><td style="color:#9FB0CC">' + e(self.t(key)) + '</td><td>' + e(value) + '</td></tr>'
+            contents += T('<tr><td style="color:#9FB0CC">') + e(self.t(key)) + '</td><td>' + e(value) + '</td></tr>'
         contents += '</table><p style="font-weight:600;margin:12px 0 4px">' + e(self.t('Health')) + '</p><table width="100%" cellspacing="0" cellpadding="3">'
         health = row.get('health') or {}
         for title, field in (('Crashes in 30 days', 'crashes_30d'), ('Unexpected shutdowns in 30 days', 'shutdowns_30d'),
                              ('Battery health', 'battery_health'), ('Cycle count', 'cycle_count'), ('Last crash', 'last_crash')):
             value = health.get(field)
             value = self.t('Not available') if value is None else (self._timestamp(value) if field == 'last_crash' else str(value) + ('%' if field == 'battery_health' else ''))
-            contents += '<tr><td style="color:#9FB0CC">' + e(self.t(title)) + '</td><td>' + e(value) + '</td></tr>'
+            contents += T('<tr><td style="color:#9FB0CC">') + e(self.t(title)) + '</td><td>' + e(value) + '</td></tr>'
         contents += '</table><p style="margin:8px 0 0">' + e(self.t('Selected date')) + ' · ' + e(self._duration(row['today'])) + '</p>'
         self.fleet_detail_text.setText(contents)
         self.today_bar.setValue(int(row['today'] or 0))
@@ -2309,14 +2342,14 @@ class ServerWindow(QMainWindow):
                  'command-pending': 'Command sent', 'command-delivered': 'Command delivered', 'command-done': 'Command finished',
                  'command-failed': 'Command failed', 'command-cancelled': 'Command cancelled', 'command-expired': 'Command expired',
                  'wake': 'Turn on sent'}
-        colors = {'report-received': '#65D782', 'report-overdue': '#FFC93C', 'enrollment-pending': '#FFC93C'}
+        colors = {'report-received': T(T('#65D782')), 'report-overdue': T(T('#FFC93C')), 'enrollment-pending': T(T('#FFC93C'))}
         for index, event in enumerate(events):
             values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time']))
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(event['time'] if column == 2 else value)
                 if column == 1:
-                    item.setIcon(status_dot(colors.get(event['kind'], '#9FB0CC')))
+                    item.setIcon(status_dot(colors.get(event['kind'], T(T('#9FB0CC')))))
                 if column == 2:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.events.setItem(index, column, item)
@@ -2421,7 +2454,7 @@ class ServerWindow(QMainWindow):
                 if column == 1:
                     item.setToolTip(self._timestamp(invitation['expires_at']))
                 if column == 4:
-                    item.setIcon(status_dot('#65D782' if state == 'Active' else '#9FB0CC'))
+                    item.setIcon(status_dot(T('#65D782') if state == 'Active' else T(T('#9FB0CC'))))
                 self.invitation_table.setItem(index, column, item)
             button = QPushButton(self.t('Revoke'))
             button.setAccessibleName(self.t('Revoke invitation') + ': ' + invitation['invitation_id'])
@@ -2496,6 +2529,27 @@ class ServerWindow(QMainWindow):
             self._filters_changed()
 
 
+def read_theme_preference(directory):
+    try:
+        value = json.loads((Path(directory) / 'ui.json').read_text(encoding='utf-8')).get('theme')
+    except (OSError, ValueError, AttributeError):
+        value = None
+    return value if value in ('auto', 'light', 'dark') else 'auto'
+
+
+def write_theme_preference(directory, value):
+    path = Path(directory) / 'ui.json'
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        data = data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        data = {}
+    data['theme'] = value if value in ('auto', 'light', 'dark') else 'auto'
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(data), encoding='utf-8')
+    os.replace(temporary, path)
+
+
 def create_application(argv=None):
     """The one place the dashboard's Qt application is configured.
 
@@ -2524,9 +2578,12 @@ def main(argv=None):
     parser.add_argument('--directory', required=True)
     parser.add_argument('--admin-port', type=int, required=True)
     parser.add_argument('--language', choices=('en', 'vi'), default='en')
+    parser.add_argument('--theme', choices=('auto', 'light', 'dark'), default=None)
     args = parser.parse_args(argv)
     application = create_application()
-    if tray_available() and tell_running_instance('lifetime-server-gui'):
+    set_theme(resolve_theme(args.theme or read_theme_preference(args.directory)))
+    relaunched = os.environ.pop('LIFETIME_RELAUNCH', None)
+    if tray_available() and not relaunched and tell_running_instance('lifetime-server-gui'):
         return 0
     window = ServerWindow(args.directory, args.admin_port, args.language)
     show_fitted(window)

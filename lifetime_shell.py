@@ -14,7 +14,8 @@ from lifetime_i18n_qt import QWidget, QPushButton, QLabel
 from lifetime_theme import CONTROL_RADIUS, install
 
 
-GREEN = '#4CC38A'
+from lifetime_theme import tokens
+GREEN = '#4CC38A'   # use tokens()['good'] where the background can be light
 
 
 def shut_down(app, window):
@@ -158,7 +159,7 @@ class PulseDot(QWidget):
     """Green status dot; while active a soft ring ripples outward every 2.4 s.
     Inactive: plain grey dot, no motion. The text beside it always names the state."""
 
-    def __init__(self, size=26, idle='#9FB0CC', reduce_motion=False):
+    def __init__(self, size=26, idle=None, reduce_motion=False):
         super().__init__()
         self.setFixedSize(size, size)
         self.idle, self.reduce_motion = idle, reduce_motion
@@ -205,7 +206,7 @@ class PulseDot(QWidget):
             t = min(self.wave / 0.7, 1.0)          # ring travels in the first 70%, then rests
             if t < 1.0:
                 eased = 1 - (1 - t) ** 3
-                ring = QColor(GREEN)
+                ring = QColor(tokens()['good'])
                 ring.setAlphaF(0.55 * (1 - eased))
                 p.setPen(QPen(ring, 2))
                 p.setBrush(Qt.BrushStyle.NoBrush)
@@ -213,11 +214,11 @@ class PulseDot(QWidget):
                 p.drawEllipse(c, r, r)
         p.setPen(Qt.PenStyle.NoPen)
         if self.active:
-            halo = QColor(GREEN)
+            halo = QColor(tokens()['good'])
             halo.setAlpha(55)
             p.setBrush(halo)
             p.drawEllipse(c, core + 2, core + 2)
-        p.setBrush(QColor(GREEN if self.active else self.idle))
+        p.setBrush(QColor(tokens()['good'] if self.active else (self.idle or tokens()['muted'])))
         p.drawEllipse(c, core, core)
 
 
@@ -317,10 +318,10 @@ class NavRow(QPushButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.underMouse() and not self.isChecked():
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor('#12203A'))
+            p.setBrush(QColor(tokens()['card']))
             p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), CONTROL_RADIUS, CONTROL_RADIUS)
         ring = self.hasFocus() and self.keyboard_focus
-        color = QColor('#FFFFFF' if self.isChecked() or ring else '#9FB0CC')
+        color = QColor(tokens()['text'] if self.isChecked() or ring else tokens()['muted'])
         p.setPen(QPen(color, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         p.save()
         p.translate((self.width()-20)/2 if self.sidebar.collapsed else 12, 12)
@@ -330,7 +331,7 @@ class NavRow(QPushButton):
             p.setFont(self.font())
             p.drawText(QRectF(44, 0, self.width()-48, 44), Qt.AlignmentFlag.AlignVCenter, self.text())
         if ring:
-            p.setPen(QPen(QColor('#FFC93C'), 2))
+            p.setPen(QPen(QColor(tokens()['accent']), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), CONTROL_RADIUS, CONTROL_RADIUS)
 
@@ -363,15 +364,32 @@ class DisclosureButton(QPushButton):
         super().paintEvent(event)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor('#9FB0CC'), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setPen(QPen(QColor(tokens()['muted']), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         x, y = self.width()-20, self.height()/2
         delta = -3 if self.isChecked() else 3
         p.drawLine(QPointF(x-4, y-delta/2), QPointF(x, y+delta/2))
         p.drawLine(QPointF(x, y+delta/2), QPointF(x+4, y-delta/2))
 
 
+def themed_logo(path):
+    """The JPL Innovation logo has white lettering for dark surfaces; on the light theme turn that near-white ink dark."""
+    from PyQt6.QtGui import QImage
+    from lifetime_theme import active_theme
+    image = QImage(str(path))
+    if active_theme() == 'light' and not image.isNull():
+        image = image.convertToFormat(QImage.Format.Format_ARGB32)
+        ink = QColor(37, 45, 45)
+        for y in range(image.height()):
+            for x in range(image.width()):
+                c = image.pixelColor(x, y)
+                if c.alpha() and min(c.red(), c.green(), c.blue()) >= 150 and max(c.red(), c.green(), c.blue()) - min(c.red(), c.green(), c.blue()) < 45:
+                    ink.setAlpha(c.alpha())
+                    image.setPixelColor(x, y, ink)
+    return QPixmap.fromImage(image)
+
+
 class Sidebar(QWidget):
-    def __init__(self, select, settings, motion_reduced, language_control, status, dot):
+    def __init__(self, select, settings, motion_reduced, language_control, status, dot, theme_control=None):
         super().__init__()
         self.setObjectName('sidebar')
         self.collapsed = False
@@ -424,7 +442,7 @@ class Sidebar(QWidget):
         self.credit_logo = QLabel()
         self.credit_logo.setObjectName('jplLogo')
         self.credit_logo.setAccessibleName(tr('Made by JPL Innovation'))
-        self.credit_pixmap = QPixmap(str(root/'assets/jpl_innovation.png'))
+        self.credit_pixmap = themed_logo(root/'assets/jpl_innovation.png')
         self.credit_logo.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.credit_logo.setFixedHeight(CREDIT_HEIGHT)
         self.credit_logo.setPixmap(crisp(self.credit_pixmap, 200, CREDIT_HEIGHT, self))
@@ -434,19 +452,22 @@ class Sidebar(QWidget):
         self.credit.setWordWrap(True)
         box.addWidget(self.credit)
         self.language_control = language_control
+        self.theme_control = theme_control
         box.addWidget(language_control)
+        if theme_control is not None:
+            box.addWidget(theme_control)
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor('#08101F'))
+        p.fillRect(self.rect(), QColor(tokens()['sidebar']))
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         row = self.group.checkedButton()
         if row and not row.isHidden():
             r = QRectF(row.x(), self.indicator_y, row.width(), row.height())
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor('#1B2A46'))
+            p.setBrush(QColor(tokens()['track']))
             p.drawRoundedRect(r, CONTROL_RADIUS, CONTROL_RADIUS)
-            p.setBrush(QColor('#FFC93C'))
+            p.setBrush(QColor(tokens()['accent']))
             p.drawRoundedRect(QRectF(r.left()+2, r.center().y()-8, 2, 16), 1, 1)
 
     def move_indicator(self, animated=True):
@@ -497,8 +518,9 @@ class Sidebar(QWidget):
         self.credit.setVisible(not collapsed)
         self.credit_logo.setPixmap(crisp(self.credit_pixmap, 44 if collapsed else 200, CREDIT_HEIGHT, self))
         self.credit_logo.setToolTip(tr('Made by JPL Innovation'))
-        layout = self.language_control.layout()
-        layout.setDirection(QHBoxLayout.Direction.TopToBottom if collapsed else QHBoxLayout.Direction.LeftToRight)
+        for control in (self.language_control, self.theme_control):
+            if control is not None:
+                control.layout().setDirection(QHBoxLayout.Direction.TopToBottom if collapsed else QHBoxLayout.Direction.LeftToRight)
         self.move_indicator(False)
         for row in self.rows:
             row.update()

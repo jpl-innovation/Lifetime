@@ -32,7 +32,7 @@ from lifetime_connect import ConnectPage
 from lifetime_reveal import reveal, NUMBER_DELAY
 from lifetime_tasks import Tasks
 
-from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS
+from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
@@ -111,7 +111,7 @@ class ValueLabel(QLabel):
         painter.drawText(self.contentsRect(), self.alignment() | Qt.AlignmentFlag.AlignVCenter, shown)
 
 
-STATUS_GOOD = '#4CC38A'   # same green as the server's "Connected" dots
+STATUS_GOOD = '#4CC38A'   # dark-mode green; light mode uses tokens()['good']
 
 
 class LiveDot(PulseDot):
@@ -503,7 +503,7 @@ class OverviewTrend(Plot):
         super().paintEvent(event)
         if self.hasFocus():
             p = QPainter(self)
-            p.setPen(QPen(QColor(THEMES['dark']['muted']), 1))
+            p.setPen(QPen(QColor(tokens()['muted']), 1))
             p.drawRoundedRect(self.rect().adjusted(1, 1, -2, -2), PANEL_RADIUS, PANEL_RADIUS)
 
 
@@ -532,8 +532,15 @@ class Window(QWidget):
         for button in self.language_control.group.buttons():
             button.setMinimumSize(40, 36)       # tall enough for the button's padding, so its corners are never cut
         self.language_control.setAccessibleName(tr('Language'))
+        self.theme_control = segments([tr('Auto'), tr('Light'), tr('Dark')],
+                                      lambda index: self.switch_theme(('auto', 'light', 'dark')[index]))
+        saved_theme = self.settings.get('theme', 'auto')
+        self.theme_control.group.button(('auto', 'light', 'dark').index(saved_theme if saved_theme in ('auto', 'light', 'dark') else 'auto')).setChecked(True)
+        for button in self.theme_control.group.buttons():
+            button.setMinimumSize(40, 36)
+        self.theme_control.setAccessibleName(tr('Theme'))
         self.sidebar = Sidebar(self.select_page, self.open_settings, motion_reduced,
-                               self.language_control, self.status, self.status_dot)
+                               self.language_control, self.status, self.status_dot, self.theme_control)
         self.navigation = self.sidebar
         outer.addWidget(self.sidebar)
         self.scroll = QScrollArea()
@@ -836,6 +843,37 @@ class Window(QWidget):
         self.apply_visibility()
         self.language_control.group.button(('en', 'vi').index(value)).setChecked(True)
 
+    def switch_theme(self, value):
+        """Light / dark / follow the system. Saved first, then Lifetime restarts itself so every surface repaints cleanly."""
+        previous = self.settings.get('theme', 'auto')
+        if value == previous:
+            return
+        try:
+            update_settings({'theme': value}, data_dir())
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
+            self.theme_control.group.button(('auto', 'light', 'dark').index(previous)).setChecked(True)
+            return
+        self.settings['theme'] = value
+        self.relaunch()
+
+    def relaunch(self):
+        from PyQt6.QtCore import QProcessEnvironment
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert('LIFETIME_RELAUNCH', '1')   # tells the new copy not to hand over to this one
+        process = QProcess()
+        process.setProgram(sys.executable)
+        process.setArguments(list(sys.argv[1:] if getattr(sys, 'frozen', False) else sys.argv))
+        process.setProcessEnvironment(environment)
+        started = process.startDetached()
+        if not (started[0] if isinstance(started, tuple) else started):
+            QMessageBox.information(self, tr('Theme saved'), tr('Close and reopen Lifetime to apply the new theme.'))
+            return
+        if self.tray:
+            self.tray.quit()
+        else:
+            QApplication.quit()
+
     def retranslate_content(self):
         self.log_name = tr('Windows event log') if sys.platform == 'win32' else tr('system journal')
         self.verify_button.setAccessibleName(tr('verify.accessible', log=self.log_name))
@@ -1075,7 +1113,7 @@ class Window(QWidget):
                 animation.stop()
 
     def apply_theme(self):
-        self.theme = 'dark'
+        self.theme = active_theme()
         t = THEMES[self.theme]
         surface = t['card']
         install()
@@ -1329,13 +1367,15 @@ if __name__ == '__main__':
         if candidate.exists():
             app.setWindowIcon(QIcon(str(candidate)))
             break
-    if tray_available() and tell_running_instance('lifetime-gui'):
+    relaunched = os.environ.pop('LIFETIME_RELAUNCH', None)
+    if tray_available() and not relaunched and tell_running_instance('lifetime-gui'):
         sys.exit(0)
     settings = load_settings()
     set_language(settings['language'])
+    set_theme(resolve_theme(settings.get('theme', 'auto')))
     previous = dict(settings)
     if not settings['completed']:
-        setup = SetupDialog(THEMES['dark'], settings)
+        setup = SetupDialog(THEMES[active_theme()], settings)
         if setup.exec() != setup.DialogCode.Accepted:
             sys.exit(0)
         settings = setup.result_settings

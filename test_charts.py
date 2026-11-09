@@ -151,8 +151,13 @@ class AggregationTests(unittest.TestCase):
             channels = [int(color[i:i+2], 16)/255 for i in (1, 3, 5)]
             linear = [v/12.92 if v <= .04045 else ((v+.055)/1.055)**2.4 for v in channels]
             return sum(a*b for a, b in zip(linear, (.2126, .7152, .0722)))
-        values = [luminance(color) for color in c.HEAT_RAMP]
-        self.assertTrue(all(a < b for a, b in zip(values, values[1:])))
+        import lifetime_theme as theme
+        # Busier days read as "more": brighter on the dark theme, darker ink on the light theme.
+        dark = [luminance(color) for color in theme.THEMES['dark']['heat']]
+        self.assertTrue(all(a < b for a, b in zip(dark, dark[1:])))
+        light = [luminance(color) for color in theme.THEMES['light']['heat']]
+        self.assertTrue(all(a > b for a, b in zip(light, light[1:])))
+        self.assertEqual(len(dark), len(light))
 
 
 class LiveChartTests(unittest.TestCase):
