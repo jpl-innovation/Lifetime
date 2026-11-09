@@ -115,5 +115,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" Lifetime-Windows.zip Lifetime-Linux.tar.gz Lifetime-Server-Windows.zip SHA256SUMS.txt \
-            --title "Lifetime $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          # Idempotent: re-tagging the same version (for example to ship a fix without a new version number)
+          # replaces the files of the existing release instead of failing or leaving it without downloads.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" Lifetime-Windows.zip Lifetime-Linux.tar.gz Lifetime-Server-Windows.zip SHA256SUMS.txt --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "Lifetime $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$GITHUB_REF_NAME" Lifetime-Windows.zip Lifetime-Linux.tar.gz Lifetime-Server-Windows.zip SHA256SUMS.txt \
+              --title "Lifetime $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          fi
