@@ -185,6 +185,21 @@ class ConsentGuiTests(unittest.TestCase):
             dialog.confirm_delete()
             delete.assert_not_called()
 
+    def test_select_all_toggles_every_optional_choice_and_stays_in_sync(self):
+        dialog = SetupDialog(gui.THEMES['dark'], dict(completed=False))
+        optional = [box for key, box in dialog.checks.items() if key != 'awake']
+        self.assertTrue(dialog.checks['awake'].isChecked())
+        self.assertFalse(dialog.select_all.isChecked())
+        dialog.select_all.setChecked(True)
+        self.assertTrue(all(box.isChecked() for box in optional))
+        optional[0].setChecked(False)                      # un-ticking one item un-ticks "Select all"
+        self.assertFalse(dialog.select_all.isChecked())
+        optional[0].setChecked(True)                       # ticking the last one ticks it again
+        self.assertTrue(dialog.select_all.isChecked())
+        dialog.select_all.setChecked(False)
+        self.assertFalse(any(box.isChecked() for box in optional))
+        self.assertTrue(dialog.checks['awake'].isChecked())   # the required item can never be switched off
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -107,6 +107,9 @@ class SetupDialog(QDialog):
         language_page.addStretch()
         first = self.page(tr('What would you like to track?'),
             tr('Lifetime records how long this computer is awake. Everything stays on this computer. Nothing is uploaded.'))
+        self.select_all = ConsentCheckBox(tr('Select all'), tokens['bg'])
+        self.select_all.setMinimumHeight(32)
+        first.addWidget(self.select_all)
         for key, title, explanation in CHOICES:
             box = ConsentCheckBox(tr(title), tokens['bg'])
             box.setChecked(self.initial[key])
@@ -117,6 +120,9 @@ class SetupDialog(QDialog):
             description.setContentsMargins(33, 0, 0, 8)
             first.addWidget(description)
             self.checks[key] = box
+            box.toggled.connect(self.sync_select_all)
+        self.select_all.toggled.connect(self.toggle_all_choices)
+        self.sync_select_all()
         first.addStretch()
         self.answers = {}
         for key, title, explanation in (
@@ -162,6 +168,19 @@ class SetupDialog(QDialog):
         layout.addLayout(controls)
         self.go(0)
         on_language_change(self.retranslate_content)
+
+    def optional_choices(self):
+        return [box for box in self.checks.values() if box.isEnabled()]   # 'Awake time' is required and always on
+
+    def toggle_all_choices(self, checked):
+        for box in self.optional_choices():
+            box.setChecked(checked)
+
+    def sync_select_all(self, *_):
+        boxes = self.optional_choices()
+        self.select_all.blockSignals(True)
+        self.select_all.setChecked(bool(boxes) and all(box.isChecked() for box in boxes))
+        self.select_all.blockSignals(False)
 
     def change_language(self, value):
         set_language(value)
