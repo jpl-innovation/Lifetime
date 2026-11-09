@@ -535,7 +535,58 @@ def parse_journal_awake(text):
 JOURNAL_TIMEOUT = 20   # a large journal can take longer than the default 5 s
 
 
+SLEEP_START_ID = '6bbd95ee977941e497c48be27c254128'   # systemd: "Performing sleep operation ..."
+SLEEP_END_ID = '8811e6df2a8e40f58a94cea26f8ebf14'     # systemd: "System returned from sleep operation ..."
+
+
+def parse_systemd_sleep(text):
+    """Seconds asleep this boot from systemd-sleep's start/return records, or None when there are none.
+
+    Unlike the kernel's "PM: suspend entry/exit" lines these cover suspend-then-hibernate: the hibernate phase
+    (hours or days) is a separate sleep operation that the kernel suspend messages never mention. Each
+    operation's sleep time is (real-time span) - (monotonic span), because the monotonic clock stops while asleep.
+    """
+    rows = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get('MESSAGE_ID') in (SLEEP_START_ID, SLEEP_END_ID) and '__MONOTONIC_TIMESTAMP' in row:
+            rows.append((int(row['__REALTIME_TIMESTAMP'])/1e6, int(row['__MONOTONIC_TIMESTAMP'])/1e6, row['MESSAGE_ID']))
+    rows.sort()
+    start, total, pairs = None, 0.0, 0
+    for real, mono, kind in rows:
+        if kind == SLEEP_START_ID:
+            start = (real, mono)
+        elif start is not None:
+            total += max(0.0, (real-start[0])-(mono-start[1]))
+            pairs += 1
+            start = None
+    if start is not None or pairs == 0:   # unfinished operation (still asleep / truncated) or no records
+        return None
+    return total
+
+
+def systemd_sleep_seconds():
+    result = run_command(['journalctl', '-b', '0', '-o', 'json', '--no-pager', 'SYSLOG_IDENTIFIER=systemd-sleep'],
+                         timeout=JOURNAL_TIMEOUT)
+    if result is None or result[0] != 0:
+        return None
+    return parse_systemd_sleep(result[1])
+
+
 def verify_linux_awake():
+    # Preferred source: systemd's own sleep records (handles suspend-then-hibernate, where the hibernate phase can
+    # last days and is invisible to the kernel suspend messages below).
+    sleep = systemd_sleep_seconds()
+    if sleep is not None:
+        clocks = probe_clocks() or {}
+        uptime, awake = clocks.get('uptime'), clocks.get('awake')
+        if uptime is not None and awake is not None and 0 <= sleep <= uptime:
+            event_seconds = max(0, uptime-sleep)
+            return dict(event_seconds=event_seconds, awake_seconds=awake, difference=abs(event_seconds-awake),
+                        message='Compared journal suspend intervals with the awake clock')
     # Kernel PM strings are kernel-generated (not translated); classification uses
     # transport metadata and clocks, never translated user-facing journal messages.
     # journalctl exits with 1 when --grep matches nothing, which is normal for a boot that never slept.

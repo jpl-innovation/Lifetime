@@ -9,8 +9,11 @@ import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from websockets.exceptions import InvalidHandshake, InvalidStatus
-from websockets.sync.client import connect
+try:
+    from websockets.exceptions import InvalidHandshake, InvalidStatus
+    from websockets.sync.client import connect
+except ModuleNotFoundError:  # optional dependency (requirements-server.txt); the desktop app works without it
+    raise unittest.SkipTest('websockets is not installed: skipping the live-socket tests')
 
 import lifetime_agent as la
 import lifetime_permissions as permissions
