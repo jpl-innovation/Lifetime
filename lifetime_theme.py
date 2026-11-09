@@ -1,13 +1,14 @@
 """Shared native surfaces, controls and popup treatment for both editions."""
 import sys
+import weakref
 THEMES = {
     'dark': dict(bg='#0B1426', card='#12203A', text='#FFFFFF',
                  muted='#9FB0CC', border='#22345A', accent='#FFC93C', accent_hover='#FFD761', track='#1B2A46',
-                 bar='#3A5688', line='#34445E', sidebar='#08101F', danger='#FF8A8A', bg2='#0F1A30', raise_='#243C63', skel_a='#263A60', skel_b='#34507F', tile='#182944', tile_hover='#1E3254', tile_border='#2A3E66', border2='#223959', good='#4CC38A', heat=('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')),
+                 bar='#3A5688', thumb='#2A3E66', line='#34445E', sidebar='#08101F', danger='#FF8A8A', bg2='#0F1A30', raise_='#243C63', skel_a='#263A60', skel_b='#34507F', tile='#182944', tile_hover='#1E3254', tile_border='#2A3E66', border2='#223959', good='#4CC38A', heat=('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')),
     # Light mode: the same layout in a calm paper palette. The amber is darkened so it stays readable as text and lines.
     'light': dict(bg='#F3F4F1', card='#FCFCFA', text='#252D2D',
                   muted='#5F6B69', border='#D3D9D5', accent='#9A5B00', accent_hover='#7F4A00', track='#E1E6E1',
-                  bar='#B8C4D6', line='#C5CDC8', sidebar='#E8EBE6', danger='#B3261E', bg2='#ECEEEA', raise_='#DDE3EB', skel_a='#E4E7E2', skel_b='#D5DAD3', tile='#F7F8F5', tile_hover='#EEF0EB', tile_border='#CBD2CC', border2='#D3D9D5', good='#2E8B57', heat=('#E9E5D6', '#E0CE98', '#D2B25A', '#B98A1F', '#9A5B00')),
+                  bar='#B8C4D6', thumb='#FDFDFC', line='#C5CDC8', sidebar='#E8EBE6', danger='#B3261E', bg2='#ECEEEA', raise_='#DDE3EB', skel_a='#E4E7E2', skel_b='#D5DAD3', tile='#F7F8F5', tile_hover='#EEF0EB', tile_border='#CBD2CC', border2='#D3D9D5', good='#2E8B57', heat=('#E9E5D6', '#E0CE98', '#D2B25A', '#B98A1F', '#9A5B00')),
 }
 
 _active = 'dark'
@@ -384,8 +385,20 @@ def install():
     app.aboutToQuit.connect(release)
 
 
+def _canonical(text):
+    """Express a stylesheet in dark-palette literals, whichever theme it was written under, so it can be re-tinted later."""
+    if _active == 'dark' or not isinstance(text, str):
+        return text
+    import re
+    reverse = {value.upper(): THEMES['dark'][key] for key, value in THEMES[_active].items() if isinstance(value, str)}
+    return re.sub(r'#[0-9A-Fa-f]{6}', lambda m: reverse.get(m.group(0).upper(), m.group(0)), text)
+
+
+_styled = weakref.WeakSet()
+
+
 def _retint_style_sheets():
-    """Every widget stylesheet goes through T(), so literal dark-palette colours follow the active theme."""
+    """Every widget stylesheet goes through T() and is remembered, so an open window can change theme in place."""
     try:
         from PyQt6.QtWidgets import QWidget
     except ImportError:
@@ -395,9 +408,28 @@ def _retint_style_sheets():
     original = QWidget.setStyleSheet
 
     def setStyleSheet(self, text):
-        original(self, T(text))
+        self._lifetime_style = _canonical(text)
+        _styled.add(self)
+        original(self, T(self._lifetime_style))
     setStyleSheet._retinted = True
+    setStyleSheet._original = original
     QWidget.setStyleSheet = setStyleSheet
+
+
+def retint_all():
+    """Re-apply every remembered stylesheet in the active theme and repaint all open windows."""
+    from PyQt6 import sip
+    from PyQt6.QtWidgets import QApplication, QWidget
+    application = QApplication.instance()
+    if application is not None:
+        application.setStyleSheet(stylesheet())
+    original = QWidget.setStyleSheet._original
+    for widget in list(_styled):
+        if not sip.isdeleted(widget):
+            original(widget, T(widget._lifetime_style))
+    if application is not None:
+        for widget in application.allWidgets():
+            widget.update()
 
 
 _retint_style_sheets()

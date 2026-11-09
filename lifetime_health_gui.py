@@ -147,7 +147,7 @@ class HealthPage(QWidget):
     def chart(self, layout, title, unit, kind='bars'):
         layout.addWidget(text(tr(title), 'caption'))
         plot = HealthPlot(kind, unit)
-        plot.bar_color = tokens()['accent']
+        plot.bar_color = None      # the active theme's accent
         plot.setMinimumWidth(0)
         plot.setFixedHeight(150)
         plot.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)

@@ -52,7 +52,7 @@ class ScrollDialog(QDialog):
         tokens = THEMES[active_theme()]
         install()
         self.setStyleSheet(stylesheet() + """
-            QTextBrowser { background: #FFFFFF; color: #252D2D; }
+            QTextBrowser { background: #FEFEFE; color: #262E2E; }   /* paper in both themes */
         """)
         layout = QVBoxLayout(self)
         self.scroll = QScrollArea()

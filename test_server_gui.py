@@ -763,7 +763,7 @@ class ServerGuiTests(unittest.TestCase):
         self.assertEqual(self.window.performance_range.currentData(), 'live')
         self.window.performance_range.setCurrentIndex(1)
         self.assertEqual(self.window.performance_plots['cpu_percent'].values, [0, None])
-        self.assertEqual(self.window.performance_plots['cpu_percent'].bar_color, '#FFC93C')
+        self.assertIsNone(self.window.performance_plots['cpu_percent'].bar_color)   # None = the active theme's accent
         self.assertFalse(self.window.power_buttons['refresh'].isEnabled())
         self.assertIn('pending', self.window.control_reason.text())
         self.window.tabs.setCurrentIndex(1)

@@ -148,7 +148,6 @@ VI = {
     'Add earlier usage': 'Thêm thời gian đã dùng trước đó',
     'Select all': 'Chọn tất cả',
     'Auto': 'Tự động', 'Light': 'Sáng', 'Dark': 'Tối', 'Theme': 'Giao diện',
-    'Theme saved': 'Đã lưu giao diện', 'Close and reopen Lifetime to apply the new theme.': 'Hãy đóng và mở lại Lifetime để áp dụng giao diện mới.',
     'history.banner': 'Lifetime hiện chỉ tính thời gian từ lần khởi động gần nhất. Thêm thời gian đã dùng trước đó để tổng thể hiện đúng máy đã được dùng bao lâu. Việc này đọc nhật ký của chính máy; không có dữ liệu nào rời khỏi máy.',
     'Start tracker': 'Bắt đầu theo dõi', 'Tracking active': 'Đang theo dõi', 'Tracker offline': 'Đã dừng theo dõi',
     'Ledger unavailable': 'Không đọc được dữ liệu',

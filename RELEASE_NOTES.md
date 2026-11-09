@@ -15,7 +15,7 @@ Check your download against `SHA256SUMS.txt`.
 
 The files attached to this release were refreshed (same version number, new checksums in `SHA256SUMS.txt`):
 
-- **Light theme** for Lifetime on Windows and Linux and for Lifetime Server. Choose **Auto** (follows your system), **Light** or **Dark** at the bottom of the sidebar (Server: Administration > Theme). Lifetime restarts itself to apply it.
+- **Light theme** for Lifetime on Windows and Linux and for Lifetime Server. Choose **Auto** (follows your system), **Light** or **Dark** at the bottom of the sidebar (Server: Administration > Theme). The new theme spreads across the window from the control, with no restart.
 - **Add earlier usage**: a new computer used to show only the time since its last start. Setup now offers (and pre-selects) adding the time before Lifetime was installed, and the Overview has an **Add earlier usage** button until it is done. The wording no longer talks about "rebuilding" or "logs".
 - **Select all** on the "What would you like to track?" step.
 - **Verify** counts suspend-then-hibernate correctly on Linux (it showed a false gap of days after a long hibernate).

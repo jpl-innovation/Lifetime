@@ -5,8 +5,8 @@ import os
 import shlex
 import sys
 
-from PyQt6.QtCore import Qt, QRectF, QPointF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent
-from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
+from PyQt6.QtCore import Qt, QRectF, QPointF, QLineF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication, QButtonGroup, QHBoxLayout, QMenu, QSystemTrayIcon, QVBoxLayout, QSizePolicy
 from lifetime_i18n import tr
@@ -388,6 +388,278 @@ def themed_logo(path):
     return QPixmap.fromImage(image)
 
 
+def reduced_motion():
+    return os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
+
+
+class ThemeReveal(QWidget):
+    """A picture of the old theme, with a growing circle cut out of it: the new theme spreads from the control."""
+    DURATION = 620
+
+    def __init__(self, window, snapshot, origin):
+        super().__init__(window)
+        self.host, self.snapshot, self.origin, self.radius = window, snapshot, QPointF(origin), 0.0
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setGeometry(window.rect())
+        corners = (window.rect().topLeft(), window.rect().topRight(), window.rect().bottomLeft(), window.rect().bottomRight())
+        self.reach = max(QLineF(self.origin, QPointF(corner)).length() for corner in corners) + 4
+        self.animation = QVariantAnimation(self)
+        self.animation.setDuration(self.DURATION)
+        self.animation.setStartValue(0.0)
+        self.animation.setEndValue(self.reach)
+        self.animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.animation.valueChanged.connect(self.step)
+        self.animation.finished.connect(self.finish)
+        window.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Resize:
+            QTimer.singleShot(0, self.finish)
+        return False
+
+    def step(self, value):
+        self.radius = value
+        self.update()
+
+    def finish(self):
+        if getattr(self.host, '_theme_reveal', None) is self:
+            self.host._theme_reveal = None
+        self.animation.stop()
+        self.host.removeEventFilter(self)
+        self.hide()
+        self.deleteLater()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        remaining = QPainterPath()
+        remaining.addRect(QRectF(self.rect()))
+        circle = QPainterPath()
+        circle.addEllipse(self.origin, self.radius, self.radius)
+        p.setClipPath(remaining.subtracted(circle))
+        p.drawPixmap(0, 0, self.snapshot)
+        p.setClipping(False)
+        edge = QColor(tokens()['accent'])
+        edge.setAlphaF(.55)
+        p.setPen(QPen(edge, 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(self.origin, self.radius, self.radius)
+
+
+def theme_reveal(window, origin, apply):
+    """Run `apply` (which changes the theme in place) behind a picture of the old look, then wipe that picture away."""
+    running = getattr(window, '_theme_reveal', None)
+    if running is not None:
+        running.finish()
+    if reduced_motion() or not window.isVisible():
+        apply()
+        return
+    overlay = ThemeReveal(window, window.grab(), origin)
+    window._theme_reveal = overlay
+    overlay.show()
+    overlay.raise_()
+    apply()
+    overlay.raise_()
+    overlay.animation.start()
+
+
+def draw_mode_icon(p, kind, center, color, emphasis):
+    """Sun, moon and auto marks that settle into shape as they are selected (16 px, one stroke weight)."""
+    p.save()
+    p.translate(center)
+    pen = QPen(color, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    if kind == 'light':
+        p.drawEllipse(QPointF(0, 0), 3.0, 3.0)
+        p.rotate(45 * (1 - emphasis))
+        inner, outer = 5.4, 6.2 + 1.3 * emphasis
+        for _ in range(8):
+            p.drawLine(QPointF(0, -inner), QPointF(0, -outer))
+            p.rotate(45)
+    elif kind == 'dark':
+        moon = QPainterPath()
+        moon.addEllipse(QPointF(0, 0), 6.5, 6.5)
+        bite = QPainterPath()
+        offset = 9.5 - 4.5 * emphasis
+        bite.addEllipse(QPointF(offset * .75, -offset * .55), 5.6, 5.6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawPath(moon.subtracted(bite))
+    else:
+        p.drawEllipse(QPointF(0, 0), 6.5, 6.5)
+        p.rotate(180 * (1 - emphasis))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawPie(QRectF(-4.5, -4.5, 9, 9), 90 * 16, 180 * 16)
+    p.restore()
+
+
+def mix(first, second, amount):
+    a, b = QColor(first), QColor(second)
+    return QColor.fromRgbF(*(a.getRgbF()[i] + (b.getRgbF()[i] - a.getRgbF()[i]) * amount for i in range(3)))
+
+
+class SwitchSegment(QPushButton):
+    def __init__(self, control, index, text, icon):
+        super().__init__(text, control)
+        self.control, self.index, self.icon_kind = control, index, icon
+        self.setCheckable(True)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)   # the focus ring appears for keyboard users, not after a click
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setToolTip(text)
+
+    def event(self, event):
+        if event.type() in (QEvent.Type.Enter, QEvent.Type.Leave):
+            self.update()
+        return super().event(event)
+
+    def keyPressEvent(self, event):
+        step = {Qt.Key.Key_Left: -1, Qt.Key.Key_Up: -1, Qt.Key.Key_Right: 1, Qt.Key.Key_Down: 1}.get(event.key())
+        neighbour = self.control.group.button(self.index + step) if step else None
+        if neighbour is not None:
+            neighbour.setFocus()
+            neighbour.click()
+        elif not step:
+            super().keyPressEvent(event)
+
+    def paintEvent(self, event):
+        c = tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        emphasis = self.control.emphasis(self.index)
+        ink = mix(c['text'] if self.underMouse() else c['muted'], c['text'], emphasis)
+        font = self.font()
+        font.setPixelSize(13)
+        font.setWeight(QFont.Weight.DemiBold if emphasis > .5 else QFont.Weight.Normal)
+        p.setFont(font)
+        area = QRectF(self.rect())
+        if self.icon_kind:
+            shown = emphasis if not self.control.vertical else 0
+            label = p.fontMetrics().horizontalAdvance(self.text())
+            total = 16 + (6 + label) * shown
+            icon_at = QPointF(area.center().x() - total / 2 + 8, area.center().y())
+            draw_mode_icon(p, self.icon_kind, icon_at, mix(ink, c['accent'], emphasis), emphasis)
+            if shown > .02:
+                p.setOpacity(shown)
+                p.setPen(ink)
+                p.drawText(QRectF(icon_at.x() + 14, area.y(), label + 4, area.height()),
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.text())
+                p.setOpacity(1)
+        else:
+            p.setPen(ink)
+            p.drawText(area, Qt.AlignmentFlag.AlignCenter, self.text())
+        if self.hasFocus():
+            p.setPen(QPen(QColor(c['accent']), 1.5))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(area.adjusted(1, 1, -1, -1), 6, 6)
+
+
+class ModeSwitch(QWidget):
+    """A recessed track with one raised tile that slides to the choice. Theme segments open up to name the current mode."""
+    HEIGHT, PAD, COMPACT = 42, 3, 40
+
+    def __init__(self, items, callback, icons=None, globe=False):
+        super().__init__()
+        self.group = QButtonGroup(self)
+        self.vertical, self.globe, self.expanding = False, globe, bool(icons)
+        self.position = 0.0
+        self.segments = []
+        for index, text in enumerate(items):
+            button = SwitchSegment(self, index, text, icons[index] if icons else None)
+            self.group.addButton(button, index)
+            self.segments.append(button)
+        self.group.button(0).setChecked(True)
+        self.setFixedHeight(self.HEIGHT)
+        self.animation = QVariantAnimation(self)
+        self.animation.setDuration(260)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.valueChanged.connect(self.place)
+        self.group.idToggled.connect(lambda index, checked: checked and self.move_to(index))
+        self.group.idClicked.connect(callback)
+
+    def set_vertical(self, vertical):
+        self.vertical = vertical
+        self.setFixedHeight(len(self.segments) * self.COMPACT + 2 * self.PAD if vertical else self.HEIGHT)
+        self.place(self.position)
+
+    def move_to(self, index):
+        self.animation.stop()
+        if reduced_motion() or not self.isVisible():
+            self.place(float(index))
+            return
+        self.animation.setStartValue(self.position)
+        self.animation.setEndValue(float(index))
+        self.animation.start()
+
+    def emphasis(self, index):
+        return max(0.0, 1.0 - abs(self.position - index))
+
+    def rects(self, position):
+        pad, count = self.PAD, len(self.segments)
+        if self.vertical:
+            height = (self.height() - 2 * pad) / count
+            return [QRectF(pad, pad + height * i, self.width() - 2 * pad, height) for i in range(count)]
+        left = pad + (30 if self.globe else 0)
+        space = self.width() - left - pad
+        if self.expanding:
+            spare = max(0.0, space - count * self.COMPACT)
+            widths = [self.COMPACT + spare * max(0.0, 1.0 - abs(position - i)) for i in range(count)]
+        else:
+            widths = [space / count] * count
+        result, x = [], left
+        for width in widths:
+            result.append(QRectF(x, pad, width, self.height() - 2 * pad))
+            x += width
+        return result
+
+    def thumb(self):
+        rects = self.rects(self.position)
+        low = min(int(self.position), len(rects) - 1)
+        high = min(low + 1, len(rects) - 1)
+        amount = self.position - low
+        a, b = rects[low], rects[high]
+        return QRectF(a.x() + (b.x() - a.x()) * amount, a.y() + (b.y() - a.y()) * amount,
+                      a.width() + (b.width() - a.width()) * amount, a.height() + (b.height() - a.height()) * amount)
+
+    def place(self, position):
+        self.position = float(position)
+        for button, rect in zip(self.segments, self.rects(self.position)):
+            button.setGeometry(rect.toRect())
+            button.update()
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.place(self.position)
+
+    def paintEvent(self, event):
+        c = tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(c['track']))
+        p.drawRoundedRect(QRectF(self.rect()), CONTROL_RADIUS, CONTROL_RADIUS)
+        if self.globe and not self.vertical:
+            p.save()
+            p.translate(18, self.height() / 2)
+            p.setPen(QPen(QColor(c['muted']), 1.3))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QPointF(0, 0), 6.5, 6.5)
+            p.drawEllipse(QPointF(0, 0), 2.8, 6.5)
+            p.drawLine(QPointF(-6.5, 0), QPointF(6.5, 0))
+            p.restore()
+        thumb = self.thumb()
+        shadow = QColor(0, 0, 0, 46)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(shadow)
+        p.drawRoundedRect(thumb.translated(0, 1), 6, 6)
+        p.setBrush(QColor(c['thumb']))
+        p.setPen(QPen(QColor(c['border']), 1))
+        p.drawRoundedRect(thumb.adjusted(.5, .5, -.5, -.5), 6, 6)
+
+
 class Sidebar(QWidget):
     def __init__(self, select, settings, motion_reduced, language_control, status, dot, theme_control=None):
         super().__init__()
@@ -442,6 +714,7 @@ class Sidebar(QWidget):
         self.credit_logo = QLabel()
         self.credit_logo.setObjectName('jplLogo')
         self.credit_logo.setAccessibleName(tr('Made by JPL Innovation'))
+        self.credit_path = root/'assets/jpl_innovation.png'
         self.credit_pixmap = themed_logo(root/'assets/jpl_innovation.png')
         self.credit_logo.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.credit_logo.setFixedHeight(CREDIT_HEIGHT)
@@ -456,6 +729,10 @@ class Sidebar(QWidget):
         box.addWidget(language_control)
         if theme_control is not None:
             box.addWidget(theme_control)
+
+    def refresh_theme(self):
+        self.credit_pixmap = themed_logo(self.credit_path)
+        self.credit_logo.setPixmap(crisp(self.credit_pixmap, 44 if self.collapsed else 200, CREDIT_HEIGHT, self))
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -520,7 +797,7 @@ class Sidebar(QWidget):
         self.credit_logo.setToolTip(tr('Made by JPL Innovation'))
         for control in (self.language_control, self.theme_control):
             if control is not None:
-                control.layout().setDirection(QHBoxLayout.Direction.TopToBottom if collapsed else QHBoxLayout.Direction.LeftToRight)
+                control.set_vertical(collapsed)
         self.move_indicator(False)
         for row in self.rows:
             row.update()

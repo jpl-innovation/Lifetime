@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEd
 from lifetime_admin import AdminClient
 import lifetime_i18n as catalog
 from lifetime_protocol import CLIENT_VERSION, IDENTITY_FIELDS, validate_identity
-from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, set_theme, resolve_theme
+from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, set_theme, resolve_theme, active_theme, retint_all
 import json
 import os
 from lifetime_layout import ControlRow
@@ -34,7 +34,7 @@ from lifetime_reveal import reveal, count_up
 from lifetime_server_devices import (ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
-from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo
+from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
 
@@ -687,7 +687,7 @@ class ServerWindow(QMainWindow):
         for field, key, unit in (('cpu_percent', 'CPU', '%'), ('ram_percent', 'RAM', '%'), ('battery_percent', 'Battery', '%'), ('temperature_c', 'Temperature', '°C')):
             detail_layout.addWidget(self.label(key))
             plot = Plot('line', unit)
-            plot.bar_color = T(T('#FFC93C'))
+            plot.bar_color = None
             plot.setFixedHeight(155)
             self.performance_plots[field] = plot
             detail_layout.addWidget(plot)
@@ -1374,23 +1374,19 @@ class ServerWindow(QMainWindow):
         self._identity_dirty = True
 
     def _theme_changed(self):
-        """Save the choice, then restart the dashboard so every surface repaints in the new theme."""
-        from PyQt6.QtCore import QProcess, QProcessEnvironment
-        write_theme_preference(self.directory, self.theme_choice.currentData())
-        environment = QProcessEnvironment.systemEnvironment()
-        environment.insert('LIFETIME_RELAUNCH', '1')
-        process = QProcess()
-        process.setProgram(sys.executable)
-        process.setArguments(list(sys.argv[1:] if getattr(sys, 'frozen', False) else sys.argv))
-        process.setProcessEnvironment(environment)
-        started = process.startDetached()
-        if not (started[0] if isinstance(started, tuple) else started):
-            return
-        tray = getattr(self, 'tray', None)
-        if tray is not None and hasattr(tray, 'quit'):
-            tray.quit()
-        else:
-            QApplication.quit()
+        """Save the choice and change in place: the new theme spreads out from the control."""
+        value = self.theme_choice.currentData()
+        write_theme_preference(self.directory, value)
+        name = resolve_theme(value)
+        if name != active_theme():
+            origin = self.theme_choice.mapTo(self, self.theme_choice.rect().center())
+            theme_reveal(self, origin, lambda: self._apply_live_theme(name))
+
+    def _apply_live_theme(self, name):
+        set_theme(name)
+        retint_all()
+        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.refresh()
 
     def _language_changed(self):
         self.language = self.language_choice.currentData()
@@ -1699,7 +1695,7 @@ class ServerWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, device['device_id'])
                 item.setData(Qt.ItemDataRole.UserRole + 1, device.get('today') if column == 3 else str(value).casefold())
                 if column == 2:
-                    item.setIcon(status_dot(T('#FFC93C') if unstable else T(T('#4CC38A')) if status == 'reporting' else T(T('#FFC93C'))
+                    item.setIcon(status_dot(T('#FFC93C') if unstable else T(T('#4CC38A')) if status == 'reporting' else T('#FFC93C')
                                             if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))))
                 if column == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -1863,7 +1859,7 @@ class ServerWindow(QMainWindow):
         self.detail_group.show()
         self.detail_group.setText(identity.get('department') or self.t('No group'))
         self.detail_status.setText(self._fleet_status(status))
-        self.detail_dot.setPixmap(status_dot(T('#4CC38A') if status == 'reporting' else T(T('#FFC93C'))
+        self.detail_dot.setPixmap(status_dot(T('#4CC38A') if status == 'reporting' else T('#FFC93C')
             if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))).pixmap(20, 20))
         total = None if not totals else totals.get('measured_seconds', 0) + totals.get('imported_seconds', 0)
         self.detail_total.setText(missing if total is None else self.t('{hours} h', hours=f'{total / 3600:,.1f}'))
@@ -2090,7 +2086,7 @@ class ServerWindow(QMainWindow):
 
     def _style_kpis(self):
         for key, value in self.kpis.items():
-            color = T(T('#FFC93C')) if key in self._kpi_alerts else T(T('#FFFFFF'))
+            color = T('#FFC93C') if key in self._kpi_alerts else T(T('#FFFFFF'))
             value.setStyleSheet(f'font-size: 28px; font-weight: 600; color: {color};')
 
     def _make_skeletons(self):
@@ -2265,7 +2261,7 @@ class ServerWindow(QMainWindow):
                 item.setToolTip(str(value) if column != 4 else (row['last'] or value))
                 if column == 2:
                     # Colour lives on the dot; the word stays in normal text colour for readability.
-                    item.setIcon(status_dot(T('#FFC93C') if row.get('unstable') else T(T('#4CC38A')) if row['status'] == 'reporting' else T(T('#FFC93C'))
+                    item.setIcon(status_dot(T('#FFC93C') if row.get('unstable') else T(T('#4CC38A')) if row['status'] == 'reporting' else T('#FFC93C')
                                             if row['status'] in ('pending', 'report-overdue') else T(T('#9FB0CC'))))
                 if column == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -2342,7 +2338,7 @@ class ServerWindow(QMainWindow):
                  'command-pending': 'Command sent', 'command-delivered': 'Command delivered', 'command-done': 'Command finished',
                  'command-failed': 'Command failed', 'command-cancelled': 'Command cancelled', 'command-expired': 'Command expired',
                  'wake': 'Turn on sent'}
-        colors = {'report-received': T(T('#65D782')), 'report-overdue': T(T('#FFC93C')), 'enrollment-pending': T(T('#FFC93C'))}
+        colors = {'report-received': T(T('#65D782')), 'report-overdue': T('#FFC93C'), 'enrollment-pending': T('#FFC93C')}
         for index, event in enumerate(events):
             values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time']))
             for column, value in enumerate(values):
@@ -2582,8 +2578,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     application = create_application()
     set_theme(resolve_theme(args.theme or read_theme_preference(args.directory)))
-    relaunched = os.environ.pop('LIFETIME_RELAUNCH', None)
-    if tray_available() and not relaunched and tell_running_instance('lifetime-server-gui'):
+    if tray_available() and tell_running_instance('lifetime-server-gui'):
         return 0
     window = ServerWindow(args.directory, args.admin_port, args.language)
     show_fitted(window)

@@ -100,17 +100,38 @@ class DashboardShellTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.history_banner.isVisible())
 
-    def test_theme_choice_is_saved_then_the_app_restarts_itself(self):
+    def test_theme_choice_is_saved_and_applied_in_the_same_window(self):
+        import lifetime_theme as theme
+        self.addCleanup(theme.set_theme, 'dark')
         self.assertEqual([b.text() for b in self.w.theme_control.group.buttons()], ['Auto', 'Light', 'Dark'])
-        self.assertTrue(self.w.theme_control.group.button(0).isChecked())
-        with patch.object(gui, 'update_settings') as save, patch.object(self.w, 'relaunch') as relaunch:
+        with patch.object(gui, 'update_settings') as save, patch.dict(os.environ, {'LIFETIME_REDUCE_MOTION': '1'}):
             self.w.theme_control.group.button(1).click()
             save.assert_called_once_with({'theme': 'light'}, self.directory)
-            relaunch.assert_called_once()
-        with patch.object(gui, 'update_settings') as save, patch.object(self.w, 'relaunch') as relaunch:
-            self.w.switch_theme('light')                    # already light: nothing to do
-            save.assert_not_called()
-            relaunch.assert_not_called()
+        self.assertEqual(theme.active_theme(), 'light')
+        self.assertEqual(self.w.theme, 'light')
+        self.assertTrue(self.w.isVisible())
+        self.assertIn(theme.THEMES['light']['bg'], self.w._lifetime_style and gui.QWidget.styleSheet(self.w))
+
+    def test_theme_reveal_covers_the_window_then_removes_itself(self):
+        import lifetime_theme as theme
+        from lifetime_shell import ThemeReveal, theme_reveal
+        self.addCleanup(theme.set_theme, 'dark')
+        with patch.dict(os.environ, {'LIFETIME_REDUCE_MOTION': '0'}):
+            theme_reveal(self.w, self.w.rect().center(), lambda: self.w.apply_live_theme('light'))
+        overlay = self.w._theme_reveal
+        self.assertIsInstance(overlay, ThemeReveal)
+        self.assertEqual(overlay.geometry(), self.w.rect())
+        QTest.qWait(ThemeReveal.DURATION + 120)
+        self.assertIsNone(self.w._theme_reveal)
+
+    def test_switch_slides_and_keeps_every_segment_reachable(self):
+        control = self.w.theme_control
+        for button in control.group.buttons():
+            self.assertGreaterEqual(button.width(), 36)
+            self.assertGreaterEqual(button.height(), 36)
+        control.set_vertical(True)
+        self.assertEqual(len({b.y() for b in control.group.buttons()}), 3)
+        control.set_vertical(False)
 
     def test_both_reduced_motion_paths_are_instant(self):
         for flag, environment in ((True, '0'), (False, '1')):
