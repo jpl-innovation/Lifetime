@@ -28,12 +28,12 @@ fi
 if command -v journalctl >/dev/null 2>&1; then
     journal_test="$(LC_ALL=C journalctl --system -n 1 --no-pager 2>&1)" || journal_test="permission denied"
     if [[ "$journal_test" == *"not seeing messages"* || "$journal_test" == *"permission denied"* || "$journal_test" == *"insufficient permissions"* ]]; then
-        printf 'Reading the full system journal helps rebuild past history. Adding your user to systemd-journal requires approval and a new login.\n'
+        printf 'Reading the full system journal lets Lifetime add the time this computer was used before you installed it. Adding your user to systemd-journal requires approval and a new login.\n'
         read -r -p 'Run sudo usermod -aG systemd-journal for your user? (y/N) ' answer || answer=''
         if [[ "$answer" == 'y' || "$answer" == 'Y' ]]; then
-            sudo usermod -aG systemd-journal "$(id -un)" || printf 'Journal access unchanged; history rebuild may be limited.\n'
+            sudo usermod -aG systemd-journal "$(id -un)" || printf 'Journal access unchanged; earlier usage may be incomplete.\n'
         else
-            printf 'Continuing without journal access changes; history rebuild may be limited.\n'
+            printf 'Continuing without journal access changes; earlier usage may be incomplete.\n'
         fi
     fi
 fi

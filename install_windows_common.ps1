@@ -1,6 +1,6 @@
 # Shared source/executable installer; PowerShell 5.1 compatible.
 $ErrorActionPreference = 'Stop'
-Write-Host 'Administrator approval is requested to read the full System event log for history rebuild and register the login task.'
+Write-Host 'Administrator approval is requested to read the full Windows activity log (so Lifetime can add the time this computer was used before you installed it) and to start tracking at login.'
 $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $Admin = ([Security.Principal.WindowsPrincipal]::new($Identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $OriginalUser) { $OriginalUser = $Identity.Name }
@@ -22,14 +22,14 @@ if (-not $Admin -and -not $ElevationAttempted) {
         $Child = Start-Process -FilePath powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru `
             -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $Encoded)
     } catch {
-        Write-Host 'Administrator approval was declined or unavailable. Continuing per-user; history rebuild may be limited.'
+        Write-Host 'Administrator approval was declined or unavailable. Continuing per-user; earlier usage may be incomplete.'
     }
     if ($Child) {
         if ($Child.ExitCode -ne 0) { throw "Elevated installer exited with code $($Child.ExitCode)." }
         return
     }
 }
-if (-not $Admin -and $ElevationAttempted) { Write-Host 'Continuing per-user; history rebuild may be limited.' }
+if (-not $Admin -and $ElevationAttempted) { Write-Host 'Continuing per-user; earlier usage may be incomplete.' }
 $InstallDir = Join-Path $OriginalLocalAppData 'Lifetime'
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 if ($ExePackage) {

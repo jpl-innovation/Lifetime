@@ -120,17 +120,17 @@ class SetupDialog(QDialog):
         first.addStretch()
         self.answers = {}
         for key, title, explanation in (
-            ('rebuild', tr('Rebuild past history?'),
-             tr('Reads retained System event logs on Windows or the system journal on Linux. Past totals may be incomplete if older logs are missing.')),
+            ('rebuild', tr('Include earlier use of this computer?'),
+             tr('Lifetime has only just been installed, so it can only count from now on. Say Yes and it reads your computer\'s own activity log to work out how long this computer has already been used. Nothing leaves this computer. Older records may be missing, so the earlier total can be approximate.')),
             ('autostart', tr('Start tracking at login?'),
              tr('Starts the awake-time tracker when you sign in. You can also start it yourself from Lifetime.'))):
             page = self.page(tr(title), tr(explanation))
             group = QButtonGroup(self)
-            yes = QRadioButton(tr('Yes, rebuild from system logs') if key == 'rebuild' else tr('Yes, start tracking at login'))
-            no = QRadioButton(tr('No, start with current tracking') if key == 'rebuild' else tr('No, I will start it myself'))
+            yes = QRadioButton(tr('Yes, add my earlier usage') if key == 'rebuild' else tr('Yes, start tracking at login'))
+            no = QRadioButton(tr('No, count from now on') if key == 'rebuild' else tr('No, I will start it myself'))
             group.addButton(yes)
             group.addButton(no)
-            # First run: pre-select "rebuild past history" so a new user gets their real total without asking anyone.
+            # First run: pre-select "include earlier use" so a new user gets their real total without asking anyone.
             # The explanation above says exactly what is read; picking No is one click.
             wanted = self.initial[key] or (key == 'rebuild' and not self.initial['completed'])
             yes.setChecked(wanted)
@@ -218,8 +218,8 @@ class SetupDialog(QDialog):
         if index == 4:
             value = self.choices()
             names = [tr(title) for key, title, _ in CHOICES if value[key]]
-            self.summary.setText(tr('Tracking\n') + '\n'.join(names) + tr('\n\nPast history: ') +
-                (tr('Rebuild from system logs') if value['rebuild'] else tr('Do not rebuild')) + tr('\nStart at login: ') +
+            self.summary.setText(tr('Tracking\n') + '\n'.join(names) + tr('\n\nEarlier usage: ') +
+                (tr('Add from the computer\'s own log') if value['rebuild'] else tr('Do not add')) + tr('\nStart at login: ') +
                 (tr('Yes') if value['autostart'] else tr('No')))
         self.pages.currentWidget().verticalScrollBar().setValue(0)
 

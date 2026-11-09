@@ -769,7 +769,7 @@ class Window(QWidget):
         self.history_hint.setWordWrap(True)
         self.history_hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         history_row.addWidget(self.history_hint, 1)
-        self.rebuild_button = QPushButton(tr('Rebuild past history'))
+        self.rebuild_button = QPushButton(tr('Add earlier usage'))
         self.rebuild_button.clicked.connect(lambda: self.rebuild_history())
         history_row.addWidget(self.rebuild_button)
         body_layout.insertWidget(1, self.history_banner)
@@ -943,7 +943,7 @@ class Window(QWidget):
         self.verification.setText(tr('rebuild.busy', log=self.log_name))
         self.import_process.finished.connect(self.import_finished)
         self.import_process.errorOccurred.connect(lambda error: self.verification.setText(
-            tr('History rebuild could not start. Check that the history importer is installed.')))
+            tr('Earlier usage could not be added. Check that the history importer is installed.')))
         self.import_process.start(command[0], command[1:] + ['--apply', '--data-dir', str(data_dir())])
 
     def import_finished(self, code, status):
