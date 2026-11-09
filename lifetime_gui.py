@@ -758,6 +758,22 @@ class Window(QWidget):
         tracker.addWidget(self.start)
         body_layout.insertWidget(0, self.tracker_banner)
         self.tracker_banner.hide()
+        # History banner: without it a fresh install only counts time since the last boot (often about an hour), which
+        # looks wrong on a computer that has been used for months. One click reads the system log and fills it in.
+        self.history_banner = QFrame()
+        self.history_banner.setObjectName('insetPanel')
+        history_row = QHBoxLayout(self.history_banner)
+        history_row.setContentsMargins(16, 12, 12, 12)
+        history_row.setSpacing(16)
+        self.history_hint = label(tr('history.banner'), 'caption')
+        self.history_hint.setWordWrap(True)
+        self.history_hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        history_row.addWidget(self.history_hint, 1)
+        self.rebuild_button = QPushButton(tr('Rebuild past history'))
+        self.rebuild_button.clicked.connect(lambda: self.rebuild_history())
+        history_row.addWidget(self.rebuild_button)
+        body_layout.insertWidget(1, self.history_banner)
+        self.history_banner.hide()
         self.shortcuts = []
         for number, page in enumerate((0, 2, 1, 4, 5, 3), 1):
             shortcut = QShortcut(QKeySequence(f'Ctrl+{number}'), self)
@@ -1264,6 +1280,8 @@ class Window(QWidget):
             self.start.setVisible(not running)
             self.tracker_banner.setVisible(not running)
             self.hint.setVisible(not running)
+            importing = hasattr(self, 'import_process') and self.import_process.state() != QProcess.ProcessState.NotRunning
+            self.history_banner.setVisible(bool(self.settings.get('completed')) and not ledger.get('imported') and not importing)
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)
