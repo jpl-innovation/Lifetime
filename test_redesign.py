@@ -109,7 +109,8 @@ class DashboardShellTests(unittest.TestCase):
         before = w.intro.value
         self.assertGreater(before, 0)
         from lifetime_reveal import progress
-        self.assertLess(progress(w.cards['boots'].entrance, eased=False), 1.0)     # its digits are still rolling; the text is already real
+        self.assertLess(progress(w.hero.entrance, eased=False), 1.0)               # the total's digits are still rolling
+        self.assertIsNone(w.cards['boots'].entrance)                               # ordinary figures just appear
         self.assertEqual(w.cards['boots'].value.text(), '40')
         self.ledger['total_seconds'] = 36002
         w.display_ledger(self.ledger)                        # fresh data mid-entrance: no restart
@@ -123,6 +124,24 @@ class DashboardShellTests(unittest.TestCase):
         self.assertEqual(w.intro.value, 1.0)                                        # tab switches never replay it
         self.assertEqual(w.cards['boots'].value.text(), '40')
 
+    def test_the_total_rolls_again_every_time_overview_is_opened_or_the_window_comes_back(self):
+        w = self.w
+        w.display_ledger(self.ledger)
+        QTest.qWait(2200)
+        self.assertTrue(w.intro.done)
+        self.assertEqual(w.hero.replay, 1.0)
+        w.select_page(1)
+        self.assertEqual(w.hero.replay, 1.0)                  # other pages leave it alone
+        w.select_page(0)
+        self.assertLess(w.hero.replay, 1.0)                   # opening Overview again rolls it again
+        QTest.qWait(1300)
+        self.assertEqual(w.hero.replay, 1.0)                  # and it lands exactly
+        w.hide()
+        w.show()
+        self.assertLess(w.hero.replay, 1.0)                   # coming back from the tray rolls it too
+        QTest.qWait(1300)
+        self.assertEqual(w.hero.replay, 1.0)
+
     def test_reduced_motion_overview_shows_the_final_numbers_at_once(self):
         self.w.close()
         with patch.dict(os.environ, {'LIFETIME_REDUCE_MOTION': '1'}):
@@ -135,6 +154,8 @@ class DashboardShellTests(unittest.TestCase):
             self.app.processEvents()
             self.assertTrue(w.intro.done)
             self.assertEqual(w.cards['boots'].value.text(), '40')
+            w.hero.roll_again()
+            self.assertEqual(w.hero.replay, 1.0)        # nothing rolls under reduced motion
             w.close()
 
     def test_theme_choice_is_saved_and_applied_in_the_same_window(self):
