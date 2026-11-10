@@ -216,7 +216,11 @@ class AddDeviceSheet(QDialog):
         code_row.addWidget(self.copy_code)
         layout.addLayout(code_row)
         expiry = dt.datetime.fromisoformat(issued['expires_at'].replace('Z', '+00:00')).astimezone()
-        self.expiry = QLabel(translate('Valid until {time}', time=expiry.strftime('%H:%M')))
+        # A code lasts 24 hours by default, so a bare "23:58" reads as a minute from now. Say the day unless it is today.
+        if expiry.date() == dt.datetime.now().astimezone().date():
+            self.expiry = QLabel(translate('Valid until {time}', time=expiry.strftime('%H:%M')))
+        else:
+            self.expiry = QLabel(translate('Valid until {date}, {time}', date=expiry.strftime('%Y-%m-%d'), time=expiry.strftime('%H:%M')))
         self.expiry.setStyleSheet('color: #9FB0CC;')
         layout.addWidget(self.expiry)
         self.other_network = QPushButton(translate('Other network?'))
