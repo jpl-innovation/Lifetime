@@ -1259,9 +1259,9 @@ class ServerWindow(QMainWindow):
         self.admin_layout.addWidget(retention)
         about, about_layout = self._section('About')
         credit = QHBoxLayout()
-        image = QLabel()
-        image.setPixmap(QPixmap(str(Path(__file__).parent / 'assets/jpl_innovation.png')).scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        credit.addWidget(image)
+        self.about_logo = QLabel()
+        self.about_logo.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        credit.addWidget(self.about_logo)
         credit.addWidget(self.label('Made by JPL Innovation'), 1)
         credit.addWidget(QLabel(CLIENT_VERSION))
         about_layout.addLayout(credit)
@@ -1380,6 +1380,7 @@ class ServerWindow(QMainWindow):
         set_theme(name)
         retint_all()
         self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.about_logo.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.refresh()
 
     def _language_changed(self):

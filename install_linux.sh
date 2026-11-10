@@ -98,6 +98,7 @@ desktop_quote() {
 } > "$HOME/.local/share/applications/lifetime.desktop"
 install -m 644 "$source_dir/assets/lifetime.png" "$install_dir/assets/lifetime.png"
 install -m 644 "$source_dir/assets/jpl_innovation.png" "$install_dir/assets/jpl_innovation.png"
+install -m 644 "$source_dir/assets/jpl_innovation_light.png" "$install_dir/assets/jpl_innovation_light.png"
 systemctl --user daemon-reload
 printf 'Open Lifetime to choose what to collect and whether to track at login. No tracking is started by this installer.\n'
 printf 'Installed Lifetime. The GUI requires PyQt6 for %s.\n' "$python_bin"
