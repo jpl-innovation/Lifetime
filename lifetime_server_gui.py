@@ -324,7 +324,8 @@ class ServerWindow(QMainWindow):
         self.today_label = QLabel()
         self.today_label.setObjectName('muted')
         title_row.addWidget(self.today_label, 1)
-        self.fleet_date = QDateEdit(QDate.currentDate())
+        self._today = QDate.currentDate()
+        self.fleet_date = QDateEdit(self._today)
         self.fleet_date.setCalendarPopup(True)
         self.fleet_date.setDisplayFormat('d MMM yyyy')
         self.fleet_date.setMinimumWidth(180)
@@ -1417,7 +1418,7 @@ class ServerWindow(QMainWindow):
         self.setLocale(locale)
         self.fleet_date.setLocale(locale)
         self.retention_date.setLocale(locale)
-        self.today_label.setText(self.t('Today · {date}', date=locale.toString(QDate.currentDate(), 'd MMM yyyy')))
+        self._show_today()
         self.server_status.setText(self.t('Server running' if self._overview_result else 'Server unavailable'))
         if self._server_info:
             self.network_label.setText((self._server_info.get('organisation') or self._server_info['name']) + ' · ' + self.t('Local network'))
@@ -2168,12 +2169,30 @@ class ServerWindow(QMainWindow):
         self._fleet_revision += 1
         self._load_fleet()
 
+    def _show_today(self):
+        locale = QLocale('vi_VN' if self.language == 'vi' else 'en_GB')
+        self.today_label.setText(self.t('Today · {date}', date=locale.toString(QDate.currentDate(), 'd MMM yyyy')))
+
+    def _roll_to_today(self):
+        """Left open past midnight, "today" moves on. Follow it, unless someone picked another date."""
+        today = QDate.currentDate()
+        if today == self._today:
+            return
+        follows = self.fleet_date.date() == self._today
+        self._today = today
+        self._show_today()
+        if follows:
+            self.fleet_date.blockSignals(True)      # the load below already uses the new date
+            self.fleet_date.setDate(today)
+            self.fleet_date.blockSignals(False)
+
     def _load_fleet(self):
         if self._closed:
             return
         if self._fleet_busy:
             self._fleet_again = True
             return
+        self._roll_to_today()
         header = self.fleet_table.horizontalHeader()
         arguments = dict(day=self.fleet_date.date().toString('yyyy-MM-dd'), days=self.chart_range.currentData(),
                          limit=6, offset=self._fleet_offset, search=self.fleet_search.text(),
