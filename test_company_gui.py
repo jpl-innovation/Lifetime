@@ -81,6 +81,15 @@ class ConnectTests(unittest.TestCase):
             self.page.tasks.resolve('private-bundle')
         self.assertEqual(self.page.step, 3)
 
+    def test_the_review_step_says_found_not_connected_until_it_really_is(self):
+        self.find()
+        self.assertEqual(self.page.review_title.text(), 'Found server.test')
+        self.page._operation = 'status'
+        self.page.completed(0, dict(enabled=True, status='connected', phase='approved', reported=True,
+                                    server='https://server.test:8443', policy=dict(history=True)))
+        self.page.change_policy()                                  # already connected: changing what is shared
+        self.assertEqual(self.page.review_title.text(), 'Connected to server.test')
+
     def test_transitions_policy_and_no_send_before_finish(self):
         with patch('lifetime_connect.run_agent') as run:
             self.find()
