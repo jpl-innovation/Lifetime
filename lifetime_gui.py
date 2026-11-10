@@ -1207,6 +1207,7 @@ class Window(QWidget):
 
     def reflow(self):
         self.sidebar.set_collapsed(self.width() < 900)
+        self.sidebar.fit_height(self.height())
         available = self.width() - self.sidebar.width()
         margin = 16 if available < 850 else 32
         self.centering.setContentsMargins(margin, margin, margin, margin)

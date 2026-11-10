@@ -100,6 +100,19 @@ class DashboardShellTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.history_banner.isVisible())
 
+    def test_a_short_window_keeps_the_language_and_theme_switches_reachable(self):
+        side = self.w.sidebar
+        self.w.resize(900, 600)
+        self.app.processEvents()
+        self.assertTrue(side.tight)
+        for control in (side.language_control, side.theme_control):
+            self.assertTrue(control.isVisible())
+            self.assertLessEqual(control.geometry().bottom(), side.height())
+        self.w.resize(1280, 900)
+        self.app.processEvents()
+        self.assertFalse(side.tight)                          # the roomy layout returns when there is room
+        self.assertTrue(side.credit_logo.isVisible())
+
     def test_the_rebuild_banner_stays_off_the_connect_page_and_returns_after(self):
         self.w.display_ledger(dict(self.ledger, imported=None))
         self.app.processEvents()
