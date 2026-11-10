@@ -81,6 +81,19 @@ class ConnectTests(unittest.TestCase):
             self.page.tasks.resolve('private-bundle')
         self.assertEqual(self.page.step, 3)
 
+    def test_the_last_report_is_shown_as_local_time_not_a_raw_utc_stamp(self):
+        import datetime as dt
+        from lifetime_i18n import datetime_text
+        self.page._operation = 'status'
+        self.page.completed(0, dict(enabled=True, phase='approved', status='connected', reported=True, server='https://s:8443',
+                                    last_sync='2026-11-10T17:03:17Z'))
+        shown = self.page.summary.text()
+        self.assertNotIn('T17:03:17Z', shown)
+        local = dt.datetime(2026, 11, 10, 17, 3, 17, tzinfo=dt.timezone.utc).astimezone()
+        self.assertIn('Last report: ' + str(datetime_text(local)), shown)
+        self.page.completed(0, dict(enabled=True, phase='approved', status='connected', reported=True, server='https://s:8443'))
+        self.assertIn('Last report: Not available', self.page.summary.text())
+
     def test_the_title_never_says_connected_beside_cannot_reach_the_server(self):
         self.page._operation = 'status'
         up = dict(enabled=True, phase='approved', status='connected', reported=True, server='https://server:8443')
