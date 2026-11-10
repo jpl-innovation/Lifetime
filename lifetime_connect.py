@@ -301,6 +301,8 @@ class ConnectPage(QWidget):
             self.note(end, detail, 'caption').setAlignment(side)
             ends.addLayout(end, 1)
         f.addLayout(ends)
+        self.code_error = self.note(f, '')      # above the field, where it is seen without scrolling
+        self.code_error.hide()
         self.code = QLineEdit()
         self.code.setMaxLength(2300)
         self.code.setPlaceholderText('LTS-XXXX-XXXX-XXXX-XXXX-XXXX')
@@ -311,8 +313,6 @@ class ConnectPage(QWidget):
         self.connect_button.setEnabled(False)
         self.code.textChanged.connect(self.format_input)
         self.code.returnPressed.connect(self.connect_server)
-        self.code_error = self.note(f, '')
-        self.code_error.hide()
         self.note(f, 'Next you choose what to share. You can change it or disconnect any time.', 'caption')
         self.pulse(self.forms[1], 'Looking for your server...', True)
         self.forms[1].addWidget(PacketFlight(self.reduce_motion))
@@ -601,18 +601,14 @@ class ConnectPage(QWidget):
         elif operation in ('status', 'finish', 'policy'):
             self.status = result or {}
             if self.status.get('status') in ('denied', 'revoked', 'invitation-used', 'invalid-code'):
-                self.show_step(1)
-                self.code_error.setText(self.t('This code cannot be used. Ask for a new code on the server.'))
-                self.code_error.show()
+                self._code_rejected(self.status.get('status'))
             elif self.status.get('enabled'):
                 self.server_address = self.status.get('server') or self.server_address
                 from urllib.parse import urlsplit
                 self.server_name = self.status.get('server_name') or urlsplit(self.server_address).hostname or ''
                 state = self.status.get('status')
                 if state in ('denied', 'revoked', 'invitation-used', 'invalid-code'):
-                    self.show_step(1)
-                    self.code_error.setText(self.t('This code cannot be used. Ask for a new code on the server.'))
-                    self.code_error.show()
+                    self._code_rejected(state)
                 elif self.status.get('phase') in ('pending', 'enrolling') or state in ('pending', 'enrolling'):
                     self.waiting_text.setText(self.t('{server} needs to approve this computer.', server=self.server_name))
                     self.set_stage(2)
@@ -644,6 +640,15 @@ class ConnectPage(QWidget):
                              self.t('Last report: {time}', time=self._local_time(self.status.get('last_sync')) or self.t('Not available')) +
                              '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)))
         self._set_reachable(self.status.get('status') not in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
+
+    def _code_rejected(self, state):
+        """Back to code entry, saying why. The old code is of no use, so it is cleared once (never while a new one is typed)."""
+        if self.step != 1:
+            self.code.clear()
+        self.show_step(1)
+        self.code_error.setText(self.t('The server removed this computer. Ask for a new code on the server to connect again.'
+                                       if state == 'revoked' else 'This code cannot be used. Ask for a new code on the server.'))
+        self.code_error.show()
 
     @staticmethod
     def _local_time(stamp):
