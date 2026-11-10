@@ -1486,6 +1486,7 @@ CONNECT_VI = {
     'Copy': 'Sao chép',
     'Valid until {time}': 'Có hiệu lực đến {time}',
     'Valid until {date}, {time}': 'Có hiệu lực đến {date}, {time}',
+    'Select a computer to see its details.': 'Chọn một máy tính để xem chi tiết.',
     'Other network?': 'Mạng khác?',
     '{name} wants to connect': '{name} muốn kết nối',
     '{name} connected': '{name} đã kết nối',

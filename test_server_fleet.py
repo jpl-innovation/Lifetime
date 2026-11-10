@@ -70,6 +70,19 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         return ids
 
+    def test_the_details_pane_says_to_select_a_computer_until_one_is_selected(self):
+        self.seed()
+        self.window.tabs.setCurrentIndex(1)
+        self.app.processEvents()
+        self.assertFalse(self.window.detail_hint.isHidden())
+        self.assertIn('Select a computer', self.window.detail_hint.text())
+        self.window.table.selectRow(0)
+        self.wait()
+        self.assertTrue(self.window.detail_hint.isHidden())
+        self.window.table.clearSelection()
+        self.wait()
+        self.assertFalse(self.window.detail_hint.isHidden())
+
     def test_a_computer_without_a_group_says_no_group_not_not_available(self):
         self.seed()
         result = dict(self.window._fleet_result)

@@ -649,6 +649,11 @@ class ServerWindow(QMainWindow):
         status_row.addWidget(self.detail_status)
         status_row.addStretch()
         detail_layout.addLayout(status_row)
+        # Before anything is selected the rows below all read "Not available"; say why, at the top where it is seen.
+        self.detail_hint = QLabel()
+        self.detail_hint.setWordWrap(True)
+        self.detail_hint.setObjectName('muted')
+        detail_layout.addWidget(self.detail_hint)
         self.spec_title = self.label('Computer specifications')
         self.spec_title.setStyleSheet('font-size:18px; font-weight:600;')
         detail_layout.addWidget(self.spec_title)
@@ -1448,6 +1453,8 @@ class ServerWindow(QMainWindow):
             self._render_fleet_detail(None)
         if self._admin_result:
             self._render_server_info(self._admin_result)
+        self.detail_hint.setText(self.t('Select a computer to see its details.'))
+        self.detail_hint.setVisible(not self._detail)
         if self._detail:
             self._render_detail(self._detail, preserve_edits=self._identity_dirty)
         else:
@@ -1781,6 +1788,7 @@ class ServerWindow(QMainWindow):
             if box:
                 box.set_selected(box.device_id in selected_ids)
         selected = self.selected_device_ids()
+        self.detail_hint.setVisible(len(selected) != 1)
         self.export_button.setEnabled(bool(selected))
         self.export_button.setObjectName('primary' if selected else '')
         self.export_button.style().unpolish(self.export_button)
