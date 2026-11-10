@@ -70,6 +70,13 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         return ids
 
+    def test_a_computer_without_a_group_says_no_group_not_not_available(self):
+        self.seed()
+        result = dict(self.window._fleet_result)
+        result['rows'] = [dict(row, group='') for row in result['rows']]
+        self.window._render_fleet(result)
+        self.assertEqual(self.window.fleet_table.item(0, 1).text(), 'No group')
+
     def test_a_code_that_outlives_today_says_which_day_it_expires(self):
         from lifetime_connection import issue
         from lifetime_server_widgets import AddDeviceSheet
