@@ -1,52 +1,116 @@
 """Authored entrances: Intro plays one choreography once, widgets paint their beat from it with phase() and
-progress(); count_up counts a plain whole-number label up. Nothing here changes geometry or masks.
+progress(); paint_roll rolls digits into place; RollLabel and fade_in use it. Nothing here changes geometry or masks.
 Reduced motion shows everything at once."""
 import os
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPointF, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QFontMetricsF, QPainter, QPalette
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel
 
-NUMBER_DELAY = 150  # ms: default pause before count_up starts
+ROLL_DELAY = 160    # ms: numbers start rolling just after the entrance does
 
 
-def count_up(label, motion_reduced=False, delay=NUMBER_DELAY, duration=700):
-    """Count a whole-number label up from zero, after a short delay. Anything that is not a plain
-    integer is left alone. If the label is changed by anyone else meanwhile the count gives way to it."""
-    stale = getattr(label, '_count', None)
-    if stale is not None:
-        label._count = None
-        stale.stop()
-        stale.deleteLater()
-    text = label.text()
-    if motion_reduced or not text.isdigit() or int(text) == 0:
+def paint_roll(painter, rect, text, progress, align=Qt.AlignmentFlag.AlignLeft):
+    """Draw `text` with every digit rolling into place like an odometer; everything else stays put.
+
+    `text` is always the FINAL text and `progress` runs 0..1, so a value that changes mid-roll just keeps rolling
+    toward the new text. Each digit keeps the width of its final digit, so nothing shifts when the roll ends. The
+    last two digits turn one extra time, higher digits start a moment later: a little life, not a show."""
+    rect = QRectF(rect)
+    flags = int(align | Qt.AlignmentFlag.AlignVCenter)
+    if progress >= 1.0 or not any(c.isdigit() for c in text):
+        painter.drawText(rect, flags, text)
         return
-    target = int(text)
-    animation = QVariantAnimation(label)
+    fm = QFontMetricsF(painter.font())
+    widths = [fm.horizontalAdvance(c) for c in text]
+    total = sum(widths)
+    if align & Qt.AlignmentFlag.AlignHCenter:
+        x = rect.left() + (rect.width() - total) / 2
+    elif align & Qt.AlignmentFlag.AlignRight:
+        x = rect.right() - total
+    else:
+        x = rect.left()
+    line = fm.height()
+    top = rect.top() + (rect.height() - line) / 2
+    base = top + fm.ascent()
+    digits = [i for i, c in enumerate(text) if c.isdigit()]
+    for index, ch in enumerate(text):
+        width = widths[index]
+        if not ch.isdigit():
+            painter.drawText(QPointF(x, base), ch)
+        else:
+            k = digits.index(index)
+            from_right = len(digits) - 1 - k
+            t = min(1.0, max(0.0, (progress - 0.05 * k) / (1 - 0.05 * k)))
+            value = (int(ch) + (10 if from_right < 2 else 0)) * (1 - (1 - t) ** 3)
+            whole = int(value)
+            fraction = value - whole
+            painter.save()
+            painter.setClipRect(QRectF(x, top, width, line))
+            for glyph, offset in ((whole % 10, -fraction * line), ((whole + 1) % 10, (1 - fraction) * line)):
+                glyph_width = fm.horizontalAdvance(str(glyph))
+                painter.drawText(QPointF(x + (width - glyph_width) / 2, base + offset), str(glyph))
+            painter.restore()
+        x += width
+
+
+class RollLabel(QLabel):
+    """A label whose digits roll into place once on request. Its text is always the real text, so accessibility,
+    tests and live updates see the true value; only the painting is animated."""
+    def __init__(self, text='', parent=None):
+        super().__init__(text, parent)
+        self._roll = 1.0
+        self._rolling = None
+
+    def roll_in(self, delay=ROLL_DELAY, duration=850, reduced=False):
+        if self._rolling is not None:
+            self._rolling.stop()
+            self._rolling.deleteLater()
+            self._rolling = None
+        if reduced or not any(c.isdigit() for c in self.text()):
+            self._roll = 1.0
+            return
+        self._roll = 0.0
+        self.update()
+        animation = QVariantAnimation(self)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setDuration(duration)
+        animation.valueChanged.connect(self._set_roll)
+        animation.finished.connect(lambda: self._set_roll(1.0))
+        self._rolling = animation
+        QTimer.singleShot(int(delay), lambda: animation.start() if self._rolling is animation else None)
+
+    def _set_roll(self, value):
+        self._roll = float(value)
+        self.update()
+
+    def paintEvent(self, event):
+        if self._roll >= 1.0:
+            return super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setFont(self.font())
+        painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
+        paint_roll(painter, self.contentsRect(), self.text(), self._roll,
+                   self.alignment() & (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignHCenter)
+                   or Qt.AlignmentFlag.AlignLeft)
+
+
+def fade_in(widget, delay=0, duration=260, reduced=False):
+    """Settle a widget in with a short fade. The effect is removed when it ends so nothing stays rasterised."""
+    if reduced or widget is None:
+        return
+    effect = QGraphicsOpacityEffect(widget)
+    effect.setOpacity(0.0)
+    widget.setGraphicsEffect(effect)
+    animation = QVariantAnimation(effect)
     animation.setStartValue(0.0)
-    animation.setEndValue(float(target))
+    animation.setEndValue(1.0)
     animation.setDuration(duration)
     animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-    state = {'written': None}
-
-    def frame(value):
-        shown = str(round(value))
-        if state['written'] is not None and label.text() != state['written']:
-            animation.stop()        # fresh data arrived; do not overwrite it with an older count
-            return
-        label.setText(shown)
-        state['written'] = shown
-
-    def finished():
-        if label.text() == state['written']:
-            label.setText(str(target))
-        label._count = None
-        animation.deleteLater()
-
-    animation.valueChanged.connect(frame)
-    animation.finished.connect(finished)
-    label._count = animation
-    label.setText('0')              # no flash of the final number before the count begins
-    state['written'] = '0'
-    QTimer.singleShot(int(delay), lambda: animation.start() if label._count is animation else None)
+    animation.valueChanged.connect(lambda v: effect.setOpacity(float(v)))
+    animation.finished.connect(lambda: widget.graphicsEffect() is effect and widget.setGraphicsEffect(None))
+    QTimer.singleShot(int(delay), animation.start)
 
 
 def phase(value, start, end):

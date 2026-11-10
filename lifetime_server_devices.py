@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayo
 
 from lifetime_server_widgets import reduced_motion, status_dot, more_icon
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T
-from lifetime_reveal import Intro, phase
+from lifetime_reveal import Intro, paint_roll, phase
 
 
 class SegmentedBar(QTabBar):
@@ -366,8 +366,8 @@ class FleetGauge(QWidget):
         font.setWeight(QFont.Weight.Light)
         painter.setFont(font)
         painter.setPen(QColor(T('#FFFFFF')))
-        shown = round(self.connected * (phase(v, 0.22, 0.88) if entering else 1.0))    # the number lands with the sweep
-        painter.drawText(QRectF(0, base - 70, self.width(), 78), Qt.AlignmentFlag.AlignCenter, str(shown))
+        roll = min(1.0, max(0.0, (v - 0.2) / 0.7)) if entering else 1.0          # the digits roll as the sweep travels
+        paint_roll(painter, QRectF(0, base - 70, self.width(), 78), str(self.connected), roll, Qt.AlignmentFlag.AlignHCenter)
 
 
 class RowDelegate(QStyledItemDelegate):
@@ -498,6 +498,14 @@ class DeviceBox(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.device_id = ''
+        # A card eases in once, the first time it is on screen with its reading; cards cascade by row.
+        self.intro = Intro(self, 320, 0, reduced_motion)
+        self._fade = None
+        if not reduced_motion():
+            self._fade = QGraphicsOpacityEffect(self)
+            self._fade.setOpacity(0.0)
+            self.setGraphicsEffect(self._fade)
+            self.intro.changed.connect(self._intro_step)
         self.setObjectName('deviceBox')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -591,8 +599,19 @@ class DeviceBox(QWidget):
         self.bottom.setText(t('Disk free: {disk} · Battery: {battery} · Last seen: {seen}', disk=disk_text,
                              battery=missing if battery is None else f'{battery:.0f}%', seen=window._relative(device.get('last_received_at'))))
         self.menu_button.setAccessibleName(t('Actions for {name}', name=name))
+        self.intro.ready()
         self.setAccessibleName(' · '.join((self.name.text(), self.user.text(), self.status.text(), self.spec.text(), self.attention.text(), self.bottom.text())))
         self.setToolTip(self.accessibleName())
+
+    def _intro_step(self):
+        if self._fade is None:
+            return
+        if self.intro.done:
+            if self.graphicsEffect() is self._fade:
+                self.setGraphicsEffect(None)
+            self._fade = None
+        else:
+            self._fade.setOpacity(phase(self.intro.value, 0.0, 1.0))
 
     def _fill(self, meter, value, delay):
         """The first time a meter shows a reading it fills from empty; later live updates just move it."""

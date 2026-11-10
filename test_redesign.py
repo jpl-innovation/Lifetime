@@ -108,7 +108,9 @@ class DashboardShellTests(unittest.TestCase):
         self.assertFalse(w.intro.done)
         before = w.intro.value
         self.assertGreater(before, 0)
-        self.assertNotEqual(w.cards['boots'].value.text(), '40')                    # the later cards are still to come
+        from lifetime_reveal import progress
+        self.assertLess(progress(w.cards['boots'].entrance, eased=False), 1.0)     # its digits are still rolling; the text is already real
+        self.assertEqual(w.cards['boots'].value.text(), '40')
         self.ledger['total_seconds'] = 36002
         w.display_ledger(self.ledger)                        # fresh data mid-entrance: no restart
         self.assertGreaterEqual(w.intro.value, before)
