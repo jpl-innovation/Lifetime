@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget
 from lifetime_i18n import duration, time_text
 from lifetime_shell import DisclosureButton
+from lifetime_reveal import phase, progress
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, Tokens
 
 TOKENS = Tokens()   # follows the active (light or dark) palette
@@ -248,6 +249,7 @@ class Plot(QWidget):
         self.scope = ''
         self.details = []
         self.bar_color = None
+        self.entrance = None      # (intro, start, end): axis settles, then bars rise oldest to newest
         self.setMouseTracking(True)
         self.setMinimumWidth(120)
         self.setMinimumHeight(140)
@@ -305,6 +307,9 @@ class Plot(QWidget):
                        self.message or tr('No recorded data in this range'))
             return
         maximum = self.scale()
+        u = progress(self.entrance, eased=False)
+        entering = u < 1.0
+        p.setOpacity(phase(u, 0.0, 0.3))        # the axis settles first, so the bars have something to stand on
         for fraction in (0, 1/3, 2/3, 1):
             y = r.bottom()-r.height()*fraction
             p.setPen(QPen(QColor(TOKENS['border']), .6))
@@ -319,6 +324,7 @@ class Plot(QWidget):
             elif self.unit != 'sessions':
                 tick += self.unit if self.unit == '%' else ''
             p.drawText(QRectF(0, y-9, r.left()-8, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, tick)
+        p.setOpacity(1.0)
         xs = self.positions(r)
         ys = [r.bottom()-r.height()*v/maximum if v is not None else None for v in self.values]
         if self.kind in ('line', 'spark'):
@@ -340,7 +346,11 @@ class Plot(QWidget):
                     continue
                 is_today = bool(self.dates and self.dates[j] == self.today)
                 color = QColor(self.bar_color or TOKENS['accent'])   # every bar in brand yellow
-                bar = QRectF(xs[j]-width/2, ys[j], width, max(.6, r.bottom()-ys[j]))
+                grow = 1.0
+                if entering:    # oldest day first, the newest bar last and a little slower
+                    begin = 0.16 + 0.5 * j / max(1, len(xs) - 1)
+                    grow = phase(u, begin, begin + (0.34 if j == len(xs) - 1 else 0.28))
+                bar = QRectF(xs[j]-width/2, r.bottom()-(r.bottom()-ys[j])*grow, width, max(.6*grow, (r.bottom()-ys[j])*grow))
                 p.setBrush(color)
                 # Clip a round rectangle below the baseline: only the data
                 # ends are rounded, the baseline stays square and anchored.
@@ -376,6 +386,7 @@ class Plot(QWidget):
                     indices[-1] = i
         if self.kind == 'bars' and len(xs) <= 24 and r.width()/len(xs) >= 54:
             indices = list(range(len(xs))) if len(xs) <= 7 else list(range(0, len(xs), 4))
+        p.setOpacity(phase(u, 0.0, 0.3))
         p.setPen(QColor(TOKENS['muted']))
         for i in ([] if self.kind == 'spark' else indices):
             label_width = min(100, r.width()/max(1, count)) if self.dates else min(80, r.width()/max(1, len(indices)))
@@ -392,6 +403,7 @@ class Plot(QWidget):
             text = (tr('Latest ') if self.kind in ('line', 'spark') else tr('Max '))+self.display(self.values[idx])
             p.setPen(QColor(TOKENS['muted']))
             p.drawText(QRectF(r.left(), 0, r.width(), 20), Qt.AlignmentFlag.AlignRight, text)
+        p.setOpacity(1.0)
         if self.hover is not None and self.hover < len(xs):
             i = self.hover
             p.setPen(QPen(QColor(TOKENS['muted']), 1, Qt.PenStyle.DashLine))

@@ -29,10 +29,11 @@ from lifetime_setup import SetupDialog, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
-from lifetime_reveal import reveal, NUMBER_DELAY
+from lifetime_reveal import Intro, progress
 from lifetime_tasks import Tasks
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all
+ENTRANCE_MS = 1700
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
@@ -192,6 +193,7 @@ class Hero(QWidget):
         self.seconds = 0
         self.target = 0
         self.fraction = 0
+        self.entrance = None        # (intro, start, end): the total counts up inside the Overview entrance
         self.setFixedHeight(144)     # content ends at 140 px; the old 156 left dead space and made Overview scroll by 4 px
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -225,14 +227,15 @@ class Hero(QWidget):
             p.setFont(f)
             p.setPen(QColor(color))
             p.drawText(QRectF(x, y, w if width is None else width, height), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, value)
-        whole_minutes, secs = divmod(int(self.seconds), 60)
+        shown = self.seconds * progress(self.entrance)
+        whole_minutes, secs = divmod(int(shown), 60)
         days, rest = divmod(whole_minutes, 1440)
         hours, minutes = divmod(rest, 60)
         # The number is the focal point and aligns with the page title; the old 100-hour ring read as a
         # loading spinner and pushed the number out of line with everything else.
         x = 0
         text(3, 25, tr('Total time awake'), 15, t['muted'], x=x, width=w-x)
-        value = f'{self.seconds / 3600:,.1f}'
+        value = f'{shown / 3600:,.1f}'
         size = 64
         f = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
         f.setPixelSize(size)
@@ -268,6 +271,7 @@ class StatCard(QFrame):
         self.number = 0.0
         self.target = None
         self.formatter = None
+        self.entrance = None        # (intro, start, end): the number counts up inside the Overview entrance
         self.effect = RiseEffect(self)
         self.setGraphicsEffect(self.effect)
         self.setMinimumWidth(0)
@@ -318,23 +322,14 @@ class StatCard(QFrame):
 
     def _show_number(self, value):
         self.number = value
-        self.value.setText(self.formatter(value))
+        shown = value * progress(self.entrance) if value > 0 else value
+        self.value.setText(self.formatter(shown))
         if self.progress:
-            self.progress.setValue(min(2400, max(0, round(value * 100))))
+            self.progress.setValue(min(2400, max(0, round(shown * 100))))
 
-    def replay_number(self, delay=NUMBER_DELAY):
-        """Count the number up again, starting just after the card's wipe does."""
-        timer = getattr(self, '_replay', None)
-        if timer is not None:
-            timer.stop()
-        if motion_reduced() or self.target is None or self.target <= 0 or getattr(self, 'formatter', None) is None:
-            return
-        self.number = 0.0
-        self._show_number(0.0)
-        self._replay = QTimer(self)
-        self._replay.setSingleShot(True)
-        self._replay.timeout.connect(lambda: animate(self, 'number_animation', 0, self.target, self._show_number, 700))
-        self._replay.start(int(delay))
+    def refresh_entrance(self):
+        if self.formatter is not None:
+            self._show_number(self.number)
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -622,6 +617,18 @@ class Window(QWidget):
         self.trend = OverviewTrend(lambda: self.select_page(2))
         trend_box.addWidget(self.trend)
         layout.addWidget(self.trend_panel)
+        # One entrance for the whole page, the first time real data is on screen: the total counts up, the
+        # stat cards follow about 90 ms apart, then the 14-day bars rise oldest to newest. Painting only.
+        self.intro = Intro(self.overview, ENTRANCE_MS, 0, motion_reduced)
+        self.hero.entrance = (self.intro, 0.0, 0.38)
+        for index, key in enumerate(('current', 'longest', 'average', 'boots')):
+            start = 0.26 + index * 90 / ENTRANCE_MS
+            self.cards[key].entrance = (self.intro, start, start + 0.3)
+        self.trend.entrance = (self.intro, 0.36, 1.0)
+        self.intro.changed.connect(self.hero.update)
+        self.intro.changed.connect(self.trend.update)
+        for card in self.cards.values():
+            self.intro.changed.connect(card.refresh_entrance)
         self.counting_toggle = DisclosureButton(tr('How this is counted'))
         self.counting_toggle.setObjectName('disclosure')
         self.counting_toggle.setCheckable(True)
@@ -1030,17 +1037,6 @@ class Window(QWidget):
             frame(0)
             self.page_animation.finished.connect(lambda: page.setGraphicsEffect(None))
         self.reflow()
-        self.reveal_page()
-
-    def reveal_page(self):
-        """Wipe the cards of the page now showing; their numbers count up just behind the wipe."""
-        page = self.pages.currentWidget()
-        if page is None or not self.isVisible():
-            return
-        cards = [f for f in page.findChildren(QFrame) if f.objectName() in ('signalCard', 'insetPanel')]
-        reveal(cards, motion_reduced())
-        for card in page.findChildren(StatCard):
-            card.replay_number()
 
     @property
     def palette_tokens(self):
@@ -1309,6 +1305,7 @@ class Window(QWidget):
             if not self.initialized:
                 self.baseline.setValue(ledger['baseline_seconds'] / 3600)
                 self.initialized = True
+            self.intro.ready()
             self.status_dot.tick(running)
             self.cards['current'].live.tick(running)
             self.status.setText(tr('Tracking active') if running else tr('Tracker offline'))
@@ -1387,7 +1384,6 @@ if __name__ == '__main__':
             pass
     if not (window.tray and '--tray' in sys.argv and previous['completed']):
         window.show()
-        QTimer.singleShot(0, window.reveal_page)      # the first page is uncovered as the window opens
     window.status.setText(tr('Updating history'))
     window._set_export_ready(False)
     window.start_daily_repair()

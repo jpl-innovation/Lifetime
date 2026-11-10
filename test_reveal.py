@@ -1,4 +1,4 @@
-"""Wipe reveal: clipped while it runs, never left clipped, restartable, and off under reduced motion."""
+"""Entrance helpers: numbers count up and land exactly; Intro plays once and progress() reads its slice."""
 import unittest
 
 from PyQt6.QtCore import QTimer
@@ -19,31 +19,6 @@ class RevealTests(unittest.TestCase):
             card.setGeometry(10, 10 + index * 60, 280, 50)
         self.window.show()
         self.addCleanup(self.window.close)
-
-    def test_cards_are_hidden_at_once_wiped_in_turn_and_unmasked_at_the_end(self):
-        reveal.reveal(self.cards, duration=200, stagger=50)
-        self.assertTrue(all(card.mask().isEmpty() for card in self.cards))             # no flash of the finished card
-        QTest.qWait(120)
-        self.assertFalse(self.cards[0].mask().isEmpty())                               # the first has started
-        self.assertTrue(self.cards[2].mask().isEmpty() or self.cards[2].mask().boundingRect().width() < 280)
-        QTest.qWait(500)
-        for card in self.cards:
-            self.assertTrue(card.mask().isEmpty())                                     # an empty mask means no mask
-            self.assertIsNone(card._wipe)
-            self.assertEqual(card.childrenRect().width() >= 0, True)
-
-    def test_a_second_reveal_replaces_the_first_instead_of_stacking(self):
-        reveal.reveal(self.cards, duration=400, stagger=0)
-        QTest.qWait(100)
-        first = self.cards[0]._wipe
-        reveal.reveal(self.cards, duration=400, stagger=0)
-        self.assertIsNot(self.cards[0]._wipe, first)
-        QTest.qWait(700)
-        self.assertIsNone(self.cards[0]._wipe)
-
-    def test_reduced_motion_shows_everything_immediately(self):
-        reveal.reveal(self.cards, motion_reduced=True)
-        self.assertTrue(all(card.mask().isEmpty() and getattr(card, '_wipe', None) is None for card in self.cards))
 
     def test_numbers_count_up_after_a_short_delay_and_land_exactly(self):
         label = QLabel('16', self.window)
@@ -67,6 +42,41 @@ class RevealTests(unittest.TestCase):
             label = QLabel(text, self.window)
             reveal.count_up(label)
             self.assertEqual(label.text(), text)
+
+    def test_intro_plays_once_waits_for_data_and_reports_slices(self):
+        intro = reveal.Intro(self.window, 200)
+        slice_ = (intro, 0.5, 1.0)
+        QTest.qWait(50)
+        self.assertEqual(intro.value, 0.0)                                             # no data yet: nothing plays
+        self.assertEqual(reveal.progress(slice_), 0.0)
+        intro.ready()
+        QTest.qWait(500)
+        self.assertTrue(intro.done)
+        self.assertEqual(reveal.progress(slice_), 1.0)
+        self.assertEqual(reveal.progress(None), 1.0)
+        intro.ready()                                                                  # a second ready() never replays
+        self.assertTrue(intro.done)
+
+    def test_reduced_motion_finishes_the_intro_at_once(self):
+        intro = reveal.Intro(self.window, 200, reduced=lambda: True)
+        intro.ready()
+        self.assertTrue(intro.done)
+
+    def test_system_meters_fill_once_and_then_follow_the_data(self):
+        import lifetime_dashboard as dashboard
+        from lifetime_theme import tokens
+        page = dashboard.SystemDashboard()
+        page.resize(900, 700)
+        page.show()
+        self.addCleanup(page.close)
+        page.update_values({'cpu': 60, 'ram': {'percent': 80, 'used': 1, 'total': 2}}, tokens())
+        meters = lambda: [m.value() for c in page.cards for _, m in c.fields.values() if m.isVisibleTo(c) and m.value()]
+        QTest.qWait(150)
+        self.assertTrue(all(v < 600 for v in meters()))                                # still filling
+        QTest.qWait(1300)
+        self.assertEqual(sorted(meters()), [600, 800])
+        page.update_values({'cpu': 61, 'ram': {'percent': 80, 'used': 1, 'total': 2}}, tokens())
+        self.assertEqual(sorted(meters()), [610, 800])                                 # later readings land at once
 
 
 if __name__ == '__main__':
