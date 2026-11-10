@@ -155,7 +155,8 @@ class DashboardTests(unittest.TestCase):
             self.assertTrue(panel.cards[index].isAncestorOf(chart))
             self.assertEqual((chart.width(), chart.height()), (120, 28))
             self.assertFalse(chart.message)
-        self.assertEqual(panel.findChildren(QPushButton), [panel.data_toggle])
+        # One data toggle for the whole page (the Open Settings button is a different control, shown only when readings are off).
+        self.assertEqual([b for b in panel.findChildren(QPushButton) if b is not panel.open_settings_button], [panel.data_toggle])
         panel.sparklines.sample()
         panel.data_toggle.click()
         self.assertFalse(panel.sparklines.isHidden())
