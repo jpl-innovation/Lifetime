@@ -70,6 +70,15 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         return ids
 
+    def test_the_numbers_are_dimmed_while_the_server_cannot_be_reached_and_restored_after(self):
+        self.seed()
+        self.assertIsNone(self.window.tabs.graphicsEffect())
+        self.window._overview_finished(None, False)
+        self.assertIsNotNone(self.window.tabs.graphicsEffect())
+        self.assertLess(self.window.tabs.graphicsEffect().opacity(), 1.0)
+        self.window._overview_finished(self.window._overview_result, True)
+        self.assertIsNone(self.window.tabs.graphicsEffect())
+
     def test_the_details_pane_says_to_select_a_computer_until_one_is_selected(self):
         self.seed()
         self.window.tabs.setCurrentIndex(1)
