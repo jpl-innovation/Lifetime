@@ -456,7 +456,10 @@ class ServerWindow(QMainWindow):
         self.events.setAccessibleName(self.t('Recent events'))
         self.events.horizontalHeader().hide()
         self.events.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.events.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        # The event ("Went offline") is what people read, so it gets the width it needs; the long computer name yields.
+        self.events.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.events.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.events.horizontalHeader().setMinimumSectionSize(40)     # the default 100 px pushed the time out of the panel
         self.events.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.events.verticalHeader().setDefaultSectionSize(40)
         self.events.setMinimumHeight(204)
@@ -2379,7 +2382,7 @@ class ServerWindow(QMainWindow):
                  'wake': 'Turn on sent'}
         colors = {'report-received': T(T('#65D782')), 'report-overdue': T('#FFC93C'), 'enrollment-pending': T('#FFC93C')}
         for index, event in enumerate(events):
-            values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time']))
+            values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time'])[:5])   # HH:MM; the tooltip has the full stamp
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(event['time'] if column == 2 else value)
