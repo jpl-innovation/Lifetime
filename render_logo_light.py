@@ -1,9 +1,12 @@
 """Rebuild assets/jpl_innovation_light.png from the dark-surface original, for the light theme.
 
-The original has chrome-grey "JPL", cyan "INNOVATION" with a dark shadow, and a dark badge with a white monitor.
-For a light surface: the grey lettering becomes one solid navy ink, the cyan is deepened for contrast, the shadow
-is dropped (it only read as a halo), and the badge is kept exactly as drawn, so its white monitor and wrench
-stay visible on its dark disc. Run: python render_logo_light.py
+The original is drawn for a dark surface: chrome-grey "JPL", cyan "INNOVATION" with a dark shadow, and a dark disc
+holding a white monitor. For a light surface the whole mark is re-inked rather than patched:
+  - everything that is white or grey (the "JPL" lettering and the monitor, waves and wrench) becomes one navy ink,
+  - the cyan (the "INNOVATION" lettering, the ring, the accents) is deepened for contrast on paper,
+  - the dark fill and the shadow become transparent, so the badge is light line art that sits on any light surface.
+Edges keep their anti-aliasing because each pixel's opacity follows how far it is from the dark background.
+Run: python render_logo_light.py
 """
 import os
 from pathlib import Path
@@ -21,30 +24,9 @@ def smooth(value, low, high):
     return t * t * (3 - 2 * t)
 
 
-def badge_circle(image):
-    """Centre and radius of the round badge: the opaque pixels right of the empty column that separates it from the text."""
-    def column_has_ink(x):
-        return any(image.pixelColor(x, y).alpha() > 40 for y in range(image.height()))
-    x = image.width() - 1
-    while x > 0 and not column_has_ink(x):
-        x -= 1
-    while x > 0 and column_has_ink(x):      # walk left across the badge until the gap before the lettering
-        x -= 1
-    left = x + 1
-    xs, ys = [], []
-    for y in range(image.height()):
-        for x in range(left, image.width()):
-            if image.pixelColor(x, y).alpha() > 40:
-                xs.append(x)
-                ys.append(y)
-    right, top, bottom = max(xs), min(ys), max(ys)
-    return (left + right) / 2, (top + bottom) / 2, (right - left) / 2
-
-
 def main():
     QGuiApplication([])
     source = QImage(str(HERE/'assets/jpl_innovation.png')).convertToFormat(QImage.Format.Format_ARGB32)
-    cx, cy, radius = badge_circle(source)
     out = QImage(source.size(), QImage.Format.Format_ARGB32)
     out.fill(QColor(0, 0, 0, 0))
     for y in range(source.height()):
@@ -52,14 +34,12 @@ def main():
             c = source.pixelColor(x, y)
             if not c.alpha():
                 continue
-            if (x - cx) ** 2 + (y - cy) ** 2 <= (radius + 3) ** 2:
-                out.setPixelColor(x, y, c)          # the badge is kept as drawn
-                continue
             luminance = 0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue()
-            ink = CYAN if c.saturation() >= 90 else INK
-            alpha = c.alpha() * smooth(luminance, 60, 115) / 255
+            cyan = c.saturation() >= 90 and luminance > 50
+            # Cyan strokes are mid-bright on the dark fill, white strokes are bright: each reaches full ink at its own level.
+            alpha = c.alpha() * smooth(luminance, 55, 115 if cyan else 190) / 255
             if alpha > 0.01:
-                out.setPixelColor(x, y, QColor(*ink, round(alpha * 255)))
+                out.setPixelColor(x, y, QColor(*(CYAN if cyan else INK), round(alpha * 255)))
     out.save(str(HERE/'assets/jpl_innovation_light.png'))
     print('saved assets/jpl_innovation_light.png', out.width(), out.height())
 
