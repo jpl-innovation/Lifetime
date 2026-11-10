@@ -154,6 +154,17 @@ class SocketTests(SocketFixture):
         self.assertGreaterEqual(offline[0]['time'], before)                     # not the stale last-report time
         self.assertLessEqual(offline[0]['time'], storage._stamp(storage._now()))    # and never in the future
 
+    def test_a_new_credential_starts_with_no_backoff(self):
+        from lifetime_ws_client import LiveLink
+        link = LiveLink(None, threading.Event(), None, threading.Event())
+        link.note_credential('old')
+        link.failures, link.retry_at = 4, time.monotonic() + 100          # the old credential was refused again and again
+        link.note_credential('old')
+        self.assertFalse(link.due())                                       # the same credential keeps its backoff
+        link.note_credential('new')                                        # the computer was paired again
+        self.assertTrue(link.due())
+        self.assertEqual(link.failures, 0)
+
     def test_revoking_closes_the_socket(self):
         self.start_agent()
         self.assertTrue(until(lambda: self.runtime.hub.connected(self.device)))
