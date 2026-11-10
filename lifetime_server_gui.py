@@ -654,6 +654,18 @@ class ServerWindow(QMainWindow):
         self.detail_hint.setWordWrap(True)
         self.detail_hint.setObjectName('muted')
         detail_layout.addWidget(self.detail_hint)
+        # The actions and the reason a button is disabled sit at the top: below the specifications they scrolled out of sight.
+        self.control_reason = QLabel()
+        self.control_reason.setWordWrap(True)
+        self.control_reason.setObjectName('muted')
+        self.power_buttons = {}
+        self.power_grid = power_grid = QGridLayout()
+        for i, (action, key) in enumerate((('sleep', 'Sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
+            button = self.button(key, lambda checked=False, a=action: self._device_command(self._detail, a))
+            self.power_buttons[action] = button
+            power_grid.addWidget(button, i // 3, i % 3)
+        detail_layout.addLayout(power_grid)
+        detail_layout.addWidget(self.control_reason)
         self.spec_title = self.label('Computer specifications')
         self.spec_title.setStyleSheet('font-size:18px; font-weight:600;')
         detail_layout.addWidget(self.spec_title)
@@ -671,17 +683,6 @@ class ServerWindow(QMainWindow):
             self.spec_values[key] = value
             spec_form.addRow(self._field(key), value)
         detail_layout.addLayout(spec_form)
-        self.control_reason = QLabel()
-        self.control_reason.setWordWrap(True)
-        self.control_reason.setObjectName('muted')
-        self.power_buttons = {}
-        self.power_grid = power_grid = QGridLayout()
-        for i, (action, key) in enumerate((('sleep', 'Sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
-            button = self.button(key, lambda checked=False, a=action: self._device_command(self._detail, a))
-            self.power_buttons[action] = button
-            power_grid.addWidget(button, i // 3, i % 3)
-        detail_layout.addLayout(power_grid)
-        detail_layout.addWidget(self.control_reason)
         live_header = QHBoxLayout()
         self.live_marker = QLabel()
         live_header.addWidget(self.live_marker, 1)
