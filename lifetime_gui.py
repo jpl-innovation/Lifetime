@@ -41,6 +41,11 @@ def motion_reduced():
     return REDUCE_MOTION or os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
+def clock_problem(detail):
+    """The importer refuses logs whose times go backwards (a changed clock). Say that in words, not the internal check."""
+    return any(text in detail for text in ('Boot ends before it starts', 'Overlapping boot timestamps', 'SleepTime is later than WakeTime'))
+
+
 VERIFY_TOLERANCE = 60   # seconds; a larger gap between the log and the awake clock is shown, not hidden as "verified"
 
 
@@ -1024,7 +1029,7 @@ class Window(QWidget):
             self.refresh()
         else:
             detail = bytes(self.import_process.readAllStandardError()).decode('utf-8', errors='replace').strip()
-            self.verification.setText(tr('rebuild.error', error=detail[-1000:]))
+            self.verification.setText(tr('rebuild.clock') if clock_problem(detail) else tr('rebuild.error', error=detail[-1000:]))
 
     def cancel_rebuild(self):
         if hasattr(self, 'import_process') and self.import_process.state() != QProcess.ProcessState.NotRunning:

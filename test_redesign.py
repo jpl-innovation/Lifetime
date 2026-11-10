@@ -100,6 +100,18 @@ class DashboardShellTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.history_banner.isVisible())
 
+    def test_an_event_log_with_a_changed_clock_is_explained_in_words(self):
+        from unittest.mock import Mock
+        for detail, friendly in (('Lifetime import: Boot ends before it starts', True),
+                                 ('Lifetime import: Overlapping boot timestamps; refusing ambiguous history', True),
+                                 ('Lifetime import: the importer crashed', False)):
+            self.w.import_process = Mock()
+            self.w.import_process.readAllStandardError.return_value = detail.encode()
+            self.w.import_finished(1, None)
+            shown = self.w.verification.text()
+            self.assertEqual('clock was probably changed' in shown, friendly)
+            self.assertNotIn('Boot ends before it starts', shown)
+
     def test_a_short_window_keeps_the_language_and_theme_switches_reachable(self):
         side = self.w.sidebar
         self.w.resize(900, 600)
