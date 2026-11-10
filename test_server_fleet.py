@@ -70,6 +70,29 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         return ids
 
+    def test_a_dashboard_left_open_past_midnight_moves_on_to_the_new_day(self):
+        from PyQt6.QtCore import QDate, QLocale
+        today = QDate.currentDate()
+        yesterday = today.addDays(-1)
+        self.window._today = yesterday                  # as if it had been opened yesterday and left running
+        self.window.fleet_date.setDate(yesterday)
+        self.wait()
+        self.window._load_fleet()
+        self.wait()
+        self.assertEqual(self.window.fleet_date.date(), today)
+        self.assertEqual(self.window._fleet_result['date'], today.toString('yyyy-MM-dd'))
+        self.assertIn(QLocale('en_GB').toString(today, 'd MMM yyyy'), self.window.today_label.text())
+
+    def test_a_date_picked_on_purpose_is_not_pulled_back_to_today(self):
+        from PyQt6.QtCore import QDate
+        picked = QDate.currentDate().addDays(-3)
+        self.window.fleet_date.setDate(picked)
+        self.wait()
+        self.window._today = QDate.currentDate().addDays(-1)    # the day rolled over meanwhile
+        self.window._load_fleet()
+        self.wait()
+        self.assertEqual(self.window.fleet_date.date(), picked)
+
     def test_empty_fleet_is_truthful_with_live_add_device_action(self):
         self.assertEqual(self.window.kpis['Connected'].text(), '0')
         self.assertEqual(self.window.kpis['Awake today'].text(), 'Not available')
