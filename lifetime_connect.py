@@ -1,4 +1,5 @@
 """One-code connection page. Certificate search never sends application data."""
+import datetime as dt
 import os
 from pathlib import Path
 import socket
@@ -14,7 +15,7 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QLineEdit, QPushButton,
                             QGraphicsOpacityEffect)
 from lifetime_tasks import Tasks
 from lifetime_shell import PageStack, PulseDot
-from lifetime_i18n import tr, TABLES
+from lifetime_i18n import tr, TABLES, datetime_text
 from lifetime_i18n_qt import QLabel, QPushButton
 from lifetime_company import read_status
 from lifetime_settings import read_settings
@@ -640,9 +641,20 @@ class ConnectPage(QWidget):
             if (self.status.get('policy') or {}).get(key):
                 names.append(title)
         self.summary.setText(self.server_name + '\n' + self.server_address + '\n' +
-                             self.t('Last report: {time}', time=self.status.get('last_sync') or self.t('Not available')) +
+                             self.t('Last report: {time}', time=self._local_time(self.status.get('last_sync')) or self.t('Not available')) +
                              '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)))
         self._set_reachable(self.status.get('status') not in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
+
+    @staticmethod
+    def _local_time(stamp):
+        """'2026-11-10T17:03:17Z' means little to a person: show their own local date and time."""
+        if not stamp:
+            return ''
+        try:
+            moment = dt.datetime.fromisoformat(str(stamp).replace('Z', '+00:00')).astimezone()
+        except ValueError:
+            return str(stamp)
+        return str(datetime_text(moment))
 
     def _set_reachable(self, reachable):
         """The title and dot must agree with the line below them: never 'Connected' beside 'Can't reach the server'."""
