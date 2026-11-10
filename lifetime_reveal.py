@@ -5,8 +5,10 @@ animation ends (the equivalent of clearing the property), so shadows, focus ring
 clipped. Starting a reveal on a card first stops any reveal already running on it, so quick tab changes never
 stack animations. Reduced motion shows the card at once.
 """
-from PyQt6.QtCore import (QEasingCurve, QPauseAnimation, QSequentialAnimationGroup, QTimer,
-                          QVariantAnimation)
+import os
+
+from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPauseAnimation, QSequentialAnimationGroup, QTimer,
+                          QVariantAnimation, pyqtSignal)
 from PyQt6.QtGui import QRegion
 
 DURATION = 800      # ms, per card
@@ -97,3 +99,61 @@ def count_up(label, motion_reduced=False, delay=NUMBER_DELAY, duration=700):
     label.setText('0')              # no flash of the final number before the count begins
     state['written'] = '0'
     QTimer.singleShot(int(delay), lambda: animation.start() if label._count is animation else None)
+
+
+def phase(value, start, end):
+    """Progress of one beat inside a longer entrance: 0 before `start`, 1 after `end`, eased out between.
+    Widgets paint their own choreography from one shared 0..1 value, so a single entrance can have many beats."""
+    if end <= start:
+        return 1.0 if value >= end else 0.0
+    t = min(1.0, max(0.0, (value - start) / (end - start)))
+    return 1 - (1 - t) ** 3
+
+
+class Intro(QObject):
+    """One authored entrance for one widget. It plays once, the first time the widget is on screen with real data,
+    never again on tab changes or refreshes. The widget paints from `value` (0..1), so it needs no layout change,
+    and a refresh that arrives mid-entrance simply continues from where it is (nothing restarts or snaps)."""
+    changed = pyqtSignal()
+
+    def __init__(self, widget, duration=900, delay=0, reduced=None):
+        super().__init__(widget)
+        self.widget, self.delay = widget, delay
+        self.reduced = reduced or (lambda: os.environ.get('LIFETIME_REDUCE_MOTION') == '1')
+        self.value, self.done, self._armed, self._started = 0.0, False, False, False
+        self._animation = QVariantAnimation(self)
+        self._animation.setStartValue(0.0)
+        self._animation.setEndValue(1.0)
+        self._animation.setDuration(duration)
+        self._animation.valueChanged.connect(self._step)
+        self._animation.finished.connect(self._finish)
+        widget.installEventFilter(self)
+        widget.destroyed.connect(self._animation.stop)
+
+    def _step(self, value):
+        self.value = float(value)
+        self.widget.update()
+        self.changed.emit()
+
+    def _finish(self):
+        self.value, self.done = 1.0, True
+        self.widget.update()
+
+    def ready(self):
+        """Real data has arrived. Start now if the widget is visible, otherwise when it first is."""
+        self._armed = True
+        if self.reduced():
+            self._started = True
+            self._finish()
+            return
+        self._maybe_start()
+
+    def _maybe_start(self):
+        if self._armed and not self._started and self.widget.isVisible():
+            self._started = True
+            QTimer.singleShot(int(self.delay), self._animation.start)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Show:
+            QTimer.singleShot(0, self._maybe_start)
+        return False

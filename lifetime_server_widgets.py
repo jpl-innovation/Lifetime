@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QLineEd
                             QPushButton, QTabBar, QVBoxLayout, QWidget)
 
 from lifetime_theme import THEMES, install, T
+from lifetime_reveal import Intro, phase
 
 from lifetime_theme import Tokens
 C = Tokens()   # follows the active palette
@@ -112,16 +113,21 @@ class DailyChart(QLabel):
         self.day_label = lambda day: day[8:10] + '/' + day[5:7]   # replaced by the window with a localized '2 Nov'
         self.setMinimumHeight(200)
         self.setMouseTracking(True)
+        self.intro = Intro(self, 1000, 120, reduced_motion)
 
     def set_samples(self, samples, missing, unit='h'):
         self.samples, self.missing, self.unit = samples, missing, unit
         self.setAccessibleName(missing if not any(s['seconds'] is not None for s in samples) else
                                '; '.join(s['day'] + ': ' + ('?' if s['seconds'] is None else f"{s['seconds']/3600:.2f} {unit}") for s in samples))
         self.update()
+        if any(sample['seconds'] is not None for sample in samples):
+            self.intro.ready()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        entering = not self.intro.done
+        v = self.intro.value if entering else 1.0
         bounds = QRectF(48, 12, max(1, self.width()-64), max(1, self.height()-45))
         available = [s['seconds']/3600 for s in self.samples if s['seconds'] is not None]
         if not available:
@@ -131,12 +137,14 @@ class DailyChart(QLabel):
         maximum = max(1, max(available))
         magnitude = 10**math.floor(math.log10(maximum))
         ceiling = math.ceil(maximum / magnitude) * magnitude
+        p.setOpacity(phase(v, 0.0, 0.3))        # the axis settles first, so the bars have something to stand on
         for tick in range(5):
             y = bounds.bottom() - tick / 4 * bounds.height()
             p.setPen(QPen(QColor(C['border']), 1))
             p.drawLine(QPointF(bounds.left(), y), QPointF(bounds.right(), y))
             p.setPen(QColor(C['muted']))
             p.drawText(QRectF(0, y-9, 40, 18), Qt.AlignmentFlag.AlignRight, f'{ceiling*tick/4:g} {self.unit}')
+        p.setOpacity(1.0)
         pitch = bounds.width() / max(1, len(self.samples))
         step = max(1, math.ceil(len(self.samples) / 7))
         for index, sample in enumerate(self.samples):
@@ -146,6 +154,9 @@ class DailyChart(QLabel):
                 p.drawLine(QPointF(x-3, bounds.bottom()-4), QPointF(x+3, bounds.bottom()-4))
             else:
                 height = sample['seconds']/3600/ceiling*bounds.height()
+                if entering:    # oldest day first, the newest (accent) bar last and a little slower
+                    begin = 0.16 + 0.5 * index / max(1, len(self.samples) - 1)
+                    height *= phase(v, begin, begin + (0.34 if index == len(self.samples) - 1 else 0.28))
                 # The newest day carries the accent; earlier days stay quiet behind it.
                 p.save()
                 p.setClipRect(bounds.adjusted(0, -2, 0, 0))

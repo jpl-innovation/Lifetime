@@ -30,7 +30,7 @@ from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
-from lifetime_reveal import reveal, count_up
+from lifetime_reveal import count_up
 from lifetime_server_devices import (ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
@@ -105,7 +105,8 @@ class ServerWindow(QMainWindow):
         self._readings_busy = False
         self._live_busy = False
         self.stream = None
-        self._revealed = False
+        self._entrance_played, self._overview_data = False, False
+        self.tile_icons = []
         self._paint_pending = False
         self._last_poll, self._poll_focus = 0.0, None
         self._live_items = {}
@@ -251,7 +252,7 @@ class ServerWindow(QMainWindow):
         self.table.verticalScrollBar().valueChanged.connect(lambda: self._readings_timer.start())
         self.table.verticalScrollBar().valueChanged.connect(lambda: self._paint_live())
         self.tabs.currentChanged.connect(lambda: self._readings_timer.start())
-        self.tabs.currentChanged.connect(self._reveal_current)
+        self.tabs.currentChanged.connect(self._arm_overview_entrance)
         self._fleet_timer = QTimer(self)
         self._fleet_timer.setSingleShot(True)
         self._fleet_timer.setInterval(250)
@@ -345,7 +346,9 @@ class ServerWindow(QMainWindow):
             top_row.setFixedHeight(44)      # the Review button must not push one tile's numbers out of line
             top = QHBoxLayout(top_row)
             top.setContentsMargins(0, 0, 0, 0)
-            top.addWidget(TileIcon(icon))
+            tile_icon = TileIcon(icon, delay=len(self.tile_icons) * 90)
+            self.tile_icons.append(tile_icon)
+            top.addWidget(tile_icon)
             top.addStretch()
             if key == 'Pending approval':
                 top.addWidget(self.button('Review', self.review_pending))
@@ -861,26 +864,17 @@ class ServerWindow(QMainWindow):
         if not self._submit(lambda: self.client.call('live', **({'device_id': focus} if focus else {})), ready, quiet=True):
             self._live_busy = False
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        if not self._revealed:
-            self._revealed = True
-            QTimer.singleShot(0, self._reveal_current)      # the first page is uncovered as the window opens
-
-    def _reveal_current(self, *unused):
-        """Wipe the cards of the page now showing, and let the Overview numbers land as it uncovers."""
-        if self._closed or not self.isVisible():
+    def _arm_overview_entrance(self, *unused):
+        """The Overview plays its entrance once, when its first real numbers are on screen: the gauge sweeps, the
+        tile icons draw and the counts land one after another. Tab changes and refreshes never replay it."""
+        if self._closed or self._entrance_played or not self._overview_data or self.tabs.currentIndex() != 0:
             return
-        page = self.tabs.currentWidget()
-        inner = page.widget() if page is not None else None
-        if inner is None:
-            return
+        self._entrance_played = True
         reduced = reduced_motion()
-        cards = [w for w in inner.findChildren(QWidget, 'panel') if not w.property('lifetimeScrollContent')]
-        reveal(cards, reduced)
-        if self.tabs.currentIndex() == 0:
-            for key in ('Connected', 'Offline', 'Pending approval'):
-                count_up(self.kpis[key], reduced)
+        for index, key in enumerate(('Connected', 'Offline', 'Awake today', 'Pending approval')):
+            for icon in self.tile_icons[index:index + 1]:
+                icon.intro.ready()
+            count_up(self.kpis[key], reduced, delay=160 + index * 90)
 
     def start_stream(self):
         """Subscribe to pushed live data. Without it the window polls, as before."""
@@ -2236,6 +2230,8 @@ class ServerWindow(QMainWindow):
         self.kpis['Awake today'].setText(self._duration(result['today']['seconds']))
         self.kpi_notes['Awake today'].setText(self.t('{count} reporting devices', count=result['today']['devices']))
         self.kpis['Pending approval'].setText(str(counts['pending']))
+        self._overview_data = True
+        self._arm_overview_entrance()
         self.kpi_notes['Pending approval'].setText(self.t('Administrator review required'))
         self.fleet_empty.setVisible(counts['total'] == 0)
         selected_group = self.fleet_group.currentData()
