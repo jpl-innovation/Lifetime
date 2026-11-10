@@ -2272,7 +2272,7 @@ class ServerWindow(QMainWindow):
         table.setFixedHeight(table.horizontalHeader().height() +
                              max(1, len(result['rows'])) * table.verticalHeader().defaultSectionSize() + 16)
         for row_index, row in enumerate(result['rows']):
-            values = (row['name'], row['group'] or self.t('Not available'),
+            values = (row['name'], row['group'] or self.t('No group'),
                       self._fleet_status(row['status']) + (' / ' + self.t('Unstable') if row.get('unstable') else ''), self._duration(row['today']), self._relative(row['last']))
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
