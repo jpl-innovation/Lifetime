@@ -445,6 +445,13 @@ class PowerAndResourcesTests(AgentFixture):
 
 
 class HardwareNameTests(unittest.TestCase):
+    def test_windows_server_is_named_as_people_say_it(self):
+        self.assertEqual(agent.os_names('Windows', '2025Server'), ('Windows Server', '2025'))
+        self.assertEqual(agent.os_names('Windows', '2012ServerR2'), ('Windows Server', '2012 R2'))
+        self.assertEqual(agent.os_names('Windows', '11'), ('Windows', '11'))
+        self.assertEqual(agent.os_names('Linux', '6.8.0'), ('Linux', '6.8.0'))
+        self.assertEqual(agent.os_names(None, None), (None, None))
+
     def test_identical_processors_are_named_once(self):
         import lifetime_signals as signals
         name = 'Intel(R) Core(TM) Ultra 9 275HX'
