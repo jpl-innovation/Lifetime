@@ -100,6 +100,41 @@ class DashboardShellTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.history_banner.isVisible())
 
+    def test_overview_entrance_plays_once_continues_through_refreshes_and_lands_exactly(self):
+        w = self.w
+        self.ledger.update(boots=40, total_seconds=36000, current_session_seconds=7200, longest_session_seconds=9000)
+        w.display_ledger(self.ledger)       # read_ledger returns this same dict, so later refreshes agree
+        QTest.qWait(450)
+        self.assertFalse(w.intro.done)
+        before = w.intro.value
+        self.assertGreater(before, 0)
+        self.assertNotEqual(w.cards['boots'].value.text(), '40')                    # the later cards are still to come
+        self.ledger['total_seconds'] = 36002
+        w.display_ledger(self.ledger)                        # fresh data mid-entrance: no restart
+        self.assertGreaterEqual(w.intro.value, before)
+        QTest.qWait(1900)
+        self.assertTrue(w.intro.done)
+        self.assertEqual(w.cards['boots'].value.text(), '40')
+        self.assertAlmostEqual(w.hero.seconds, w.hero.target, delta=5)
+        w.select_page(1)
+        w.select_page(0)
+        self.assertEqual(w.intro.value, 1.0)                                        # tab switches never replay it
+        self.assertEqual(w.cards['boots'].value.text(), '40')
+
+    def test_reduced_motion_overview_shows_the_final_numbers_at_once(self):
+        self.w.close()
+        with patch.dict(os.environ, {'LIFETIME_REDUCE_MOTION': '1'}):
+            w = gui.Window(dict(load_settings(self.directory), completed=True, history=True, language='en'))
+            w.timer.stop()
+            w.worker.timer.stop()
+            self.addCleanup(w.deleteLater)
+            w.display_ledger(dict(self.ledger, boots=40))
+            w.show()
+            self.app.processEvents()
+            self.assertTrue(w.intro.done)
+            self.assertEqual(w.cards['boots'].value.text(), '40')
+            w.close()
+
     def test_theme_choice_is_saved_and_applied_in_the_same_window(self):
         import lifetime_theme as theme
         self.addCleanup(theme.set_theme, 'dark')

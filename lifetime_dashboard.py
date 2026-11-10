@@ -15,6 +15,7 @@ from lifetime_i18n import duration, ui_text
 import lifetime_signals as signals
 from lifetime_settings import allowed_probes, defaults
 from lifetime_charts import LiveSparklines
+from lifetime_reveal import Intro, progress
 
 
 class ProbeWorker(QWidget):
@@ -189,6 +190,8 @@ class SignalCard(QFrame):
         self.box.addStretch()
         self.fields = {}
         self.sparks = {}
+        self.entrance = None        # (intro, start, end): the meters fill once, top to bottom
+        self.percent = {}
 
     def set_rows(self, rows, tokens):
         keys = [r[0] for r in rows]
@@ -245,8 +248,14 @@ class SignalCard(QFrame):
             value.setText(text)
             meter.setVisible(percentage is not None)
             if percentage is not None:
-                meter.setValue(round(max(0, min(100, percentage))*10))
+                self.percent[key] = max(0, min(100, percentage))
+                meter.setValue(round(self.percent[key]*10*progress(self.entrance)))
                 meter.setAccessibleName(f'{key}: {percentage:.1f}%')
+
+    def refresh_entrance(self):
+        for key, (value, meter) in self.fields.items():
+            if key in self.percent and meter.isVisibleTo(self):
+                meter.setValue(round(self.percent[key]*10*progress(self.entrance)))
 
 
 class SystemDashboard(QWidget):
@@ -286,6 +295,12 @@ class SystemDashboard(QWidget):
         self.set_columns(1)
         layout.addWidget(self.sparklines)
         self.settings = dict(battery=True, network=True, wifi_name=True, graphics=True, resources=True)
+        # The meters fill once, the first time the page is open with real readings, then just follow the data.
+        self.intro = Intro(self, 900, 100)
+        for index, card in enumerate(self.cards):
+            start = 0.12 * index
+            card.entrance = (self.intro, start, start + 0.6)
+            self.intro.changed.connect(card.refresh_entrance)
 
     def show_data(self, checked):
         self.sparklines.setVisible(checked and any(self.settings.values()))
@@ -396,4 +411,6 @@ class SystemDashboard(QWidget):
         for card, rows, mapping in zip(self.cards, (power, network, graphics, computer), mappings):
             card.sparks = mapping
             card.set_rows(rows, tokens)
+        if any(row[2] is not None for rows in (power, network, graphics, computer) for row in rows):
+            self.intro.ready()
         self.freshness.setText(tr('Local readings · 2 s / 10 s'))

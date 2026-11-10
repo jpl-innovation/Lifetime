@@ -1,67 +1,15 @@
-"""Wipe reveal for dashboard cards: a moving clip uncovers each card left to right.
-
-The clip is a widget mask, so nothing is laid out again while it runs, and it is removed the moment the
-animation ends (the equivalent of clearing the property), so shadows, focus rings and tooltips are never left
-clipped. Starting a reveal on a card first stops any reveal already running on it, so quick tab changes never
-stack animations. Reduced motion shows the card at once.
-"""
+"""Authored entrances: Intro plays one choreography once, widgets paint their beat from it with phase() and
+progress(); count_up counts a plain whole-number label up. Nothing here changes geometry or masks.
+Reduced motion shows everything at once."""
 import os
 
-from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPauseAnimation, QSequentialAnimationGroup, QTimer,
-                          QVariantAnimation, pyqtSignal)
-from PyQt6.QtGui import QRegion
+from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QTimer, QVariantAnimation, pyqtSignal
 
-DURATION = 800      # ms, per card
-STAGGER = 60        # ms between cards
-NUMBER_DELAY = 150  # ms: numbers start just after the wipe does, so they land as the card is uncovered
-
-
-def _stop(widget):
-    group = getattr(widget, '_wipe', None)
-    if group is not None:
-        widget._wipe = None
-        group.stop()
-        group.deleteLater()
-        widget.clearMask()
-
-
-def reveal(widgets, motion_reduced=False, delay=0, stagger=STAGGER, duration=DURATION):
-    """Uncover each visible widget in turn. Widgets are hidden behind an empty mask from this call on, so
-    there is no flash of the finished card before its animation begins."""
-    cards = [w for w in widgets if w is not None and w.isVisibleTo(w.window())]
-    for card in cards:
-        _stop(card)
-    if motion_reduced:
-        return
-    for index, card in enumerate(cards):
-        card.setMask(QRegion(0, 0, 0, 0))
-        group = QSequentialAnimationGroup(card)
-        group.addAnimation(QPauseAnimation(delay + index * stagger))
-        sweep = QVariantAnimation(group)
-        sweep.setStartValue(0.0)
-        sweep.setEndValue(1.0)
-        sweep.setDuration(duration)
-        sweep.setEasingCurve(QEasingCurve.Type.OutCubic)      # the same curve as GSAP's power3.out
-
-        def frame(value, card=card):
-            width = max(1, round(card.width() * value))
-            card.setMask(QRegion(0, 0, width, card.height()))
-        sweep.valueChanged.connect(frame)
-        group.addAnimation(sweep)
-        group.finished.connect(lambda card=card, group=group: _finished(card, group))
-        card._wipe = group
-        group.start()
-
-
-def _finished(card, group):
-    if getattr(card, '_wipe', None) is group:
-        card._wipe = None
-        card.clearMask()
-    group.deleteLater()
+NUMBER_DELAY = 150  # ms: default pause before count_up starts
 
 
 def count_up(label, motion_reduced=False, delay=NUMBER_DELAY, duration=700):
-    """Count a whole-number label up from zero, starting just after the wipe. Anything that is not a plain
+    """Count a whole-number label up from zero, after a short delay. Anything that is not a plain
     integer is left alone. If the label is changed by anyone else meanwhile the count gives way to it."""
     stale = getattr(label, '_count', None)
     if stale is not None:
@@ -138,6 +86,7 @@ class Intro(QObject):
     def _finish(self):
         self.value, self.done = 1.0, True
         self.widget.update()
+        self.changed.emit()
 
     def ready(self):
         """Real data has arrived. Start now if the widget is visible, otherwise when it first is."""
@@ -151,9 +100,25 @@ class Intro(QObject):
     def _maybe_start(self):
         if self._armed and not self._started and self.widget.isVisible():
             self._started = True
-            QTimer.singleShot(int(self.delay), self._animation.start)
+            QTimer.singleShot(int(self.delay), self._begin)
+
+    def _begin(self):
+        if self.widget.isVisible():
+            self._animation.start()
+        else:
+            self._started = False       # hidden again before it began: wait for the next time it is shown
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.Show:
             QTimer.singleShot(0, self._maybe_start)
         return False
+
+
+def progress(entrance, eased=True):
+    """0..1 for a widget's slice of an Intro. `entrance` is (intro, start, end) or None (meaning finished)."""
+    if entrance is None or entrance[0].done:
+        return 1.0
+    intro, start, end = entrance
+    if eased:
+        return phase(intro.value, start, end)
+    return min(1.0, max(0.0, (intro.value - start) / (end - start)))
