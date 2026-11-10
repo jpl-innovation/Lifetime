@@ -589,7 +589,7 @@ class ConnectPage(QWidget):
             trust = decode_bundle(result)
             self.server_address = trust['address']
             self.server_name = urlsplit(self.server_address).hostname
-            self.review_title.setText(self.t('Connected to {server}', server=self.server_name))
+            self.review_title.setText(self.t('Found {server}', server=self.server_name))      # found, not connected yet
             self.review_address.setText(self.server_address)
             self.show_step(3)
         elif operation == 'disconnect':
