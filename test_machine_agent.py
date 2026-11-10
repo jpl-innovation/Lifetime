@@ -444,6 +444,16 @@ class PowerAndResourcesTests(AgentFixture):
 
 
 
+class HardwareNameTests(unittest.TestCase):
+    def test_identical_processors_are_named_once(self):
+        import lifetime_signals as signals
+        name = 'Intel(R) Core(TM) Ultra 9 275HX'
+        self.assertEqual(signals.unique_names(name + ', ' + name), name)
+        self.assertEqual(signals.unique_names(name), name)
+        self.assertEqual(signals.unique_names('Xeon A, Xeon B, Xeon A'), 'Xeon A, Xeon B')   # different ones stay, in order
+        self.assertEqual(signals.unique_names(''), '')
+
+
 class ConnectionCliTests(unittest.TestCase):
     def test_policy_display_name_and_detached_background_reach_agent(self):
         with tempfile.TemporaryDirectory() as root:
