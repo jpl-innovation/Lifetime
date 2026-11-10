@@ -349,7 +349,7 @@ class ConnectPage(QWidget):
         self.stage = 1
         self._report_started = None
         f = self.forms[4]
-        self.pulse(f, 'Connected', True)
+        self.connected_title = self.pulse(f, 'Connected', True)
         self.summary = self.note(f, '')
         self.summary.setTextFormat(Qt.TextFormat.PlainText)
         self.unreachable = self.note(f, "Can't reach the server right now. Lifetime will keep trying.")
@@ -402,6 +402,7 @@ class ConnectPage(QWidget):
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setObjectName('pageTitle')
         label.setWordWrap(True)
+        label.dot = dot
         row.addWidget(label, 1)
         layout.addLayout(row)
         return label
@@ -641,7 +642,13 @@ class ConnectPage(QWidget):
         self.summary.setText(self.server_name + '\n' + self.server_address + '\n' +
                              self.t('Last report: {time}', time=self.status.get('last_sync') or self.t('Not available')) +
                              '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)))
-        self.unreachable.setVisible(self.status.get('status') in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
+        self._set_reachable(self.status.get('status') not in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
+
+    def _set_reachable(self, reachable):
+        """The title and dot must agree with the line below them: never 'Connected' beside 'Can't reach the server'."""
+        self.unreachable.setVisible(not reachable)
+        self.connected_title.setText(self.t('Connected' if reachable else 'Not connected right now'))
+        self.connected_title.dot.set_active(reachable)
 
     def failed(self, number, error):
         operation = self._operation
@@ -661,4 +668,4 @@ class ConnectPage(QWidget):
             self.review_error.setText(self.t(message))
             self.review_error.show()
         elif self.step == 5:
-            self.unreachable.show()
+            self._set_reachable(False)

@@ -81,6 +81,19 @@ class ConnectTests(unittest.TestCase):
             self.page.tasks.resolve('private-bundle')
         self.assertEqual(self.page.step, 3)
 
+    def test_the_title_never_says_connected_beside_cannot_reach_the_server(self):
+        self.page._operation = 'status'
+        up = dict(enabled=True, phase='approved', status='connected', reported=True, server='https://server:8443')
+        self.page.completed(0, up)
+        self.assertEqual(self.page.connected_title.text(), 'Connected')
+        self.assertTrue(self.page.unreachable.isHidden())
+        self.page.completed(0, dict(up, status='unreachable'))
+        self.assertEqual(self.page.connected_title.text(), 'Not connected right now')
+        self.assertFalse(self.page.unreachable.isHidden())
+        self.page.completed(0, up)                                 # and it recovers by itself
+        self.assertEqual(self.page.connected_title.text(), 'Connected')
+        self.assertTrue(self.page.unreachable.isHidden())
+
     def test_the_review_step_says_found_not_connected_until_it_really_is(self):
         self.find()
         self.assertEqual(self.page.review_title.text(), 'Found server.test')
