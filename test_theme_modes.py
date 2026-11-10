@@ -62,6 +62,31 @@ class ThemeModeTests(unittest.TestCase):
                 if re.search(r"QColor\('#(?:0B1426|12203A|08101F|1B2A46|34445E)'", code):
                     self.fail(f'{name}:{number} hard-codes a dark surface colour: {line.strip()}')
 
+    def test_the_jpl_logo_has_a_light_version_with_dark_lettering_and_an_intact_badge(self):
+        from qt_test_support import qt_app
+        from lifetime_shell import themed_logo
+        self.app = qt_app()     # keep a reference: a pixmap needs a live application
+        path = Path('assets/jpl_innovation.png')
+        self.assertTrue(Path('assets/jpl_innovation_light.png').is_file())
+
+        def brightest(image, xs, ys):
+            found = [image.pixelColor(x, y) for x in xs for y in ys]
+            return max(c.lightness() for c in found if c.alpha() > 200)
+        theme.set_theme('dark')
+        dark_pixmap = themed_logo(path)         # keep the pixmaps alive while their images are read
+        dark = dark_pixmap.toImage()
+        theme.set_theme('light')
+        try:
+            light_pixmap = themed_logo(path)
+            light = light_pixmap.toImage()
+        finally:
+            theme.set_theme('dark')
+        jpl = (range(10, 110, 3), range(95, 165, 3))      # the "JPL" lettering
+        badge = (range(light.width() * 70 // 100, light.width() * 95 // 100, 3), range(light.height() * 20 // 100, light.height() * 80 // 100, 3))
+        self.assertGreater(brightest(dark, *jpl), 200)    # the original, for dark surfaces
+        self.assertLess(brightest(light, *jpl), 60)       # navy lettering, readable on paper
+        self.assertGreater(brightest(light, *badge), 200) # the badge's white monitor stays white, not recoloured dark
+
 
 if __name__ == '__main__':
     unittest.main()

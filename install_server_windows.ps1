@@ -88,6 +88,7 @@ foreach ($name in @('LifetimeServerRuntime.exe', 'LifetimeServerDashboard.exe'))
 New-Item -ItemType Directory -Path (Join-Path $InstallDirectory 'assets'), (Join-Path $InstallDirectory 'docs') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\lifetime.png'), (Join-Path $PSScriptRoot 'assets\lifetime.ico') -Destination (Join-Path $InstallDirectory 'assets') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\jpl_innovation.png') -Destination (Join-Path $InstallDirectory 'assets') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png') -Destination (Join-Path $InstallDirectory 'assets') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\SERVER_OPERATIONS.md') -Destination (Join-Path $InstallDirectory 'docs') -Force
 
 if ($Mode -ne 'PackagedTask') {

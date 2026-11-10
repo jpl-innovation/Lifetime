@@ -55,7 +55,7 @@ if ($ExePackage) {
     $TaskAction = New-ScheduledTaskAction -Execute $Tracker -Argument '--run' -WorkingDirectory $InstallDir
 } else {
     New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'assets') | Out-Null
-    foreach ($Name in @('lifetime.png', 'lifetime.ico', 'jpl_innovation.png')) {
+    foreach ($Name in @('lifetime.png', 'lifetime.ico', 'jpl_innovation.png', 'jpl_innovation_light.png')) {
         $Source = Join-Path $PSScriptRoot "assets\$Name"
         $Target = Join-Path $InstallDir "assets\$Name"
         if ([IO.Path]::GetFullPath($Source) -ne [IO.Path]::GetFullPath($Target)) {

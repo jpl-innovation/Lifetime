@@ -372,20 +372,15 @@ class DisclosureButton(QPushButton):
 
 
 def themed_logo(path):
-    """The JPL Innovation logo has white lettering for dark surfaces; on the light theme turn that near-white ink dark."""
-    from PyQt6.QtGui import QImage
+    """The JPL Innovation logo for the active theme. The original is drawn for dark surfaces; light mode uses
+    assets/jpl_innovation_light.png (navy lettering, deeper cyan, badge unchanged), built by render_logo_light.py."""
     from lifetime_theme import active_theme
-    image = QImage(str(path))
-    if active_theme() == 'light' and not image.isNull():
-        image = image.convertToFormat(QImage.Format.Format_ARGB32)
-        ink = QColor(37, 45, 45)
-        for y in range(image.height()):
-            for x in range(image.width()):
-                c = image.pixelColor(x, y)
-                if c.alpha() and min(c.red(), c.green(), c.blue()) >= 150 and max(c.red(), c.green(), c.blue()) - min(c.red(), c.green(), c.blue()) < 45:
-                    ink.setAlpha(c.alpha())
-                    image.setPixelColor(x, y, ink)
-    return QPixmap.fromImage(image)
+    path = Path(path)
+    if active_theme() == 'light':
+        light = path.with_name(path.stem + '_light' + path.suffix)
+        if light.is_file():
+            return QPixmap(str(light))
+    return QPixmap(str(path))
 
 
 def reduced_motion():
