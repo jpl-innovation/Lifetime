@@ -198,11 +198,36 @@ class Hero(QWidget):
         self.seconds = 0
         self.target = 0
         self.fraction = 0
-        self.entrance = None        # (intro, start, end): the total counts up inside the Overview entrance
+        self.entrance = None        # (intro, start, end): the total rolls inside the first Overview entrance
+        self.replay = 1.0           # later rolls: the total is the number that matters, so it rolls again each time Overview opens
+        self._replay_animation = None
         self.setFixedHeight(144)     # content ends at 140 px; the old 156 left dead space and made Overview scroll by 4 px
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setAccessibleName(tr('Total time awake'))
+
+    def roll_again(self):
+        if self._replay_animation is not None:
+            self._replay_animation.stop()
+            self._replay_animation.deleteLater()
+            self._replay_animation = None
+        if motion_reduced():
+            self.replay = 1.0
+            self.update()
+            return
+        self.replay = 0.0
+        animation = QVariantAnimation(self)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setDuration(1000)
+        animation.valueChanged.connect(self._replay_step)
+        animation.finished.connect(lambda: self._replay_step(1.0))
+        self._replay_animation = animation
+        animation.start()
+
+    def _replay_step(self, value):
+        self.replay = float(value)
+        self.update()
 
     def position_controls(self):
         if not hasattr(self, 'controls'):
@@ -250,7 +275,7 @@ class Hero(QWidget):
         while QFontMetrics(f).horizontalAdvance(value) > max(60, available) and size > 18:
             size -= 2
             f.setPixelSize(size)
-        text(28, 80, value, size, t['text'], QFont.Weight.Light, x=x, width=w-x, roll=progress(self.entrance, eased=False))
+        text(28, 80, value, size, t['text'], QFont.Weight.Light, x=x, width=w-x, roll=min(progress(self.entrance, eased=False), self.replay))
         text(112, 28, tr('hero.duration', days=days, hours=hours, minutes=minutes, seconds=secs),
              13 if w < 400 else 15, t['muted'], x=0 if w < 400 else x, width=w if w < 400 else w-x)
 
@@ -624,18 +649,13 @@ class Window(QWidget):
         self.trend = OverviewTrend(lambda: self.select_page(2))
         trend_box.addWidget(self.trend)
         layout.addWidget(self.trend_panel)
-        # One entrance for the whole page, the first time real data is on screen: the total counts up, the
-        # stat cards follow about 90 ms apart, then the 14-day bars rise oldest to newest. Painting only.
+        # One entrance for the page, the first time real data is on screen: the total rolls into place, then the
+        # 14-day bars rise oldest to newest. Only the number that matters moves; the other figures just appear.
         self.intro = Intro(self.overview, ENTRANCE_MS, 0, motion_reduced)
         self.hero.entrance = (self.intro, 0.0, 0.38)
-        for index, key in enumerate(('current', 'longest', 'average', 'boots')):
-            start = 0.26 + index * 90 / ENTRANCE_MS
-            self.cards[key].entrance = (self.intro, start, start + 0.3)
         self.trend.entrance = (self.intro, 0.36, 1.0)
         self.intro.changed.connect(self.hero.update)
         self.intro.changed.connect(self.trend.update)
-        for card in self.cards.values():
-            self.intro.changed.connect(card.refresh_entrance)
         self.counting_toggle = DisclosureButton(tr('How this is counted'))
         self.counting_toggle.setObjectName('disclosure')
         self.counting_toggle.setCheckable(True)
@@ -1033,6 +1053,8 @@ class Window(QWidget):
         self.scroll.verticalScrollBar().setValue(0)
         self.sidebar.move_indicator()
         page = self.pages.currentWidget()
+        if index == 0 and self.intro.done:
+            self.hero.roll_again()
         if not motion_reduced():
             effect = RiseEffect(page)
             page.setGraphicsEffect(effect)
@@ -1103,6 +1125,9 @@ class Window(QWidget):
         super().showEvent(event)
         if hasattr(self, 'timer'):
             self.timer.start(1000)
+        if getattr(self, '_shown_once', False) and getattr(self, 'active_page', None) == 0 and self.intro.done:
+            self.hero.roll_again()      # brought back from the tray or restored: the total rolls in again
+        self._shown_once = True
         self.reflow()
         QTimer.singleShot(0, lambda: self.sidebar.move_indicator(False))
 
