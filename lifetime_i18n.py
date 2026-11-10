@@ -1048,6 +1048,7 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
                                                                                                               'ký '
                                                                                                               'lại.',
  'Continue?': 'Tiếp tục?',
+ 'Continue': 'Tiếp tục',
  'Delete older records permanently? Latest totals remain, with their original timestamps.': 'Xóa '
                                                                                             'vĩnh '
                                                                                             'viễn '

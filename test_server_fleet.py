@@ -70,6 +70,15 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         return ids
 
+    def test_the_confirmation_button_says_continue_not_a_question(self):
+        from PyQt6.QtWidgets import QMessageBox
+        seen = []
+        for language, words in (('en', ['Continue', 'Cancel']), ('vi', ['Tiếp tục', 'Hủy'])):
+            self.window.language = language
+            with patch.object(QMessageBox, 'exec', lambda dialog: seen.append([b.text() for b in dialog.buttons()]) or 0):
+                self.window._confirm('Confirm Refresh for X?')
+            self.assertEqual(seen[-1][0], words[0])
+
     def test_a_dashboard_left_open_past_midnight_moves_on_to_the_new_day(self):
         from PyQt6.QtCore import QDate, QLocale
         today = QDate.currentDate()
