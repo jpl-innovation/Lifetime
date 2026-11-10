@@ -81,6 +81,18 @@ class ConnectTests(unittest.TestCase):
             self.page.tasks.resolve('private-bundle')
         self.assertEqual(self.page.step, 3)
 
+    def test_the_tutorial_puts_the_server_step_first_in_both_languages(self):
+        from lifetime_i18n import TABLES
+        for language in ('en', 'vi'):
+            page = ConnectPage(directory=self.root.name, machine_root=Path(self.root.name)/'agent', language=language)
+            self.addCleanup(page.close)
+            self.addCleanup(page.timer.stop)
+            words = [label.text() for label in page.findChildren(type(page.code_error))]
+            first, then = TABLES[language]['First, on the server'], TABLES[language]['Then, on this computer']
+            self.assertIn(first, words)
+            self.assertIn(then, words)
+            self.assertNotIn(TABLES[language]['Type that code below.'], words)    # "that code" had nothing to point at
+
     def test_a_computer_the_server_removed_is_told_so_and_the_dead_code_is_cleared_once(self):
         self.page._operation = 'status'
         self.page.completed(0, dict(enabled=True, phase='approved', status='connected', reported=True, server='https://s:8443'))

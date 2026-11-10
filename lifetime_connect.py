@@ -293,8 +293,9 @@ class ConnectPage(QWidget):
         f.addWidget(PacketFlight(self.reduce_motion))
         # The tutorial is captioned onto the drawing: each end says what to do at that computer.
         ends = QHBoxLayout()
-        for heading, detail, side in (('On this computer', 'Type that code below.', Qt.AlignmentFlag.AlignLeft),
-                                      ('On the server', 'Press Add device to get a code.', Qt.AlignmentFlag.AlignRight)):
+        # The drawing puts this computer on the left, but the order of work is server first, so the words say so.
+        for heading, detail, side in (('Then, on this computer', 'Type the code below.', Qt.AlignmentFlag.AlignLeft),
+                                      ('First, on the server', 'Press Add device to get a code.', Qt.AlignmentFlag.AlignRight)):
             end = QVBoxLayout()
             end.setSpacing(0)
             self.note(end, heading).setAlignment(side)
