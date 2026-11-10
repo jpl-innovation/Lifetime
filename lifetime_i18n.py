@@ -1051,6 +1051,7 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
  'Continue': 'Tiếp tục',
  'Found {server}': 'Đã tìm thấy {server}',
  'Not connected right now': 'Hiện chưa kết nối',
+ 'The server removed this computer. Ask for a new code on the server to connect again.': 'Máy chủ đã gỡ máy tính này. Hãy lấy mã mới trên máy chủ để kết nối lại.',
  'Delete older records permanently? Latest totals remain, with their original timestamps.': 'Xóa '
                                                                                             'vĩnh '
                                                                                             'viễn '

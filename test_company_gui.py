@@ -81,6 +81,22 @@ class ConnectTests(unittest.TestCase):
             self.page.tasks.resolve('private-bundle')
         self.assertEqual(self.page.step, 3)
 
+    def test_a_computer_the_server_removed_is_told_so_and_the_dead_code_is_cleared_once(self):
+        self.page._operation = 'status'
+        self.page.completed(0, dict(enabled=True, phase='approved', status='connected', reported=True, server='https://s:8443'))
+        self.assertEqual(self.page.step, 5)
+        self.page.code.setText(self.code)                          # the old code, still sitting in the box
+        removed = dict(enabled=False, status='revoked')
+        self.page.completed(0, removed)
+        self.assertEqual(self.page.step, 1)
+        self.assertIn('removed this computer', self.page.code_error.text())
+        self.assertEqual(self.page.code.text(), '')
+        self.page.code.setText(self.code)                          # a new code is typed ...
+        self.page.completed(0, removed)                            # ... and a later poll must not wipe it
+        self.assertEqual(self.page.code.text(), self.code)
+        self.page.completed(0, dict(enabled=False, status='denied'))
+        self.assertIn('This code cannot be used', self.page.code_error.text())
+
     def test_the_last_report_is_shown_as_local_time_not_a_raw_utc_stamp(self):
         import datetime as dt
         from lifetime_i18n import datetime_text
