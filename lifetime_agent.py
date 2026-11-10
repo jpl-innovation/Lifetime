@@ -116,6 +116,13 @@ def _history(ledger):
     return result
 
 
+def os_names(system, release):
+    """Python reports Windows Server 2025 as system 'Windows', release '2025Server'. Say 'Windows Server 2025'."""
+    import re
+    match = re.fullmatch(r'(\d{4})Server(R2)?', release or '')
+    return ('Windows Server', match[1] + (' R2' if match[2] else '')) if system == 'Windows' and match else (system, release)
+
+
 def _resources(state=None):
     """Bounded inventory and live readings; mutable state caches six-hour specs."""
     import platform
@@ -154,7 +161,8 @@ def _resources(state=None):
                      disks=[dict(name=text(d['path']), total_bytes=d.get('total'),
                                  free_bytes=d['total']-d['used'] if d.get('total') is not None and d.get('used') is not None else None)
                             for d in sorted(disks or [], key=lambda d: d.get('path') != system_path)[:8]],
-                     os_name=text(signals.safe(platform.system)()), os_version=text(signals.safe(platform.release)()),
+                     os_name=text(os_names(signals.safe(platform.system)(), signals.safe(platform.release)())[0]),
+                     os_version=text(os_names(signals.safe(platform.system)(), signals.safe(platform.release)())[1]),
                      battery_design_wh=battery.get('design_wh'),
                      mac_addresses=[m.upper().replace('-', ':') for m in hardware.get('mac_addresses', []) or [] if m][:8],
                      hostname=text(signals.safe(socket.gethostname)()))
