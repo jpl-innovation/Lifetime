@@ -30,7 +30,7 @@ from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
-from lifetime_reveal import count_up
+from lifetime_reveal import RollLabel, fade_in
 from lifetime_server_devices import (ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
@@ -354,7 +354,7 @@ class ServerWindow(QMainWindow):
                 top.addWidget(self.button('Review', self.review_pending))
             tile_layout.addWidget(top_row)
             tile_layout.addSpacing(8)
-            value = QLabel(self.t('Not available'))
+            value = RollLabel(self.t('Not available'))
             value.setObjectName('metric')
             value.setMinimumHeight(38)
             self.kpis[key] = value
@@ -874,7 +874,9 @@ class ServerWindow(QMainWindow):
         for index, key in enumerate(('Connected', 'Offline', 'Awake today', 'Pending approval')):
             for icon in self.tile_icons[index:index + 1]:
                 icon.intro.ready()
-            count_up(self.kpis[key], reduced, delay=160 + index * 90)
+            self.kpis[key].roll_in(delay=160 + index * 90, reduced=reduced)
+            for caption in (self.kpi_titles[key], self.kpi_notes[key]):   # the words settle in just after their number starts
+                fade_in(caption, delay=420 + index * 90, reduced=reduced)
 
     def start_stream(self):
         """Subscribe to pushed live data. Without it the window polls, as before."""
@@ -1700,6 +1702,7 @@ class ServerWindow(QMainWindow):
             box = self.table.cellWidget(row_number, 0)
             if box is None:
                 box = DeviceBox()
+                box.intro.delay = min(row_number, 8) * 45
                 box.activated.connect(self._select_box)
                 box.menu_requested.connect(self._device_menu)
                 self.table.setCellWidget(row_number, 0, box)

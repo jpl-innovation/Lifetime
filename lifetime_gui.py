@@ -29,7 +29,7 @@ from lifetime_setup import SetupDialog, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
-from lifetime_reveal import Intro, progress
+from lifetime_reveal import Intro, paint_roll, progress
 from lifetime_tasks import Tasks
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all
@@ -109,6 +109,11 @@ class ValueLabel(QLabel):
         painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
         shown = QFontMetrics(font).elidedText(self.text(), Qt.TextElideMode.ElideRight, self.contentsRect().width())
         self.setToolTip(self.text() if shown != self.text() else '')
+        roll = progress(getattr(self.parentWidget(), 'entrance', None), eased=False)    # the card's slice of the entrance
+        if roll < 1.0:
+            paint_roll(painter, QRectF(self.contentsRect()), shown, roll,
+                       self.alignment() & (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignRight) or Qt.AlignmentFlag.AlignLeft)
+            return
         painter.drawText(self.contentsRect(), self.alignment() | Qt.AlignmentFlag.AlignVCenter, shown)
 
 
@@ -220,13 +225,13 @@ class Hero(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         t = THEMES[self.window().theme]
         w, h = self.width(), self.height()
-        def text(y, height, value, size, color, weight=QFont.Weight.Normal, x=0, width=None):
+        def text(y, height, value, size, color, weight=QFont.Weight.Normal, x=0, width=None, roll=1.0):
             f = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
             f.setPixelSize(size)
             f.setWeight(weight)
             p.setFont(f)
             p.setPen(QColor(color))
-            p.drawText(QRectF(x, y, w if width is None else width, height), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, value)
+            paint_roll(p, QRectF(x, y, w if width is None else width, height), value, roll, Qt.AlignmentFlag.AlignLeft)
         shown = self.seconds * progress(self.entrance)
         whole_minutes, secs = divmod(int(shown), 60)
         days, rest = divmod(whole_minutes, 1440)
@@ -235,7 +240,7 @@ class Hero(QWidget):
         # loading spinner and pushed the number out of line with everything else.
         x = 0
         text(3, 25, tr('Total time awake'), 15, t['muted'], x=x, width=w-x)
-        value = f'{shown / 3600:,.1f}'
+        value = f'{self.seconds / 3600:,.1f}'        # the real total: its digits roll into place during the entrance
         size = 64
         f = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
         f.setPixelSize(size)
@@ -245,7 +250,7 @@ class Hero(QWidget):
         while QFontMetrics(f).horizontalAdvance(value) > max(60, available) and size > 18:
             size -= 2
             f.setPixelSize(size)
-        text(28, 80, value, size, t['text'], QFont.Weight.Light, x=x, width=w-x)
+        text(28, 80, value, size, t['text'], QFont.Weight.Light, x=x, width=w-x, roll=progress(self.entrance, eased=False))
         text(112, 28, tr('hero.duration', days=days, hours=hours, minutes=minutes, seconds=secs),
              13 if w < 400 else 15, t['muted'], x=0 if w < 400 else x, width=w if w < 400 else w-x)
 
@@ -323,13 +328,15 @@ class StatCard(QFrame):
     def _show_number(self, value):
         self.number = value
         shown = value * progress(self.entrance) if value > 0 else value
-        self.value.setText(self.formatter(shown))
+        entering = self.entrance is not None and not self.entrance[0].done and self.target is not None
+        self.value.setText(self.formatter(self.target if entering else shown))     # the digits roll; the text is the real one
         if self.progress:
             self.progress.setValue(min(2400, max(0, round(shown * 100))))
 
     def refresh_entrance(self):
         if self.formatter is not None:
             self._show_number(self.number)
+            self.value.update()
 
     def paintEvent(self, event):
         p = QPainter(self)

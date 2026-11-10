@@ -20,27 +20,42 @@ class RevealTests(unittest.TestCase):
         self.window.show()
         self.addCleanup(self.window.close)
 
-    def test_numbers_count_up_after_a_short_delay_and_land_exactly(self):
-        label = QLabel('16', self.window)
-        reveal.count_up(label, delay=100, duration=300)
-        self.assertEqual(label.text(), '0')
-        QTest.qWait(60)
-        self.assertEqual(label.text(), '0')                                            # not before the delay
+    def test_a_rolling_number_keeps_its_real_text_rolls_then_lands_exactly(self):
+        label = reveal.RollLabel('16', self.window)
+        label.setStyleSheet('font-size: 28px; color: white;')
+        label.resize(120, 40)
+        label.roll_in(delay=60, duration=300)
+        self.assertEqual(label.text(), '16')                  # the true value is always there for readers and tests
+        self.assertEqual(label._roll, 0.0)                     # rolled back to zero until the delay passes
+        QTest.qWait(60 + 120)
+        self.assertTrue(0.0 < label._roll < 1.0)
         QTest.qWait(600)
+        self.assertEqual(label._roll, 1.0)
         self.assertEqual(label.text(), '16')
 
-    def test_fresh_data_wins_over_a_running_count(self):
-        label = QLabel('40', self.window)
-        reveal.count_up(label, delay=0, duration=600)
-        QTest.qWait(150)
-        label.setText('7')
-        QTest.qWait(800)
-        self.assertEqual(label.text(), '7')
+    def test_rolling_digits_land_on_exactly_the_plain_rendering(self):
+        from PyQt6.QtGui import QImage, QPainter, QPalette
+        from PyQt6.QtCore import Qt
+        def render(label):
+            image = QImage(120, 40, QImage.Format.Format_ARGB32)
+            image.fill(0)
+            label.render(image)
+            return image
+        plain = QLabel('1,234 h 05 m', self.window)
+        rolled = reveal.RollLabel('1,234 h 05 m', self.window)
+        for label in (plain, rolled):
+            label.setStyleSheet('font-size: 20px; color: white;')
+            label.resize(120, 40)
+        rolled._roll = 1.0
+        self.assertEqual(render(plain), render(rolled))        # nothing shifts or changes when the roll ends
+        rolled._roll = 0.5
+        self.assertNotEqual(render(plain), render(rolled))     # and midway it really is different
 
-    def test_words_and_zero_are_left_alone(self):
-        for text in ('Not available', '113 h 33 m', '0'):
-            label = QLabel(text, self.window)
-            reveal.count_up(label)
+    def test_words_and_reduced_motion_do_not_roll(self):
+        for text, reduced in (('Not available', False), ('16', True)):
+            label = reveal.RollLabel(text, self.window)
+            label.roll_in(reduced=reduced)
+            self.assertEqual(label._roll, 1.0)
             self.assertEqual(label.text(), text)
 
     def test_intro_plays_once_waits_for_data_and_reports_slices(self):
