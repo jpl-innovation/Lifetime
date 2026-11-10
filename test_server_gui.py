@@ -662,6 +662,7 @@ class ServerGuiTests(unittest.TestCase):
         self.assertGreater(calls, 0)
         self.assertLess(calls, 10)
         box = self.window.table.cellWidget(0, 0)
+        self.wait(lambda: box.meters['CPU'][1].value() == 42 and box.meters['RAM'][1].value() == 50)   # the meters fill in once
         self.assertEqual(box.meters['CPU'][1].value(), 42)
         self.assertEqual(box.meters['RAM'][1].value(), 50)
         self.window.refresh()

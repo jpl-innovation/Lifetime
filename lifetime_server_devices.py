@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayo
 
 from lifetime_server_widgets import reduced_motion, status_dot, more_icon
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T
+from lifetime_reveal import Intro, phase
 
 
 class SegmentedBar(QTabBar):
@@ -277,19 +278,26 @@ class StatusNotice(QLabel):
 
 class TileIcon(QWidget):
     """A shell symbol at tile size, so both editions share one icon family."""
-    def __init__(self, kind):
+    def __init__(self, kind, delay=0):
         super().__init__()
         self.kind = kind
         self.setFixedSize(32, 32)
+        self.intro = Intro(self, 700, delay, reduced_motion)    # the strokes draw themselves, tile by tile
 
     def paintEvent(self, event):
         from lifetime_shell import symbol
+        drawn = phase(self.intro.value, 0.0, 1.0) if not self.intro.done else 1.0
+        if drawn < 0.02:
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.scale(1.6, 1.6)
         pen = QPen(QColor(T('#FFFFFF')), 1.2)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        if drawn < 1.0:
+            # Every stroke grows from its own start: a dash that lengthens while the gap stays longer than the shape.
+            pen.setDashPattern([drawn * 18, 60])
         painter.setPen(pen)
         symbol(painter, self.kind)
 
@@ -302,6 +310,7 @@ class FleetGauge(QWidget):
         super().__init__()
         self.setMinimumHeight(176)
         self.value, self.connected = 0.0, 0
+        self.intro = Intro(self, 1200, 0, reduced_motion)
         self.motion = QVariantAnimation(self)
         self.motion.setDuration(520)
         self.motion.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -312,9 +321,11 @@ class FleetGauge(QWidget):
         self.setAccessibleName(description)
         target = connected / total if total else 0.0
         self.motion.stop()
-        if reduced_motion() or not self.isVisible():
-            self.value = target
+        first = not self.intro._armed
+        if reduced_motion() or not self.isVisible() or first:
+            self.value = target         # the first reading is revealed by the entrance, not by a second animation
             self.update()
+            self.intro.ready()
         else:
             self.motion.setStartValue(self.value)
             self.motion.setEndValue(target)
@@ -330,10 +341,22 @@ class FleetGauge(QWidget):
         middle, base = self.width() / 2, self.height() - 16.0
         outer = min(middle - 10, base - 8)
         inner = outer - 22
-        lit = round(self.value * self.TICKS)
+        entering = not self.intro.done
+        v = self.intro.value if entering else 1.0
+        sweep = phase(v, 0.18, 0.88) if entering else 1.0
+        lit = round(self.value * sweep * self.TICKS)
         for index in range(self.TICKS):
-            angle = math.pi * (1 - index / (self.TICKS - 1))
-            pen = QPen(QColor(T('#FFC93C') if index < lit else T(T('#22345A'))), 6)
+            along = index / (self.TICKS - 1)
+            angle = math.pi * (1 - along)
+            # The empty track settles in from the left first; the lit ticks follow it round.
+            arrive = phase(v, along * 0.30, along * 0.30 + 0.28) if entering else 1.0
+            if index < lit:
+                head = entering and index >= lit - 2 and sweep < 1.0     # the leading ticks are brighter while it travels
+                color = QColor(T('#FFD761') if head else T('#FFC93C'))
+            else:
+                color = QColor(T(T('#22345A')))
+                color.setAlphaF(arrive)
+            pen = QPen(color, 6)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             painter.drawLine(QPointF(middle + inner * math.cos(angle), base - inner * math.sin(angle)),
@@ -343,7 +366,8 @@ class FleetGauge(QWidget):
         font.setWeight(QFont.Weight.Light)
         painter.setFont(font)
         painter.setPen(QColor(T('#FFFFFF')))
-        painter.drawText(QRectF(0, base - 70, self.width(), 78), Qt.AlignmentFlag.AlignCenter, str(self.connected))
+        shown = round(self.connected * (phase(v, 0.22, 0.88) if entering else 1.0))    # the number lands with the sweep
+        painter.drawText(QRectF(0, base - 70, self.width(), 78), Qt.AlignmentFlag.AlignCenter, str(shown))
 
 
 class RowDelegate(QStyledItemDelegate):
@@ -557,7 +581,7 @@ class DeviceBox(QWidget):
                 value = perf['ram_used_bytes'] / specs['ram_bytes'] * 100
             label, meter = self.meters[key]
             label.setText(t('{metric}: {value}', metric=t(key), value=missing if value is None else f'{value:.0f}%'))
-            meter.setValue(0 if value is None else round(value))
+            self._fill(meter, 0 if value is None else round(value), 0 if key == 'CPU' else 90)
             meter.setVisible(value is not None)
             label.setVisible(value is not None)     # the spec line above already says when nothing is known
             meter.setAccessibleName(label.text())
@@ -569,6 +593,23 @@ class DeviceBox(QWidget):
         self.menu_button.setAccessibleName(t('Actions for {name}', name=name))
         self.setAccessibleName(' · '.join((self.name.text(), self.user.text(), self.status.text(), self.spec.text(), self.attention.text(), self.bottom.text())))
         self.setToolTip(self.accessibleName())
+
+    def _fill(self, meter, value, delay):
+        """The first time a meter shows a reading it fills from empty; later live updates just move it."""
+        if getattr(meter, '_filled', False) or reduced_motion() or value <= 0 or not self.isVisible():
+            meter._filled = meter._filled if getattr(meter, '_filled', False) else bool(value)
+            meter.setValue(value)
+            return
+        meter._filled = True
+        meter.setValue(0)
+        fill = QVariantAnimation(meter)
+        fill.setStartValue(0)
+        fill.setEndValue(value)
+        fill.setDuration(650)
+        fill.setEasingCurve(QEasingCurve.Type.OutCubic)
+        fill.valueChanged.connect(lambda v: meter.setValue(int(v)))
+        fill.finished.connect(lambda: meter.setValue(value))
+        QTimer.singleShot(delay, fill.start)
 
     def set_selected(self, selected):
         if self.property('selected') != selected:
