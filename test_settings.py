@@ -178,6 +178,10 @@ class ConsentGuiTests(unittest.TestCase):
         self.assertEqual(list(card.cards[0].fields), ['Battery'])
         self.assertEqual(card.cards[0].fields['Battery'][0].text(), 'No battery')
 
+    def test_the_last_setup_step_mentions_connecting_to_a_server(self):
+        dialog = SetupDialog(gui.THEMES['dark'], dict(completed=False))
+        self.assertIn('open Connect', dialog.connect_hint.text())
+
     def test_the_empty_system_page_offers_a_way_to_settings_like_health_does(self):
         opened = []
         page = dashboard.SystemDashboard(lambda: opened.append('settings'))
