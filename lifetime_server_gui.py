@@ -1998,7 +1998,7 @@ class ServerWindow(QMainWindow):
 
     def _confirm(self, message):
         dialog = QMessageBox(QMessageBox.Icon.Warning, self.t('Continue?'), self.t(message), parent=self)
-        yes = dialog.addButton(self.t('Continue?'), QMessageBox.ButtonRole.AcceptRole)
+        yes = dialog.addButton(self.t('Continue'), QMessageBox.ButtonRole.AcceptRole)
         no = dialog.addButton(self.t('Cancel'), QMessageBox.ButtonRole.RejectRole)
         dialog.setDefaultButton(no)
         dialog.setEscapeButton(no)
