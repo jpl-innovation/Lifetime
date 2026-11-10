@@ -1485,6 +1485,7 @@ CONNECT_VI = {
     'On the computer, open Lifetime, choose Connect, and enter this code.': 'Trên máy tính, mở Lifetime, chọn Kết nối và nhập mã này.',
     'Copy': 'Sao chép',
     'Valid until {time}': 'Có hiệu lực đến {time}',
+    'Valid until {date}, {time}': 'Có hiệu lực đến {date}, {time}',
     'Other network?': 'Mạng khác?',
     '{name} wants to connect': '{name} muốn kết nối',
     '{name} connected': '{name} đã kết nối',

@@ -70,6 +70,22 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         return ids
 
+    def test_a_code_that_outlives_today_says_which_day_it_expires(self):
+        from lifetime_connection import issue
+        from lifetime_server_widgets import AddDeviceSheet
+        now = dt.datetime.now(dt.timezone.utc)
+        for hours, has_date in ((0.01, False), (30, True)):
+            issued = dict(code=issue('0' * 64), uses=1,
+                          expires_at=(now + dt.timedelta(hours=hours)).isoformat().replace('+00:00', 'Z'))
+            sheet = AddDeviceSheet(issued, 'https://127.0.0.1:8443', self.window.t, self.window, client=None)
+            self.addCleanup(sheet.close)
+            local = (now + dt.timedelta(hours=hours)).astimezone()
+            if has_date:
+                self.assertIn(local.strftime('%Y-%m-%d'), sheet.expiry.text())
+            else:
+                self.assertNotIn(local.strftime('%Y-%m-%d'), sheet.expiry.text())
+                self.assertTrue(sheet.expiry.text().endswith(local.strftime('%H:%M')))
+
     def test_the_confirmation_button_says_continue_not_a_question(self):
         from PyQt6.QtWidgets import QMessageBox
         seen = []
