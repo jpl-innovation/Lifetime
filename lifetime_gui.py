@@ -713,7 +713,7 @@ class Window(QWidget):
         layout.addWidget(self.counting_panel)
         self.counting_panel.setMaximumHeight(0)
         self.counting_panel.hide()
-        self.system = SystemDashboard()
+        self.system = SystemDashboard(self.open_settings)
         self.history = History()
         self.system.layout().setContentsMargins(0, 0, 0, 0)
         self.history.layout().setContentsMargins(0, 0, 0, 0)

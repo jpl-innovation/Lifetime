@@ -259,7 +259,7 @@ class SignalCard(QFrame):
 
 
 class SystemDashboard(QWidget):
-    def __init__(self):
+    def __init__(self, open_settings=None):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -284,6 +284,12 @@ class SystemDashboard(QWidget):
         self.empty.setWordWrap(True)
         self.empty.hide()
         layout.addWidget(self.empty)
+        # The Health page offers the same way out; a message that points at Settings should open it.
+        self.open_settings_button = QPushButton(tr('Open Settings'))
+        if open_settings:
+            self.open_settings_button.clicked.connect(open_settings)
+        self.open_settings_button.hide()
+        layout.addWidget(self.open_settings_button, alignment=Qt.AlignmentFlag.AlignLeft)
         self.sparklines = LiveSparklines()
         self.sparklines.hide()
         self.data_toggle.toggled.connect(self.show_data)
@@ -310,6 +316,7 @@ class SystemDashboard(QWidget):
         self.sparklines.set_settings(settings)
         any_enabled = any(settings.get(key) for key in ('battery', 'network', 'wifi_name', 'graphics', 'resources'))
         self.empty.setVisible(not any_enabled)
+        self.open_settings_button.setVisible(not any_enabled)
         self.data_toggle.setVisible(any_enabled)
         self.sparklines.setVisible(any_enabled and self.data_toggle.isChecked())
         self.freshness.setVisible(any_enabled)
