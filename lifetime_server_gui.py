@@ -1516,9 +1516,20 @@ class ServerWindow(QMainWindow):
         if not self._submit(lambda: client.call('overview'), self._overview_finished):
             self._overview_busy = False
 
+    def _set_stale(self, stale):
+        """While the server cannot be reached the numbers are only the last ones received. Dim them so they do not look live."""
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        if stale and self.tabs.graphicsEffect() is None:
+            effect = QGraphicsOpacityEffect(self.tabs)
+            effect.setOpacity(0.45)
+            self.tabs.setGraphicsEffect(effect)
+        elif not stale and self.tabs.graphicsEffect() is not None:
+            self.tabs.setGraphicsEffect(None)
+
     def _overview_finished(self, result, success):
         self._overview_busy = False
         self.overview_health.setVisible(not success)
+        self._set_stale(not success)
         if success:
             self._overview_result = result
             self._render_overview(result)
