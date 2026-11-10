@@ -100,6 +100,20 @@ class DashboardShellTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.history_banner.isVisible())
 
+    def test_the_rebuild_banner_stays_off_the_connect_page_and_returns_after(self):
+        self.w.display_ledger(dict(self.ledger, imported=None))
+        self.app.processEvents()
+        self.assertTrue(self.w.history_banner.isVisible())
+        self.w.select_page(5)                                   # Connect needs the height for its form
+        self.app.processEvents()
+        self.assertFalse(self.w.history_banner.isVisible())
+        self.w.display_ledger(dict(self.ledger, imported=None))   # a refresh while on Connect must not bring it back
+        self.app.processEvents()
+        self.assertFalse(self.w.history_banner.isVisible())
+        self.w.select_page(0)
+        self.app.processEvents()
+        self.assertTrue(self.w.history_banner.isVisible())
+
     def test_overview_entrance_plays_once_continues_through_refreshes_and_lands_exactly(self):
         w = self.w
         self.ledger.update(boots=40, total_seconds=36000, current_session_seconds=7200, longest_session_seconds=9000)

@@ -1031,6 +1031,10 @@ class Window(QWidget):
             self.import_process.kill()
             self.import_process.waitForFinished(1000)
 
+    def _show_history_banner(self):
+        """Not on Connect: that form needs the height, and the banner is about a different task."""
+        self.history_banner.setVisible(getattr(self, '_history_due', False) and getattr(self, 'active_page', 0) != 5)
+
     def select_page(self, index):
         if index not in (0, 1, 2, 3, 4, 5):
             return
@@ -1047,6 +1051,7 @@ class Window(QWidget):
         if previous.graphicsEffect():
             previous.setGraphicsEffect(None)
         self.active_page = index
+        self._show_history_banner()
         self.pages.setCurrentIndex(index)
         self.pages.updateGeometry()
         self.body.layout().activate()
@@ -1348,7 +1353,8 @@ class Window(QWidget):
             self.tracker_banner.setVisible(not running)
             self.hint.setVisible(not running)
             importing = hasattr(self, 'import_process') and self.import_process.state() != QProcess.ProcessState.NotRunning
-            self.history_banner.setVisible(bool(self.settings.get('completed')) and not ledger.get('imported') and not importing)
+            self._history_due = bool(self.settings.get('completed')) and not ledger.get('imported') and not importing
+            self._show_history_banner()
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)
