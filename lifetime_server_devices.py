@@ -68,7 +68,7 @@ class SegmentedBar(QTabBar):
         self.setStyleSheet(f'''QTabBar {{background:transparent; }}
             QTabBar::tab {{background:transparent; color:#9FB0CC; border:0; padding:13px {7 if compact else 30}px; font-size:{14 if compact else 15}px; font-weight:600;}}
             QTabBar::tab:hover {{color:#FFFFFF;}}
-            QTabBar::tab:selected {{color:#FFFFFF;}}
+            QTabBar::tab:selected {{color:#FFF0BF;}}
             QTabBar::tab:focus {{color:#FFC93C;}}''')
 
     def _set_sheen(self, value):
