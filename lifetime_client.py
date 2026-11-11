@@ -143,6 +143,7 @@ class SyncClient:
 
     def _exchange(self, state):
         phase = state['phase']
+        self._sent_extended = False
         if phase == 'enrolling':
             message = state['enrollment']
             response = tls.request_json(state['bundle'], '/v1/enroll', message, timeout=self.timeout)
@@ -158,6 +159,11 @@ class SyncClient:
             raise ResponseError('No approved reporting credential')
         message = self.agent.batch()
         message['client_version'] = protocol.CLIENT_VERSION
+        extended = 'health' in message.get('readings', {}) or 'detail' in message.get('health', {}) or bool(set(message.get('history', {})) & set(protocol.HISTORY_EXTRA))
+        if extended and time.time() < state.get('legacy_server_until', 0):
+            message = protocol.without_extended(message)
+            extended = False
+        self._sent_extended = extended
         response = tls.request_json(state['bundle'], '/v1/sync', message,
                                     credential=state['credential'], timeout=self.timeout)
         self._ack_reply(response, state, message)
@@ -247,6 +253,9 @@ class SyncClient:
                         current.update(status='invalid-code', phase='disabled', enabled=False,
                                        enrollment=None, credential=None)
                         self.agent._set_policy(current, dict(history=False, resources=False))
+                    elif status == 400 and getattr(self, '_sent_extended', False):
+                        # A server older than 1.2 rejects the Activity/Health detail: resend the 1.1 format for a day.
+                        current.update(legacy_server_until=now+86400, next_attempt=0)
                     elif status == 409:
                         current['status'] = 'conflict'
                     elif status in (401, 403) and state['phase'] == 'approved':

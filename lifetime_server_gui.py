@@ -14,7 +14,7 @@ from PyQt6.QtCore import QDate, QEvent, QItemSelectionModel, QLocale, QTimer, Qt
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6 import sip
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
-                            QFileDialog, QFormLayout, QGridLayout,
+                            QFileDialog, QFormLayout, QGridLayout, QFrame,
                             QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                             QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QHeaderView,
                             QSizePolicy, QSpinBox, QMenu, QTableWidget,
@@ -33,7 +33,8 @@ from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, loc
 from lifetime_reveal import RollLabel, fade_in
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
-from lifetime_charts import Plot
+from lifetime_charts import Plot, Insights
+from lifetime_health_gui import HealthPage
 from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
@@ -743,6 +744,37 @@ class ServerWindow(QMainWindow):
         self.daily_summary.setObjectName('muted')
         self.daily_summary.setWordWrap(True)
         detail_layout.addWidget(self.daily_summary)
+        # The desktop's own Activity and Health pages, fed with what this computer reported.
+        self.activity_state = self.label('History is off on this computer')
+        self.activity_state.setObjectName('muted')
+        self.activity_stats = QLabel()
+        self.activity_stats.setObjectName('muted')
+        self.activity_stats.setWordWrap(True)
+        self.remote_activity = Insights()
+        # The server's split detail pane is narrower than the desktop page.
+        # Keep the same controls/charts, with ranges on their own row.
+        activity_box = self.remote_activity.layout()
+        activity_header = activity_box.itemAt(0).layout()
+        activity_header.removeWidget(self.remote_activity.ranges)
+        range_row = QHBoxLayout()
+        range_row.addWidget(self.remote_activity.ranges, alignment=Qt.AlignmentFlag.AlignLeft)
+        range_row.addStretch()
+        activity_box.insertLayout(1, range_row)
+        activity_box.itemAt(2).layout().setSpacing(12)
+        for value in self.remote_activity.figures:
+            value.setStyleSheet('font-size:16px; font-weight:600;')
+        self.remote_health = HealthPage({}, lambda: None, remote=True)
+        for card in self.remote_activity.cards:
+            glass(card)
+        for panel in self.remote_health.content.findChildren(QFrame):
+            if panel.objectName() == 'insetPanel':
+                glass(panel)
+        for page in (self.remote_activity, self.remote_health):
+            page.setStyleSheet('QLabel#pageTitle {font-size:22px; font-weight:600;} QLabel#caption {font-size:13px;} QLabel#groupTitle {font-size:17px; font-weight:600;}')
+        self.health_state = self.label('System readings are off on this computer')
+        self.health_state.setObjectName('muted')
+        for widget in (self.activity_stats, self.activity_state, self.remote_activity, self.health_state, self.remote_health):
+            detail_layout.addWidget(widget)
         self.detail_text = QTextBrowser()
         self.detail_text.setOpenExternalLinks(False)
         self.detail_text.setFrameShape(QTextBrowser.Shape.NoFrame)
@@ -1952,6 +1984,7 @@ class ServerWindow(QMainWindow):
         self.copy_device_id.setEnabled(False)
         self.device_pending.hide()
         self._render_specs({})
+        self._render_remote({})
         self._power_state(None)
         self._fit_detail_text()
 
@@ -1974,9 +2007,48 @@ class ServerWindow(QMainWindow):
                                               day=self._date(day.isoformat(), year=False)))
         self.daily_summary.setVisible(bool(recorded))
 
+    def _render_remote(self, device):
+        """Rebuild the inputs the desktop pages read from its local ledger and probes."""
+        policy = device.get('policy') or {}
+        history = device.get('history') if policy.get('history') is True else None
+        totals = device.get('totals') or {}
+        have = bool(history and history.get('daily'))
+        self.activity_state.setVisible(not have)
+        self.activity_state.setText(self.t('No activity history reported yet' if history is not None or policy.get('history') is True
+                                           else 'History is off on this computer') if not have else '')
+        if policy.get('history') is not True:
+            self.activity_state.setText(self.t('History is off on this computer'))
+        self.remote_activity.setVisible(have)
+        self.activity_stats.setVisible(have and history.get('boots') is not None)
+        if have:
+            imported = totals.get('imported_seconds', 0)
+            self.remote_activity.set_ledger(dict(
+                daily=history.get('daily') or {}, hourly=history.get('hourly', []), sessions=history.get('sessions', []),
+                dated_hourly=history.get('dated_hourly', {}), first_seen=(history.get('first_seen') or '')[:10] or None,
+                recording_started=history.get('recording_started'),
+                total_seconds=totals.get('measured_seconds', 0) + imported, baseline_seconds=totals.get('baseline_seconds', 0),
+                imported=dict(seconds=imported, daily=history.get('imported_daily') or {}),
+                **({'daily_allocation': {'estimated': True}} if history.get('daily_estimated') else {})))
+            if history.get('boots') is not None:
+                from lifetime_charts import hm
+                self.activity_stats.setText(self.t('Boots {boots} · current session {current} · longest session {longest}',
+                    boots=f"{history['boots']:,}", current=hm(history.get('current_session_seconds') or 0),
+                    longest=hm(history.get('longest_session_seconds') or 0)))
+        else:
+            self.remote_activity.set_ledger({})
+            self.activity_stats.clear()
+        health = (device.get('readings') or {}).get('health') if policy.get('resources') is True else None
+        detail = (health or {}).get('detail')
+        self.remote_health.setVisible(bool(detail))
+        self.health_state.setVisible(not detail)
+        self.health_state.setText(self.t('System readings are off on this computer' if policy.get('resources') is not True
+                                         else 'No health details reported yet'))
+        self.remote_health.set_remote(detail or {})
+
     def _render_detail(self, device, preserve_edits=False):
         self._render_specs(device)
         self._render_daily(device)
+        self._render_remote(device)
         self._power_state(device)
         commands = device.get('commands') or []
         self.command_status.setText(self.t('Command status: {status}', status=self.t('command.' + commands[0]['status'])) if commands else '')
@@ -2016,7 +2088,7 @@ class ServerWindow(QMainWindow):
                 T('<tr><td style="color:#9FB0CC;">') + e(self.t(key)) +
                 '</td><td>' + e(value) + '</td></tr>' for key, value in rows) + '</table>'   # no colons, as on Overview
         contents = table(fields)
-        health = device.get('health') or {}
+        health = (device.get('readings') or {}).get('health') or device.get('health') or {}
         contents += '<p style="font-weight:600;margin:12px 0 4px">' + e(self.t('Health')) + '</p>'
         contents += table([(title, missing if health.get(field) is None else (self._timestamp(health[field]) if field == 'last_crash' else str(health[field]) + ('%' if field == 'battery_health' else ''))) for title, field in (('Crashes in 30 days', 'crashes_30d'), ('Unexpected shutdowns in 30 days', 'shutdowns_30d'), ('Battery health', 'battery_health'), ('Cycle count', 'cycle_count'), ('Last crash', 'last_crash'))])
         contents += '<p style="font-weight:600;margin:12px 0 4px">' + e(self.t('Usage snapshots (hours; never added together)')) + '</p>'

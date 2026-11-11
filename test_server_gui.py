@@ -155,11 +155,30 @@ class ServerGuiTests(unittest.TestCase):
         self.addCleanup(self.cleanup_window)
         self.wait_idle()
 
+    def test_remote_pages_use_resources_and_history_consent(self):
+        row = device(0)
+        row['policy'] = dict(history=True, resources=True)
+        row['history'] = dict(daily={dt.date.today().isoformat(): 3600}, hourly=[0]*24, boots=2)
+        row['readings'] = dict(health=dict(detail=dict(stability=[], battery={'packs': []}, sleep={'daily': {}, 'nights': []})))
+        with patch.object(gui.HealthPage, 'refresh', side_effect=AssertionError('local probe')):
+            self.window._render_remote(row)
+        self.assertFalse(self.window.remote_activity.isHidden())
+        self.assertFalse(self.window.remote_health.isHidden())
+        row['policy'] = dict(history=False, resources=False)
+        self.window._render_remote(row)
+        self.assertTrue(self.window.remote_activity.isHidden())
+        self.assertTrue(self.window.remote_health.isHidden())
+        self.assertEqual(self.window.health_state.text(), self.window.t('System readings are off on this computer'))
+
     def cleanup_window(self):
         for event in self.api.block.values():
             event.set()
         self.window.close()
         self.wait(lambda: not self.window._jobs)
+        for label in self.window.findChildren(gui.RollLabel):
+            label._rolling = None  # cancel delayed entrances before releasing the test window
+        self.window.deleteLater()
+        self.app.sendPostedEvents(None, gui.QEvent.Type.DeferredDelete)
 
     def wait(self, predicate, timeout=3):
         deadline = time.monotonic() + timeout

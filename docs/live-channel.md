@@ -62,3 +62,24 @@ it while commands, acks and presence stay on the socket. Not built.
   left running from an earlier connect must be stopped once; new connects replace it automatically.
 - The source (non-packaged) agent install uses a clean virtual environment with no packages, so it uses the HTTPS
   fallback unless `websockets` is installed there.
+
+## Activity and Health detail (client 1.2)
+
+Durable HTTPS sync adds optional history fields: `hourly` (24 buckets),
+`dated_hourly` (120 days), `sessions` (100 rows), `boots`, and current/longest
+session seconds. Existing daily/imported history remains capped at 3,660 days.
+These fields require the existing history consent.
+
+Under existing resources consent, `readings.health` carries the version-1 health
+summary plus optional `detail`: stability events (400), battery packs (4), capacity
+history/usage (400 days each), sleep days/nights (400 each). OS log reads run in a
+background worker and refresh every six hours. Failed readings are omitted.
+No new consent flags are introduced; the older independent health summary is
+unchanged. Revoking resources clears the extended readings locally and remotely.
+
+The server validates nested field names, types, finite ranges, dates and list caps;
+the complete sync remains limited to 1 MiB. Optional JSON is stored in existing
+snapshot columns, so existing databases need no DDL migration. The loopback,
+token-protected device detail API returns the same snapshots. Old clients work
+unchanged. Since older servers strictly reject unknown fields, a 400 response to
+an extended batch makes the client retry the old format for 24 hours.
