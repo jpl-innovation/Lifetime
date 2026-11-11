@@ -115,3 +115,85 @@ def rows(data, tr):
                'BIOS vendor / version / date': 'board', 'GPU driver / VRAM': 'gpus',
                'OS build / architecture / installed': 'os', 'Uptime / last boot': 'os'}
     return [(tr(key), value.replace(missing, unavailable(domains.get(key)))) for key, value in result]
+
+
+def sections(data, tr):
+    """Grouped specification rows: (label, value, unavailable reason)."""
+    data = data or {}
+    reasons = data.get('unavailable') or {}
+    generic = 'The operating system did not expose this reading'
+
+    def row(label, value, unit='', domain=None, reason=None):
+        missing = value is None or value == ''
+        shown = tr('Not available') if missing else f'{value:g}{unit}' if type(value) in (int, float) else str(value)
+        return tr(label), shown, tr(reason or reasons.get(domain) or generic) if missing else ''
+
+    def gib(value):
+        return value / 2**30 if value is not None else None
+
+    def title(key, number):
+        return tr(key, number=number)
+
+    cpu = data.get('cpu') or {}
+    cooling = [('', [row('CPU temperature', cpu.get('temperature_c'), ' °C', 'cpu_temperature'),
+                     row('Current clock', cpu.get('current_mhz'), ' MHz', 'cpu'),
+                     row('Maximum clock', cpu.get('max_mhz'), ' MHz', 'cpu')])]
+    fans = data.get('fans') or []
+    fan_reason = reasons.get('fans') or "Not reported by this computer's firmware"
+    cooling[0][1].append(row('Reported fans', len(fans) if fans else None, reason=fan_reason))
+    for i, fan in enumerate(fans, 1):
+        cooling.append((fan.get('name') or title('Fan {number}', i),
+                        [row('Fan speed', fan.get('rpm'), ' RPM', reason=fan_reason)]))
+
+    memory = data.get('memory') or {}
+    modules = [('', [row('Slots used', memory.get('slots_used'), domain='memory'),
+                     row('Total slots', memory.get('slots_total'), domain='memory')])]
+    for i, module in enumerate(memory.get('modules') or [], 1):
+        modules.append((title('Memory module {number}', i), [
+            row('Memory type', module.get('kind')), row('Memory speed', module.get('speed_mhz'), ' MHz'),
+            row('Capacity', gib(module.get('capacity_bytes')), ' GiB')]))
+    if not memory.get('modules'):
+        modules[0][1].insert(0, row('RAM modules', None, domain='memory'))
+
+    disks = [(disk.get('model') or title('Drive {number}', i), [
+        row('Drive type', disk.get('kind')), row('Capacity', gib(disk.get('size_bytes')), ' GiB'),
+        row('Disk health', disk.get('health'))]) for i, disk in enumerate(data.get('disks') or [], 1)]
+
+    adapters = []
+    for i, adapter in enumerate(data.get('adapters') or [], 1):
+        connected = adapter.get('connected')
+        entries = [row('Model', adapter.get('model')), row('Connection type', adapter.get('kind')),
+                   row('Status', tr('Connected') if connected is True else tr('Disconnected') if connected is False else None),
+                   row('Link speed', adapter.get('speed_mbps'), ' Mbps'),
+                   row('Driver', adapter.get('driver'), domain='adapter_driver')]
+        if adapter.get('vendor'):
+            entries.append(row('Manufacturer', adapter['vendor']))
+        if adapter.get('mac'):
+            entries.append(row('MAC address', adapter['mac']))
+        if adapter.get('kind') == 'Wi-Fi':
+            entries.extend([row('Wi-Fi standard', adapter.get('wifi_standard')), row('Wi-Fi band', adapter.get('band'))])
+        adapters.append((adapter.get('name') or title('Network card {number}', i), entries))
+
+    graphics = [(gpu.get('name') or title('Graphics adapter {number}', i), [
+        row('Driver', gpu.get('driver')), row('Video memory', gib(gpu.get('vram_bytes')), ' GiB')])
+        for i, gpu in enumerate(data.get('gpus') or [], 1)]
+    if not graphics:
+        graphics.append(('', [row('GPU driver / VRAM', None, domain='gpus')]))
+    for i, display in enumerate(data.get('displays') or [], 1):
+        width, height = display.get('width'), display.get('height')
+        resolution = f'{width} × {height} px' if width is not None and height is not None else None
+        graphics.append((title('Display {number}', i), [row('Resolution', resolution), row('Refresh rate', display.get('hz'), ' Hz')]))
+    if not data.get('displays'):
+        graphics.append(('', [row('Displays', None)]))
+
+    board, os = data.get('board') or {}, data.get('os') or {}
+    return [(tr('Processor & cooling'), cooling), (tr('Memory'), modules),
+            (tr('Storage'), disks or [('', [row('Physical disks', None, domain='disks')])]),
+            (tr('Network cards'), adapters or [('', [row('Network cards', None, domain='adapters')])]),
+            (tr('Graphics & displays'), graphics),
+            (tr('Motherboard & BIOS'), [('', [row(label, board.get(key), domain='board') for label, key in (
+                ('Manufacturer', 'manufacturer'), ('Model', 'model'), ('BIOS vendor', 'bios_vendor'),
+                ('BIOS version', 'bios_version'), ('BIOS date', 'bios_date'))])]),
+            (tr('Operating system'), [('', [row(label, os.get(key), unit, 'os') for label, key, unit in (
+                ('OS name', 'name', ''), ('OS build', 'build', ''), ('Architecture', 'architecture', ''),
+                ('Installed', 'installed', ''), ('Uptime', 'uptime_seconds', ' s'), ('Last boot', 'last_boot', ''))])])]

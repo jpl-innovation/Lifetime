@@ -152,6 +152,27 @@ class ParsingTests(unittest.TestCase):
 
 
 class InventoryTests(unittest.TestCase):
+    def test_grouped_specs_keep_values_separate_from_missing_reasons(self):
+        from lifetime_system import sections
+        translate = lambda key, **values: key.format(**values)
+        grouped = dict(sections(dict(cpu={'temperature_c': 0}, fans=[],
+                                    adapters=[dict(name='Ethernet', kind='Ethernet', connected=False,
+                                                   vendor='Example vendor', mac='02:00:00:00:00:01')],
+                                    displays=[dict(width=2560, height=1440)]), translate))
+        processor = {label: (value, reason) for _, entries in grouped['Processor & cooling'] for label, value, reason in entries}
+        self.assertEqual(processor['CPU temperature'], ('0 °C', ''))
+        self.assertEqual(processor['Reported fans'][0], 'Not available')
+        self.assertIn('firmware', processor['Reported fans'][1])
+        network = {label: (value, reason) for _, entries in grouped['Network cards'] for label, value, reason in entries}
+        self.assertEqual(network['Status'][0], 'Disconnected')
+        self.assertEqual(network['Link speed'][0], 'Not available')
+        self.assertTrue(network['Driver'][1])
+        self.assertEqual(network['Manufacturer'][0], 'Example vendor')
+        self.assertEqual(network['MAC address'][0], '02:00:00:00:00:01')
+        display = {label: value for _, entries in grouped['Graphics & displays'] for label, value, _ in entries}
+        self.assertEqual(display['Resolution'], '2560 × 1440 px')
+        self.assertEqual(display['Refresh rate'], 'Not available')
+
     def test_missing_fields_are_explicit_and_thermal_zones_are_not_cpu(self):
         import lifetime_system as system
         rows = dict(system.rows(dict(fans=[], adapters=[dict(name='Wi-Fi', kind='Wi-Fi')]), lambda s: s))
