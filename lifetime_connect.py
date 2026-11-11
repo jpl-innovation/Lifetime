@@ -19,6 +19,7 @@ from lifetime_i18n_qt import QLabel, QPushButton
 from lifetime_company import read_status
 from lifetime_settings import read_settings
 from lifetime_theme import tokens
+from lifetime_glass import solid
 
 NO_SERVER = 'No server found with this code. Check that the server is on and that this computer is on the same network.'
 PERMISSION = 'Windows permission is needed to finish.'
@@ -243,13 +244,16 @@ class PacketFlight(QWidget):
 
 
 class ConnectPage(QWidget):
+    def restyle_glass(self):
+        self.setStyleSheet('QWidget#connectPage {background: ' + solid(tokens()['bg']) + ';}')
+
     def __init__(self, parent=None, directory=None, language=None, machine_root=None):
         super().__init__(parent)
         from lifetime_theme import install
         install()
         self.setObjectName('connectPage')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet('QWidget#connectPage {background: ' + tokens()['bg'] + ';}')
+        self.restyle_glass()
         self.directory, self.machine_root, self.language = directory, machine_root, language
         self._busy = False
         self._operation = None

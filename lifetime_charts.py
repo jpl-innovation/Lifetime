@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget
 from lifetime_i18n import duration, time_text
 from lifetime_shell import DisclosureButton
+from lifetime_glass import active_style, paint_glass, paint_track, solid
 from lifetime_reveal import Intro, phase, progress
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, Tokens
 
@@ -696,6 +697,10 @@ class RangeSegments(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        if active_style() == 'glass':
+            paint_track(painter, QRectF(self.rect()), PANEL_RADIUS)
+            paint_glass(painter, self.indicator, CONTROL_RADIUS, pill=True)
+            return
         painter.setBrush(QColor(TOKENS['card']))
         painter.drawRoundedRect(QRectF(self.rect()), PANEL_RADIUS, PANEL_RADIUS)
         painter.setBrush(QColor(TOKENS['track']))
@@ -726,7 +731,6 @@ class ChartCard(QFrame):
         if isinstance(chart, Calendar):
             self.viewport = QScrollArea()
             self.viewport.setFrameShape(QFrame.Shape.NoFrame)
-            self.viewport.setStyleSheet(f'QScrollArea, QScrollArea > QWidget > QWidget {{background:{TOKENS["card"]};}}')
             self.viewport.setWidgetResizable(True)
             self.viewport.setWidget(chart)
             self.viewport.setMinimumHeight(181)
@@ -743,11 +747,18 @@ class ChartCard(QFrame):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setStyleSheet(f'QTableWidget {{background:{TOKENS["card"]}; gridline-color:{TOKENS["border"]}; font-size:13px;}} QHeaderView::section {{background:{TOKENS["track"]}; color:{TOKENS["muted"]}; border:0; padding:5px;}}')
         self.box.addWidget(self.table, 1)
         self.table.hide()
         self.data_visible = False
         self.headers, self.rows = [], []
+        self.restyle_glass()
+
+    def restyle_glass(self):
+        """The calendar's scroll area and the data table sit on the card: solid in Classic, see-through on Glass."""
+        if isinstance(self.chart, Calendar):
+            self.viewport.setStyleSheet(f'QScrollArea, QScrollArea > QWidget > QWidget {{background:{solid(TOKENS["card"])};}}')
+        edge = 'border:none; ' if active_style() == 'glass' else ''        # the glass card is the frame
+        self.table.setStyleSheet(f'QTableWidget {{{edge}background:{solid(TOKENS["card"])}; gridline-color:{TOKENS["border"]}; font-size:13px;}} QHeaderView::section {{background:{solid(TOKENS["track"])}; color:{TOKENS["muted"]}; border:0; padding:5px;}}')
 
     def set_table(self, headers, rows):
         self.headers, self.rows = headers, rows
@@ -779,6 +790,9 @@ class ChartCard(QFrame):
 
 
 class Insights(QWidget):
+    def restyle_glass(self):
+        self.data_toggle.setStyleSheet('QPushButton:checked {background:' + solid(TOKENS['track']) + ';}')
+
     def __init__(self):
         super().__init__()
         self.ledger = {}
@@ -798,7 +812,7 @@ class Insights(QWidget):
         self.data_toggle.setCheckable(True)
         self.data_toggle.setAccessibleName(tr('Show data for all charts'))
         self.data_toggle.setFixedHeight(40)
-        self.data_toggle.setStyleSheet('QPushButton:checked {background:' + TOKENS['track'] + ';}')
+        self.restyle_glass()
         row.addWidget(self.data_toggle)
         self.ranges.currentIndexChanged.connect(lambda index: self.set_range(RANGES[index]))
         box.addLayout(row)

@@ -29,6 +29,21 @@ class SettingsTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def test_style_defaults_to_classic_round_trips_and_ignores_unknown_values(self):
+        self.assertEqual(settings.defaults()['style'], 'classic')
+        self.assertEqual(settings.load_settings(self.root)['style'], 'classic')
+        self.assertEqual(settings.update_settings({'style': 'glass'}, self.root)['style'], 'glass')
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        settings.save_settings(dict(settings.load_settings(self.root), completed=True), self.root)   # a full save keeps it
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        settings.save_settings({'completed': True}, self.root)                   # and so does one that does not mention it
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        settings.update_settings({'theme': 'light'}, self.root)                  # other preferences leave it alone
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        for bad in ('neon', None, 3, ['glass']):
+            (self.root/'settings.json').write_text(json.dumps({'style': bad}))
+            self.assertEqual(settings.load_settings(self.root)['style'], 'classic')
+
     def test_defaults_missing_invalid_and_partial(self):
         self.assertEqual(settings.load_settings(self.root), settings.defaults())
         path = self.root/'settings.json'

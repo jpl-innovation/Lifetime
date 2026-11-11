@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QHBoxLayout, QLab
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, QRadioButton
 
 from lifetime_theme import stylesheet, install
+from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
 from lifetime_settings import defaults, delete_history, normalize, save_settings, load_settings, update_settings
 
 CHOICES = (
@@ -35,6 +36,7 @@ def setup_style(tokens):
         QWidget {{ color: {t['text']}; font-family: '{family}'; font-size: 15px; }}
         QLabel {{ background: transparent; }}
         QLabel#title {{ font-size: 26px; font-weight: 600; }}
+        QLabel#sectionTitle {{ font-size: 18px; font-weight: 600; }}
         QLabel#description, QLabel#progress {{ color: {t['muted']}; font-size: 13px; }}
         QLabel#summary {{ background: {t['card']}; padding: 20px; }}
         QCheckBox, QRadioButton {{ spacing: 12px; min-height: 28px; }}
@@ -44,7 +46,7 @@ def setup_style(tokens):
             background: {t['accent']}; border: 1px solid {t['accent']}; }}
         QCheckBox:focus, QRadioButton:focus {{ color: {t['accent']}; }}
         QScrollArea {{ border: none; }}
-    """
+    """ + desktop_sheet(t)
 
 
 class ConsentCheckBox(QCheckBox):
@@ -73,7 +75,9 @@ class SetupDialog(QDialog):
     def __init__(self, tokens, settings=None, directory=None, parent=None):
         super().__init__(parent)
         self.directory = directory
+        self.tokens = tokens
         self.initial = normalize(settings or defaults())
+        set_style(self.initial['style'])
         set_language(self.initial['language'])
         self.result_settings = None
         self.setWindowTitle(tr('Lifetime settings') if self.initial['completed'] else tr('Set up Lifetime'))
@@ -104,6 +108,18 @@ class SetupDialog(QDialog):
             language_group.addButton(button)
             language_page.addWidget(button)
             self.language_buttons[code] = button
+        language_page.addSpacing(16)
+        language_page.addWidget(self.text(tr('Style'), 'sectionTitle'))
+        style_group = QButtonGroup(self)
+        self.style_buttons = {}
+        for key, title in (('glass', 'Glass'), ('classic', 'Classic')):
+            button = QRadioButton(tr(title))
+            button.setMinimumHeight(44)
+            button.setChecked(active_style() == key)
+            button.toggled.connect(lambda checked, value=key: self.change_style(value) if checked else None)
+            style_group.addButton(button)
+            language_page.addWidget(button)
+            self.style_buttons[key] = button
         language_page.addStretch()
         first = self.page(tr('What would you like to track?'),
             tr('Lifetime records how long this computer is awake. Everything stays on this computer. Nothing is uploaded.'))
@@ -191,6 +207,29 @@ class SetupDialog(QDialog):
             QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
         if self.parent() and hasattr(self.parent(), 'switch_language'):
             self.parent().switch_language(value)
+
+    def change_style(self, value):
+        """Glass or Classic is a look, not consent: saved at once, like the language. The window changes with it."""
+        if value == active_style():
+            return
+        if self.parent() and hasattr(self.parent(), 'switch_style'):
+            saved = self.parent().switch_style(value)          # the window saves it and changes in place
+        else:                                                  # first run: there is no window behind the dialog yet
+            from lifetime_shell import attach_glass_all, install_glass_surfaces
+            try:
+                update_settings({'style': value}, self.directory)
+                saved = True
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
+                saved = False
+            if saved:
+                set_style(value)
+                install_glass_surfaces()
+                attach_glass_all()
+        if saved:
+            self.setStyleSheet(setup_style(self.tokens))
+        else:
+            self.style_buttons[active_style()].setChecked(True)
 
     def retranslate_content(self):
         if hasattr(self, 'next'):

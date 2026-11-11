@@ -5,16 +5,18 @@ import os
 import shlex
 import sys
 
-from PyQt6.QtCore import Qt, QRectF, QPointF, QLineF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent
+from PyQt6.QtCore import Qt, QObject, QRectF, QPointF, QLineF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
-from PyQt6.QtWidgets import QApplication, QButtonGroup, QHBoxLayout, QMenu, QSystemTrayIcon, QVBoxLayout, QSizePolicy
+from PyQt6 import QtWidgets
+from PyQt6.QtWidgets import QApplication, QButtonGroup, QFrame, QHBoxLayout, QMenu, QSystemTrayIcon, QVBoxLayout, QSizePolicy
 from lifetime_i18n import tr
 from lifetime_i18n_qt import QWidget, QPushButton, QLabel
-from lifetime_theme import CONTROL_RADIUS, install
+from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, install
+from lifetime_glass import Glass, active_style, paint_glass, paint_track
 
 
-from lifetime_theme import tokens
+from lifetime_theme import tokens, active_theme
 GREEN = '#4CC38A'   # use tokens()['good'] where the background can be light
 
 
@@ -316,12 +318,19 @@ class NavRow(QPushButton):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        lit = active_style() == 'glass'
         if self.underMouse() and not self.isChecked():
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(tokens()['card']))
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), CONTROL_RADIUS, CONTROL_RADIUS)
+            if lit:      # a faint white wash on the sidebar's glass
+                p.setBrush(QColor(255, 255, 255, 16 if active_theme() == 'dark' else 90))
+                p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), self.height() / 2 - 1, self.height() / 2 - 1)
+            else:
+                p.setBrush(QColor(tokens()['card']))
+                p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), CONTROL_RADIUS, CONTROL_RADIUS)
         ring = self.hasFocus() and self.keyboard_focus
         color = QColor(tokens()['text'] if self.isChecked() or ring else tokens()['muted'])
+        if lit and self.isChecked():
+            color = QColor(tokens()['tab_on'])       # the current page's name is the server menu's warm white-yellow
         p.setPen(QPen(color, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         p.save()
         p.translate((self.width()-20)/2 if self.sidebar.collapsed else 12, 12)
@@ -333,7 +342,8 @@ class NavRow(QPushButton):
         if ring:
             p.setPen(QPen(QColor(tokens()['accent']), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), CONTROL_RADIUS, CONTROL_RADIUS)
+            ring_radius = self.height() / 2 - 2 if lit else CONTROL_RADIUS
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), ring_radius, ring_radius)
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
@@ -385,6 +395,51 @@ def themed_logo(path):
 
 def reduced_motion():
     return os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
+
+
+GLASS_PANELS = ('signalCard', 'insetPanel', 'summary')
+FLAT_BUTTONS = ('primary', 'primaryAction', 'quietAction', 'disclosure', 'importToggle', 'segment')   # amber or text-only
+
+
+def attach_glass(widget):
+    """Give a panel or an ordinary button the shared glass painter. It paints nothing while the style is Classic."""
+    if widget.property('glass') is True:        # Glass() sets this; a Qt property survives a re-wrapped C++ widget
+        return
+    app = QApplication.instance()
+    owner = getattr(app, '_lifetime_glass', None)
+    if owner is None:
+        return
+    if isinstance(widget, QFrame) and widget.objectName() in GLASS_PANELS:
+        painter = Glass(widget, PANEL_RADIUS, glass_only=True, owner=owner)
+    elif (isinstance(widget, QtWidgets.QPushButton) and type(widget).__name__ in ('QPushButton', 'ConnectButton')
+            and widget.objectName() not in FLAT_BUTTONS and type(widget.parentWidget()).__name__ != 'RangeSegments'):
+        painter = Glass(widget, CONTROL_RADIUS, pill=True, glass_only=True, owner=owner)
+        style = widget.style()
+        style.unpolish(widget)      # the stylesheet's [glass="true"] rule needs the property seen by a fresh polish
+        style.polish(widget)
+    else:
+        return
+    widget.destroyed.connect(painter.deleteLater)
+
+
+def attach_glass_all():
+    for widget in QApplication.allWidgets():
+        attach_glass(widget)
+
+
+def install_glass_surfaces():
+    """Once per application: every panel and button polished while the style is Glass gets the glass painter."""
+    app = QApplication.instance()
+    if app is None or hasattr(app, '_lifetime_glass'):
+        return
+
+    class Surfaces(QObject):
+        def eventFilter(self, widget, event):
+            if event.type() == QEvent.Type.Polish and active_style() == 'glass' and isinstance(widget, QtWidgets.QWidget):
+                attach_glass(widget)
+            return False
+    app._lifetime_glass = Surfaces(app)
+    app.installEventFilter(app._lifetime_glass)
 
 
 class ThemeReveal(QWidget):
@@ -634,8 +689,12 @@ class ModeSwitch(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(c['track']))
-        p.drawRoundedRect(QRectF(self.rect()), CONTROL_RADIUS, CONTROL_RADIUS)
+        lit = active_style() == 'glass'
+        if lit:
+            paint_track(p, QRectF(self.rect()), CONTROL_RADIUS)
+        else:
+            p.setBrush(QColor(c['track']))
+            p.drawRoundedRect(QRectF(self.rect()), CONTROL_RADIUS, CONTROL_RADIUS)
         if self.globe and not self.vertical:
             p.save()
             p.translate(18, self.height() / 2)
@@ -646,6 +705,9 @@ class ModeSwitch(QWidget):
             p.drawLine(QPointF(-6.5, 0), QPointF(6.5, 0))
             p.restore()
         thumb = self.thumb()
+        if lit:
+            paint_glass(p, thumb, thumb.height() / 2, pill=True)
+            return
         shadow = QColor(0, 0, 0, 46)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(shadow)
@@ -734,10 +796,18 @@ class Sidebar(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(tokens()['sidebar']))
+        lit = active_style() == 'glass'
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if lit:
+            # One pane of glass down the edge of the window: its other three sides lie outside the widget.
+            paint_glass(p, QRectF(-40, -40, self.width() + 40, self.height() + 80), 24)
+        else:
+            p.fillRect(self.rect(), QColor(tokens()['sidebar']))
         row = self.group.checkedButton()
-        if row and not row.isHidden():
+        if row and not row.isHidden() and lit:
+            r = self.marker_rect(row)
+            paint_glass(p, r, r.height() / 2, pill=True)      # the lens stretches as it moves, exactly as the plain marker does
+        elif row and not row.isHidden():
             r = self.marker_rect(row)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(tokens()['track']))
