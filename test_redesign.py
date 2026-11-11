@@ -283,3 +283,143 @@ class DashboardShellTests(unittest.TestCase):
         self.assertEqual(self.w.trend.values[-3], 0)
         QTest.mouseClick(self.w.trend, Qt.MouseButton.LeftButton)
         self.assertEqual(self.w.pages.currentIndex(), 2)
+
+
+class DesktopStyleTests(unittest.TestCase):
+    """The desktop's two looks: Classic is how it always looked, Glass is the server's material on the desktop's layout."""
+    # sha256 of the Classic window stylesheet before Glass existed (font family normalised), dark and light
+    CLASSIC = {'dark': '30d99b5e9e6505a85b190b967aeea8e8d617341215517566380e3671f9a6751e',
+               'light': '493f6b22521f66778beef9344025abb974a9111ef93b87d8ef855fcd2c16889a'}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = qt_app()
+
+    def setUp(self):
+        import lifetime_glass
+        import lifetime_theme as theme
+        self.addCleanup(lifetime_glass.set_style, 'glass')
+        self.addCleanup(theme.set_theme, 'dark')
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+        for p in (patch.object(gui, 'data_dir', return_value=self.directory),
+                  patch.object(gui, 'read_ledger', return_value=dict(new_ledger(), imported={'seconds': 0})),
+                  patch.dict(os.environ, {'LIFETIME_REDUCE_MOTION': '1'})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def window(self, **extra):
+        w = gui.Window(dict(load_settings(self.directory), completed=True, history=True, language='en', **extra))
+        w.timer.stop()
+        w.worker.timer.stop()
+        w.resize(1100, 760)
+        w.show()
+        self.addCleanup(w.deleteLater)
+        self.addCleanup(w.close)
+        self.app.processEvents()
+        return w
+
+    def sheet(self, w):
+        return gui.QWidget.styleSheet(w)
+
+    def test_classic_is_the_default_and_its_stylesheet_is_the_one_from_before(self):
+        import hashlib
+        import lifetime_theme as theme
+        from lifetime_glass import active_style, desktop_sheet
+        w = self.window()
+        self.assertEqual(active_style(), 'classic')
+        for name in ('dark', 'light'):
+            theme.set_theme(name)
+            w.apply_theme()
+            plain = self.sheet(w).replace('Segoe UI', 'FAMILY').replace('DejaVu Sans', 'FAMILY')
+            self.assertEqual(hashlib.sha256(plain.encode()).hexdigest(), self.CLASSIC[name], name)
+            self.assertEqual(desktop_sheet(theme.THEMES[name]), '')
+            self.assertNotIn('qlineargradient(x1:0, y1:0, x2:1', plain)
+
+    def test_unknown_style_value_means_classic(self):
+        from lifetime_glass import active_style
+        self.window(style='neon')
+        self.assertEqual(active_style(), 'classic')
+
+    def test_glass_adds_to_the_classic_sheet_and_switching_back_restores_it_exactly(self):
+        from lifetime_glass import active_style
+        w = self.window()
+        classic = self.sheet(w)
+        self.assertTrue(w.switch_style('glass'))
+        glass = self.sheet(w)
+        self.assertEqual(active_style(), 'glass')
+        self.assertTrue(glass.startswith(classic))
+        self.assertIn('qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2353A0', glass)
+        self.assertEqual(load_settings(self.directory)['style'], 'glass')
+        self.assertEqual(w.settings['style'], 'glass')
+        self.assertTrue(w.switch_style('classic'))
+        self.assertEqual(self.sheet(w), classic)
+        self.assertEqual(load_settings(self.directory)['style'], 'classic')
+        self.assertFalse(w.switch_style('classic'))          # nothing to do
+        self.assertFalse(w.switch_style('neon'))
+
+    def test_switching_style_repaints_the_sidebar_and_panels(self):
+        w = self.window()
+        classic = w.grab().toImage()
+        w.switch_style('glass')
+        self.app.processEvents()
+        glass = w.grab().toImage()
+        self.assertNotEqual(classic.pixel(4, 300), glass.pixel(4, 300))               # the sidebar's ground
+        self.assertNotEqual(classic.pixel(w.width() - 60, 60), glass.pixel(w.width() - 60, 60))   # the window behind the content
+        self.assertTrue(w.stats_panel.property('glass'))
+        self.assertTrue(w.verify_button.property('glass'))
+        w.switch_style('classic')
+        self.app.processEvents()
+        self.assertEqual(w.grab().toImage(), classic)                                  # and back, pixel for pixel
+
+    def test_both_styles_in_both_themes_paint_every_page(self):
+        import lifetime_theme as theme
+        w = self.window()
+        for style in ('classic', 'glass'):
+            for name in ('dark', 'light'):
+                theme.set_theme(name)
+                w.apply_live_style(style)
+                for page in (0, 1, 2, 3, 4, 5):
+                    w.select_page(page)
+                    self.app.processEvents()
+                    self.assertFalse(w.grab().isNull(), (style, name, page))
+                w.sidebar.set_collapsed(True)
+                self.assertFalse(w.grab().isNull())
+                w.sidebar.set_collapsed(False)
+
+    def test_the_sidebar_marker_still_stretches_towards_its_page_in_glass(self):
+        w = self.window(style='glass')
+        side = w.sidebar
+        with patch.dict(os.environ, {'LIFETIME_REDUCE_MOTION': '0'}):
+            w.select_page(0)
+            QTest.qWait(600)
+            w.select_page(3)                                    # the lens below leads with its bottom edge, the top catches up
+            side.indicator_animation.setCurrentTime(80)
+            side.trail_animation.setCurrentTime(80)
+            row = side.group.checkedButton()
+            self.assertLess(side.marker_rect(row).top(), side.indicator_y)
+            self.assertFalse(w.sidebar.grab().isNull())
+            QTest.qWait(700)
+            self.assertAlmostEqual(side.marker_rect(row).height(), row.height())
+
+    def test_settings_dialog_offers_the_style_and_changes_the_window_live(self):
+        from lifetime_glass import active_style
+        from lifetime_setup import SetupDialog
+        w = self.window()
+        dialog = SetupDialog(gui.THEMES[w.theme], w.settings, self.directory, w)
+        self.addCleanup(dialog.deleteLater)
+        self.assertEqual(set(dialog.style_buttons), {'glass', 'classic'})
+        self.assertTrue(dialog.style_buttons['classic'].isChecked())
+        self.assertNotIn('qlineargradient', dialog.styleSheet())
+        dialog.style_buttons['glass'].setChecked(True)
+        self.assertEqual(active_style(), 'glass')
+        self.assertEqual(load_settings(self.directory)['style'], 'glass')
+        self.assertIn('qlineargradient(x1:0, y1:0, x2:1', dialog.styleSheet())
+        self.assertIn('qlineargradient(x1:0, y1:0, x2:1', self.sheet(w))
+        self.assertFalse(dialog.grab().isNull())
+
+    def test_style_names_are_translated(self):
+        from lifetime_i18n import VI
+        for key, vi in (('Style', 'Kiểu giao diện'), ('Glass', 'Kính'), ('Classic', 'Cổ điển')):
+            self.assertEqual(VI[key], vi)

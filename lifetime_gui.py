@@ -11,7 +11,7 @@ import statistics
 import time
 import platform
 
-from PyQt6.QtCore import QEvent, Qt, QTimer, QRectF, QVariantAnimation, QEasingCurve, QPointF, QProcess
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, QRectF, QVariantAnimation, QEasingCurve, QPointF, QProcess
 from PyQt6.QtGui import QColor, QIcon, QPalette, QPainter, QPen, QFont, QShortcut, QKeySequence, QFontMetrics
 from PyQt6.QtWidgets import (QApplication, QAbstractSpinBox, QDoubleSpinBox,
                             QGraphicsOpacityEffect, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
@@ -23,7 +23,8 @@ from lifetime_i18n import duration
 from lifetime_dashboard import ProbeWorker, SystemDashboard, RefreshGlyph
 from lifetime_charts import Insights, Plot, clean_daily, date_series
 from lifetime_health_gui import HealthPage
-from lifetime_shell import ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
+from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
+from lifetime_shell import install_glass_surfaces, attach_glass_all, ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
 from lifetime_settings import load_settings, save_settings, update_settings
 from lifetime_setup import SetupDialog, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
@@ -148,6 +149,8 @@ class HoursInput(QDoubleSpinBox):
 
 class Backdrop(QWidget):
     def paintEvent(self, event):
+        if active_style() == 'glass':
+            return      # the window's own depth shows through
         p = QPainter(self)
         t = THEMES[self.window().theme or 'dark']
         p.fillRect(self.rect(), QColor(t['bg']))
@@ -541,6 +544,8 @@ class Window(QWidget):
     def __init__(self, settings=None):
         super().__init__()
         self.settings = settings if settings is not None else load_settings(data_dir())
+        set_style(self.settings.get('style') if self.settings.get('style') in STYLES else 'classic')
+        install_glass_surfaces()
         self.last_verification = None
         self.daily_repair_complete = True
         set_language(self.settings.get('language', language()))
@@ -905,6 +910,30 @@ class Window(QWidget):
         self.system.update_values(self.worker.values, THEMES[self.theme])
         self.refresh()
 
+    def switch_style(self, value, origin=None):
+        """Glass or Classic. Saved with the theme and applied in place, spreading out like a theme change does."""
+        previous = self.settings.get('style', 'classic')
+        if value not in STYLES or value == previous:
+            return False
+        try:
+            update_settings({'style': value}, data_dir())
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
+            return False
+        self.settings['style'] = value
+        theme_reveal(self, origin or self.rect().center(), lambda: self.apply_live_style(value))
+        return True
+
+    def apply_live_style(self, name):
+        set_style(name)
+        attach_glass_all()
+        for widget in self.findChildren(QObject):
+            if hasattr(widget, 'restyle_glass'):
+                widget.restyle_glass()
+        self.apply_theme()
+        self.sidebar.update()
+        self.refresh()
+
     def system_theme_changed(self, *_):
         if self.settings.get('theme', 'auto') == 'auto':
             self.reveal_theme(resolve_theme('auto'), self.rect().center())
@@ -1180,7 +1209,7 @@ class Window(QWidget):
             QPushButton:pressed {{ background: {t['track']}; }}
             QPushButton#importToggle {{ background: transparent; border: none; padding: 6px 0; text-align: left; }}
             QPushButton#importToggle:focus {{ text-decoration: underline; }}
-        """)
+        """ + desktop_sheet(t))
         self.update()
         self.hero.update()
         QTimer.singleShot(0, self.baseline.update_editor_geometry)
@@ -1402,6 +1431,8 @@ if __name__ == '__main__':
     settings = load_settings()
     set_language(settings['language'])
     set_theme(resolve_theme(settings.get('theme', 'auto')))
+    set_style(settings.get('style', 'classic'))
+    install_glass_surfaces()
     previous = dict(settings)
     if not settings['completed']:
         setup = SetupDialog(THEMES[active_theme()], settings)

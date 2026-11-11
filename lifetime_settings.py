@@ -24,7 +24,7 @@ def iso_date(value: str) -> dt.date:
 
 
 def defaults():
-    return dict(version=1, language=default_language(), theme='auto', completed=False, awake=True, rebuild=False,
+    return dict(version=1, language=default_language(), theme='auto', style='classic', completed=False, awake=True, rebuild=False,
                 autostart=False, identity={key: '' for key in IDENTITY_FIELDS},
                 **{key: False for key in CATEGORIES})
 
@@ -40,6 +40,7 @@ def normalize(value):
         if value.get('language') in ('en', 'vi'):
             result['language'] = value['language']
         result['theme'] = value.get('theme') if value.get('theme') in ('auto', 'light', 'dark') else 'auto'
+        result['style'] = value.get('style') if value.get('style') in ('glass', 'classic') else 'classic'    # classic is how it always looked
         for key in (*CATEGORIES, 'completed', 'rebuild', 'autostart'):
             result[key] = value.get(key) is True
         result['identity'] = normalize_identity(value.get('identity', {}))

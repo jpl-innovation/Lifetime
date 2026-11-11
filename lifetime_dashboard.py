@@ -16,6 +16,7 @@ import lifetime_signals as signals
 from lifetime_settings import allowed_probes, defaults
 from lifetime_charts import LiveSparklines
 from lifetime_reveal import Intro, progress
+from lifetime_glass import solid
 
 
 class ProbeWorker(QWidget):
@@ -259,6 +260,9 @@ class SignalCard(QFrame):
 
 
 class SystemDashboard(QWidget):
+    def restyle_glass(self):
+        self.data_toggle.setStyleSheet('QPushButton:checked {background:' + solid('#1B2A46') + ';}')
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -275,7 +279,7 @@ class SystemDashboard(QWidget):
         self.data_toggle.setCheckable(True)
         self.data_toggle.setAccessibleName(tr('Show data for all live series'))
         self.data_toggle.setFixedHeight(40)
-        self.data_toggle.setStyleSheet('QPushButton:checked {background:#1B2A46;}')
+        self.restyle_glass()
         header.addWidget(self.data_toggle)
         layout.addLayout(header)
         layout.addWidget(self.freshness)
