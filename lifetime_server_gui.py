@@ -687,7 +687,8 @@ class ServerWindow(QMainWindow):
         live_header.addWidget(self.performance_range)
         detail_layout.addLayout(live_header)
         self.performance_plots = {}
-        for field, key, unit in (('cpu_percent', 'CPU', '%'), ('ram_percent', 'RAM', '%'), ('battery_percent', 'Battery', '%'), ('temperature_c', 'Temperature', '°C')):
+        for field, key, unit in (('cpu_percent', 'CPU', '%'), ('ram_percent', 'RAM', '%'), ('disk_free_percent', 'Disk free', '%'),
+                                 ('battery_percent', 'Battery', '%'), ('temperature_c', 'Temperature', '°C')):
             detail_layout.addWidget(self.label(key))
             plot = Plot('line', unit)
             plot.bar_color = None
@@ -701,6 +702,25 @@ class ServerWindow(QMainWindow):
         self.detail_total.setStyleSheet('font-size: 32px; font-weight: 600;')
         detail_layout.addWidget(self.detail_total)
         detail_layout.addWidget(self.label('Recorded awake time'))
+        daily_header = QHBoxLayout()
+        daily_title = self.label('Awake time per day')
+        daily_title.setStyleSheet('font-size:18px; font-weight:600;')
+        daily_header.addWidget(daily_title, 1)
+        self.daily_range = QComboBox()
+        self.daily_range.addItem(self.t('14 days'), 14)
+        self.daily_range.addItem(self.t('30 days'), 30)
+        self.daily_range.setAccessibleName(self.t('Awake time per day'))
+        self.daily_range.currentIndexChanged.connect(lambda: self._render_daily(self._detail) if self._detail else None)
+        daily_header.addWidget(self.daily_range)
+        detail_layout.addLayout(daily_header)
+        self.device_daily = Plot('daily', 'h')      # the desktop's Overview bars, for this computer
+        self.device_daily.setFixedHeight(170)
+        self.device_daily.setAccessibleName(self.t('Awake time per day'))
+        detail_layout.addWidget(self.device_daily)
+        self.daily_summary = QLabel()
+        self.daily_summary.setObjectName('muted')
+        self.daily_summary.setWordWrap(True)
+        detail_layout.addWidget(self.daily_summary)
         self.detail_text = QTextBrowser()
         self.detail_text.setOpenExternalLinks(False)
         self.detail_text.setFrameShape(QTextBrowser.Shape.NoFrame)
@@ -1104,8 +1124,8 @@ class ServerWindow(QMainWindow):
             if field in ('cpu_percent', 'ram_percent') and self.performance_range.currentData() == 'live':
                 continue
             plot.set_data([dt.datetime.fromisoformat(r['observed_at'].replace('Z', '+00:00')).astimezone().strftime('%H:%M') for r in history], [r.get(field) for r in history],
-                          message='' if history and allowed else self.t('No recorded data in this range' if allowed else 'Not permitted'))
-            plot.setAccessibleName(self.t({'cpu_percent': 'CPU', 'ram_percent': 'RAM', 'battery_percent': 'Battery', 'temperature_c': 'Temperature'}[field]))
+                          message='' if history and allowed else self.t('No recorded data in this range' if allowed else 'System readings are off on this computer'))
+            plot.setAccessibleName(self.t({'cpu_percent': 'CPU', 'ram_percent': 'RAM', 'disk_free_percent': 'Disk free', 'battery_percent': 'Battery', 'temperature_c': 'Temperature'}[field]))
         self._paint_live_detail()
 
     def _make_this_server(self):
@@ -1836,8 +1856,28 @@ class ServerWindow(QMainWindow):
         self._power_state(None)
         self._fit_detail_text()
 
+    def _render_daily(self, device):
+        """Awake hours per local day from the history the computer already reports; missing days stay empty."""
+        allowed = (device.get('policy') or {}).get('history') is True
+        daily = ((device.get('history') or {}).get('daily') or {}) if allowed else {}
+        today = dt.date.today()
+        days = [today - dt.timedelta(days=i) for i in reversed(range(self.daily_range.currentData() or 14))]
+        values = [daily[d.isoformat()] / 3600 if isinstance(daily.get(d.isoformat()), (int, float)) else None for d in days]
+        recorded = [(v, d) for v, d in zip(values, days) if v is not None]
+        message = '' if recorded else self.t('No awake time recorded yet' if allowed else 'History is off on this computer')
+        self.device_daily.set_data([d.isoformat() for d in days], values, dates=days, message=message)
+        if recorded:
+            longest, day = max(recorded, key=lambda pair: pair[0])
+            average = sum(v for v, _ in recorded) / len(recorded)
+            self.daily_summary.setText(self.t('Average {average} a day · longest day {longest} on {day}',
+                                              average=self.t('{hours} h', hours=f'{average:.1f}'),
+                                              longest=self.t('{hours} h', hours=f'{longest:.1f}'),
+                                              day=self._date(day.isoformat(), year=False)))
+        self.daily_summary.setVisible(bool(recorded))
+
     def _render_detail(self, device, preserve_edits=False):
         self._render_specs(device)
+        self._render_daily(device)
         self._power_state(device)
         commands = device.get('commands') or []
         self.command_status.setText(self.t('Command status: {status}', status=self.t('command.' + commands[0]['status'])) if commands else '')

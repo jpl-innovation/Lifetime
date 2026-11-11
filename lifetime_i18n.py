@@ -898,6 +898,12 @@ for _key, _text in {
     VI[_key] = _text
 
 SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
+    'Awake time per day': 'Thời gian thức mỗi ngày', '14 days': '14 ngày', '30 days': '30 ngày',
+    'Disk free': 'Dung lượng trống',
+    'History is off on this computer': 'Máy tính này đang tắt lịch sử',
+    'System readings are off on this computer': 'Máy tính này đang tắt thông tin hệ thống',
+    'No awake time recorded yet': 'Chưa ghi nhận thời gian thức',
+    'Average {average} a day · longest day {longest} on {day}': 'Trung bình {average} mỗi ngày · ngày dài nhất {longest} vào {day}',
     'Live': 'Trực tiếp', '24 hours': '24 giờ', 'Performance range': 'Khoảng hiệu suất',
     'Live: {seconds}s ago': 'Trực tiếp: {seconds} giây trước',
     'Last seen: {seconds}s ago': 'Kết nối cuối: {seconds} giây trước',
