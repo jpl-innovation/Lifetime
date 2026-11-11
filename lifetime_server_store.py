@@ -723,12 +723,18 @@ class Store:
                             continue
                         elif row[category] and _time(value['observed_at']) < _time(json.loads(row[category])['observed_at']):
                             continue
+                        if category == 'health' and 'detail' not in value and row['health']:
+                            old = json.loads(row['health'])     # the series are sent once per reading
+                            if old.get('detail') is not None and old['observed_at'] == value['observed_at']:
+                                value = dict(value, detail=old['detail'])
                         if category == 'readings':
                             if 'specs' not in value and row['readings']:
                                 old_specs = json.loads(row['readings']).get('specs')
                                 if old_specs is not None:
                                     value = dict(value, specs=old_specs)
                             self._performance_insert(db, device_id, value)
+                        if category in ('readings', 'health'):
+                            value = self._retained_reading(value, row['retained_before'])
                         db.execute(f'UPDATE devices SET {category}=?,{category}_received_at=? WHERE device_id=?',
                                    (_json(value), received, device_id))
             db.execute('UPDATE devices SET retired_seq=?,last_received_at=? WHERE device_id=?', (retired_seq, received, device_id))
@@ -932,12 +938,41 @@ class Store:
             return self._public_device(db, self._device_row(db, device_id), detail=True)
 
     @staticmethod
+    def _retained_reading(value, before):
+        if not before:
+            return value
+        # A fresh snapshot can contain older event series. Apply the same date
+        # boundary as the activity ledger, including when a client reconnects.
+        value = json.loads(_json(value))
+        health = value.get('health', value)
+        if health.get('last_crash') and _time(health['last_crash']) < _time(before):
+            health['last_crash'] = None
+        detail = health.get('detail') or {}
+        if isinstance(detail.get('stability'), list):
+            detail['stability'] = [r for r in detail['stability'] if _time(r['date']) >= _time(before)]
+        battery = detail.get('battery') or {}
+        if 'history' in battery:
+            battery['history'] = [r for r in battery['history'] if r['date'] >= before[:10]]
+        if 'usage' in battery:
+            battery['usage'] = {d: v for d, v in battery['usage'].items() if d >= before[:10]}
+        sleep = detail.get('sleep') or {}
+        if 'daily' in sleep:
+            sleep['daily'] = {d: v for d, v in sleep['daily'].items() if d >= before[:10]}
+        if 'nights' in sleep:
+            sleep['nights'] = [r for r in sleep['nights'] if r['date'] >= before[:10]]
+        return value
+
+    @staticmethod
     def _retained_history(value, before):
         result = dict(value)
         if before:
-            for field in ('daily', 'imported_daily'):
+            for field in ('daily', 'imported_daily', 'dated_hourly'):
                 if field in result:
                     result[field] = {day: seconds for day, seconds in result[field].items() if day >= before[:10]}
+            if 'sessions' in result:
+                result['sessions'] = [r for r in result['sessions'] if _time(r['start']) >= _time(before)]
+            # Aggregate hours have no dates and cannot survive a retention boundary.
+            result.pop('hourly', None)
             for field in ('first_seen', 'recording_started'):
                 if result.get(field) and _time(result[field]) < _time(before):
                     result.pop(field)
@@ -969,6 +1004,9 @@ class Store:
                 for category in ('readings', 'health'):
                     if row[category] and _time(json.loads(row[category])['observed_at']) < _time(before):
                         db.execute(f'UPDATE devices SET {category}=NULL,{category}_received_at=NULL WHERE device_id=?', (row['device_id'],))
+                    elif row[category]:
+                        db.execute(f'UPDATE devices SET {category}=? WHERE device_id=?',
+                                   (_json(self._retained_reading(json.loads(row[category]), before)), row['device_id']))
             return {'deleted': deleted}
 
     def _different_path(self, path):

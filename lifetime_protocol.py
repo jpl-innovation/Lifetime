@@ -7,7 +7,7 @@ import uuid
 from lifetime_identity import FIELDS as IDENTITY_FIELDS, normalize as normalize_identity
 
 VERSION = 1
-CLIENT_VERSION = '1.1.0'
+CLIENT_VERSION = '1.2.0'
 MAX_BYTES = 1024 * 1024
 MAX_RECORDS = 100
 
@@ -99,7 +99,9 @@ def validate_sync(message):
     if 'history' in message:
         if not policy['history']:
             raise ProtocolError('History is not permitted')
-        history = _object(message['history'], ('daily', 'imported_daily', 'first_seen', 'first_seen_source', 'recording_started', 'daily_estimated'))
+        history = _object(message['history'], ('daily', 'imported_daily', 'first_seen', 'first_seen_source', 'recording_started', 'daily_estimated',
+                                               *HISTORY_EXTRA))
+        validate_history_extra(history)
         for field in ('daily', 'imported_daily'):
             days = history.get(field, {})
             if not isinstance(days, dict) or len(days) > 3660:
@@ -122,13 +124,15 @@ def validate_sync(message):
     if 'readings' in message:
         if not policy['resources']:
             raise ProtocolError('System readings are not permitted')
-        readings = _object(message['readings'], ('observed_at', 'system', 'release', 'machine', 'python_version', 'specs', 'performance'), ('observed_at',))
+        readings = _object(message['readings'], ('observed_at', 'system', 'release', 'machine', 'python_version', 'specs', 'performance', 'health'), ('observed_at',))
         timestamp(readings['observed_at'])
         for key in ('system', 'release', 'machine', 'python_version'):
             if key in readings:
                 _text(readings[key])
         if 'specs' in readings:
             validate_specs(readings['specs'])
+        if 'health' in readings:
+            validate_health(readings['health'])
         if 'performance' in readings:
             validate_performance(readings['performance'])
     if 'command_result' in message:
@@ -146,6 +150,138 @@ def _text(value, maximum=128):
     if not isinstance(value, str) or len(value) > maximum or any(ord(c) < 32 for c in value):
         raise ProtocolError('Invalid text reading')
     return value
+
+
+HISTORY_EXTRA = ('hourly', 'dated_hourly', 'sessions', 'boots', 'current_session_seconds', 'longest_session_seconds')
+MAX_SESSIONS = 100
+MAX_DETAIL_DAYS = 400
+
+
+def _day(value):
+    try:
+        if not isinstance(value, str) or len(value) != 10 or dt.date.fromisoformat(value).isoformat() != value:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ProtocolError('Invalid date') from None
+    return value
+
+
+def _hours(value):
+    if not isinstance(value, list) or len(value) != 24:
+        raise ProtocolError('Expected 24 hourly values')
+    for item in value:
+        if number(item) > 3660 * 3600:
+            raise ProtocolError('Hourly value out of range')
+
+
+def validate_history_extra(history):
+    """Activity detail (1.2): bounded shapes the desktop's own charts consume."""
+    if 'hourly' in history:
+        _hours(history['hourly'])
+    if 'dated_hourly' in history:
+        days = history['dated_hourly']
+        if not isinstance(days, dict) or len(days) > 120:
+            raise ProtocolError('Invalid dated hourly history')
+        for day, hours in days.items():
+            _day(day)
+            _hours(hours)
+            if sum(hours) > 86400 * 1.01:
+                raise ProtocolError('Dated hourly history exceeds one day')
+    if 'sessions' in history:
+        sessions = history['sessions']
+        if not isinstance(sessions, list) or len(sessions) > MAX_SESSIONS:
+            raise ProtocolError('Invalid session list')
+        for item in sessions:
+            _object(item, ('start', 'seconds', 'imported'), ('start', 'seconds'))
+            timestamp(item['start'])
+            if number(item['seconds']) > 3660*86400:
+                raise ProtocolError('Session too long')
+            if 'imported' in item and type(item['imported']) is not bool:
+                raise ProtocolError('Invalid session flag')
+    if 'boots' in history:
+        if number(history['boots'], True) > 100000000:
+            raise ProtocolError('Boot count out of range')
+    for key in ('current_session_seconds', 'longest_session_seconds'):
+        if key in history:
+            if number(history[key]) > 3660*86400:
+                raise ProtocolError('Session too long')
+
+
+def validate_health_detail(detail):
+    """Stability, battery and sleep series (1.2) in the shapes the desktop Health page consumes."""
+    _object(detail, ('stability', 'battery', 'sleep'))
+    if detail.get('stability') is not None:
+        events = detail['stability']
+        if not isinstance(events, list) or len(events) > MAX_DETAIL_DAYS:
+            raise ProtocolError('Invalid stability list')
+        for event in events:
+            _object(event, ('date', 'kind'), ('date', 'kind'))
+            timestamp(event['date'])
+            if event['kind'] not in ('Unexpected shutdown', 'Crash'):
+                raise ProtocolError('Invalid stability event')
+    battery = detail.get('battery')
+    if battery is not None:
+        _object(battery, ('packs', 'history', 'usage'))
+        packs = battery.get('packs', [])
+        if not isinstance(packs, list) or len(packs) > 4:
+            raise ProtocolError('Invalid battery packs')
+        for pack in packs:
+            _object(pack, ('full', 'design', 'cycles', 'chemistry', 'unit', 'health'))
+            for key in ('full', 'design', 'cycles', 'health'):
+                limit = 1000 if key == 'health' else 100000 if key == 'cycles' else 1000000
+                if pack.get(key) is not None and number(pack[key], key == 'cycles') > limit:
+                    raise ProtocolError('Battery value out of range')
+            if pack.get('chemistry') is not None:
+                _text(pack['chemistry'], 32)
+            if pack.get('unit', 'Wh') not in ('Wh', 'Ah'):
+                raise ProtocolError('Invalid battery unit')
+        history = battery.get('history', [])
+        if not isinstance(history, list) or len(history) > MAX_DETAIL_DAYS:
+            raise ProtocolError('Invalid battery history')
+        for item in history:
+            _object(item, ('date', 'full', 'health'), ('date', 'full'))
+            _day(item['date'])
+            for key in ('full', 'health'):
+                if item.get(key) is not None and number(item[key]) > (1000 if key == 'health' else 1000000):
+                    raise ProtocolError('Battery value out of range')
+        usage = battery.get('usage')
+        if usage is not None:
+            if not isinstance(usage, dict) or len(usage) > MAX_DETAIL_DAYS:
+                raise ProtocolError('Invalid battery usage')
+            for day, values in usage.items():
+                _day(day)
+                _object(values, ('ac', 'battery'), ('ac', 'battery'))
+                if any(number(v) > 90000 for v in values.values()):
+                    raise ProtocolError('Battery usage exceeds one day')
+    sleep = detail.get('sleep')
+    if sleep is not None:
+        _object(sleep, ('daily', 'nights'), ('daily', 'nights'))
+        if not isinstance(sleep['daily'], dict) or len(sleep['daily']) > MAX_DETAIL_DAYS:
+            raise ProtocolError('Invalid sleep days')
+        for day, values in sleep['daily'].items():
+            _day(day)
+            _object(values, ('cycles', 'seconds'), ('cycles', 'seconds'))
+            if number(values['cycles'], True) > 1000 or number(values["seconds"]) > 90000:
+                raise ProtocolError('Sleep value out of range')
+        if not isinstance(sleep['nights'], list) or len(sleep['nights']) > MAX_DETAIL_DAYS:
+            raise ProtocolError('Invalid sleep nights')
+        for night in sleep['nights']:
+            _object(night, ('date', 'seconds'), ('date', 'seconds'))
+            _day(night['date'])
+            if number(night["seconds"]) > 90000:
+                raise ProtocolError('Night exceeds one day')
+
+
+def without_extended(message):
+    """The 1.1 wire format, for servers that predate Activity/Health detail."""
+    result = dict(message)
+    if 'history' in result:
+        result['history'] = {k: v for k, v in result['history'].items() if k not in HISTORY_EXTRA}
+    if 'health' in result:
+        result['health'] = {k: v for k, v in result['health'].items() if k != 'detail'}
+    if 'readings' in result:
+        result['readings'] = {k: v for k, v in result['readings'].items() if k != 'health'}
+    return result
 
 
 def _list(value):
@@ -214,7 +350,9 @@ def validate_performance(value):
 
 def validate_health(value):
     fields = ('version', 'observed_at', 'shutdowns_30d', 'crashes_30d', 'battery_health', 'cycle_count', 'last_crash')
-    _object(value, fields, fields)
+    _object(value, (*fields, 'detail'), fields)
+    if 'detail' in value:
+        validate_health_detail(value['detail'])
     if type(value['version']) is not int or value['version'] != 1:
         raise ProtocolError('Unsupported health summary version')
     observed = timestamp(value['observed_at'])

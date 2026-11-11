@@ -51,6 +51,26 @@ class AgentFixture(unittest.TestCase):
 
 
 class MachineTests(AgentFixture):
+    def test_extended_health_read_does_not_wait_for_logs(self):
+        import lifetime_health as health
+        started, release = threading.Event(), threading.Event()
+        def read(*args):
+            started.set()
+            release.wait(3)
+            return dict(observed_at=STAMP, stability=[], battery=None, sleep=None)
+        with patch.object(health, 'collect', side_effect=read) as collect:
+            try:
+                self.assertIsNone(self.machine._remote_health())
+                self.assertTrue(started.wait(1))
+                self.assertIsNone(self.machine._remote_health())
+                self.assertEqual(collect.call_count, 1)
+            finally:
+                release.set()
+            self.machine._health_job.result(timeout=2)
+            self.assertEqual(self.machine._remote_health()['detail']['stability'], [])
+            self.machine.set_policy(dict(history=False, resources=False))
+            self.assertIsNone(self.machine._health_value)
+
     def test_initialization_is_explicit_and_separate_from_user_data(self):
         with patch.object(agent.tracker, 'data_dir', side_effect=AssertionError('per-user data read')):
             missing = Path(self.temporary.name) / 'missing'

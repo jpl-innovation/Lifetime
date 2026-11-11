@@ -113,6 +113,21 @@ def _history(ledger):
                   first_seen_source=ledger.get('first_seen_source', 'unknown'),
                   recording_started=ledger.get('recording_started'),
                   daily_estimated=bool(ledger.get('daily_allocation', {}).get('estimated', False)))
+    # Activity detail for the server: the same ledger fields the desktop charts read, bounded.
+    sessions = [dict(start=s['start'], seconds=s['seconds'], **({'imported': True} if s.get('imported') else {}))
+                for s in ledger.get('sessions', [])[-protocol.MAX_SESSIONS:] if isinstance(s, dict) and 'start' in s and 'seconds' in s]
+    extra = dict(hourly=list(ledger.get('hourly', [])), sessions=sessions,
+                 dated_hourly=dict(sorted(ledger.get('dated_hourly', {}).items())[-120:]),
+                 boots=ledger.get('boots'), current_session_seconds=ledger.get('current_session_seconds'),
+                 longest_session_seconds=ledger.get('longest_session_seconds'))
+    for key, value in extra.items():
+        if value is None:
+            continue
+        try:
+            protocol.validate_history_extra({key: value})
+            result[key] = value
+        except protocol.ProtocolError:
+            pass    # one malformed local field cannot hide the remaining charts
     return result
 
 
@@ -385,6 +400,11 @@ class MachineAgent:
             state.pop('battery_capacity', None)
             state['ledger'].pop('health_capacity', None)
         if not policy['resources']:
+            self._health_value = None
+            self._health_due = 0
+            if getattr(self, '_health_job', None) is not None:
+                self._health_job.cancel()
+                self._health_job = None
             state['readings'] = None
             for key in ('specs', 'specs_collected_at', 'cpu_counter', 'network_counters'):
                 state.pop(key, None)
@@ -484,6 +504,10 @@ class MachineAgent:
         resource_data = None
         if snapshot['policy']['resources']:
             resource_data = dict(resources_sampler() if resources_sampler else _resources(snapshot), observed_at=timestamp)
+        if resource_data is not None and resources_sampler is None:
+            remote_health = self._remote_health()
+            if remote_health is not None:
+                resource_data['health'] = remote_health
         with self._transaction() as state:
             ledger = state['ledger']
             before = ledger['total_seconds']
@@ -514,6 +538,32 @@ class MachineAgent:
             state['sampled'] = True
         self.write_status()
         return record
+
+    def _remote_health(self):
+        """Poll one background read; OS logs never delay the accounting sampler."""
+        from concurrent.futures import ThreadPoolExecutor
+        if not hasattr(self, '_health_reader'):
+            self._health_reader = ThreadPoolExecutor(max_workers=1, thread_name_prefix='health-report')
+            self._health_job, self._health_due, self._health_value = None, 0, None
+        if self._health_job is not None and self._health_job.done():
+            try:
+                value = self._health_job.result()
+                protocol.validate_health(value)
+                self._health_value = value
+            except Exception:
+                pass
+            self._health_job = None
+        if self._health_job is None and time.monotonic() >= self._health_due:
+            def read():
+                import lifetime_health as health
+                data = health.collect({'completed': True, 'health': True})
+                value = health.summary(data)
+                if value is not None:
+                    value['detail'] = health.detail(data)
+                return value
+            self._health_job = self._health_reader.submit(read)
+            self._health_due = time.monotonic()+21600
+        return copy.deepcopy(self._health_value)
 
     def set_health_consent(self, enabled):
         """Update just Health without overwriting other reporting choices."""
@@ -668,6 +718,8 @@ class MachineAgent:
                 sync_thread.join()
 
     def close(self):
+        if hasattr(self, '_health_reader'):
+            self._health_reader.shutdown(wait=False, cancel_futures=True)
         with self._lock:
             self._db.close()
 
