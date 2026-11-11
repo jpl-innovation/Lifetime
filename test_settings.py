@@ -151,7 +151,7 @@ class ConsentGuiTests(unittest.TestCase):
         for category, expected in (
             ('battery', {'power', 'battery'}), ('network', {'network', 'counters'}),
             ('wifi_name', {'wifi'}), ('graphics', {'gpu'}),
-            ('resources', {'cpu', 'ram', 'disks', 'identity'})):
+            ('resources', {'cpu', 'ram', 'disks', 'identity', 'inventory'})):
             self.assertEqual(settings.allowed_probes(dict(completed=True, **{category: True})), expected | {'clocks'})
 
     def test_revoked_inflight_readings_are_discarded(self):

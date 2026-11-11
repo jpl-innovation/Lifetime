@@ -35,6 +35,7 @@ from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_sty
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot, Insights
 from lifetime_health_gui import HealthPage
+from lifetime_system_gui import HardwarePanel
 from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
@@ -745,6 +746,8 @@ class ServerWindow(QMainWindow):
         self.daily_summary.setWordWrap(True)
         detail_layout.addWidget(self.daily_summary)
         # The desktop's own Activity and Health pages, fed with what this computer reported.
+        self.hardware_detail = HardwarePanel(remote=True)
+        detail_layout.addWidget(self.hardware_detail)
         self.activity_state = self.label('History is off on this computer')
         self.activity_state.setObjectName('muted')
         self.activity_stats = QLabel()
@@ -1167,6 +1170,9 @@ class ServerWindow(QMainWindow):
         missing = self.t('Not available')
         allowed = (device.get('policy') or {}).get('resources') is True
         specs = (device.get('specs') or {}) if allowed else {}
+        if hasattr(self, 'hardware_detail'):
+            self.hardware_detail.setVisible(allowed)
+            self.hardware_detail.set_data(specs.get('hardware'))
         values = {'Manufacturer': specs.get('manufacturer'), 'Model': specs.get('model'),
                   'CPU': specs.get('cpu_name'), 'RAM': byte_text(specs.get('ram_bytes'), missing),
                   'Cores / threads': f"{specs.get('cpu_cores') if specs.get('cpu_cores') is not None else missing} / {specs.get('cpu_threads') if specs.get('cpu_threads') is not None else missing}",

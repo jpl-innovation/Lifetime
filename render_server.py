@@ -56,6 +56,19 @@ def populate(store, fingerprint, count=20, detailed=False):
                      os_name='Windows', os_version='11', mac_addresses=['02:00:00:00:00:01'],
                      disks=[dict(name='C:', total_bytes=512 * 1024**3, free_bytes=(24 if index == 1 else 180) * 1024**3)],
                      battery_design_wh=60)
+        specs['hardware'] = dict(cpu=dict(temperature_c=52+index, current_mhz=2400, max_mhz=4800),
+            fans=[dict(name='CPU fan', rpm=1200), dict(name='Case fan', rpm=800)],
+            adapters=[dict(name='Ethernet', model='Demo Gigabit adapter', kind='Ethernet', connected=True,
+                           speed_mbps=1000, driver='1.2.3', vendor='Demo vendor', mac='02:00:00:00:00:01'),
+                      dict(name='Wi-Fi', model='Demo wireless adapter', kind='Wi-Fi', connected=False,
+                           wifi_standard='802.11ax', band='5 GHz')],
+            memory=dict(modules=[dict(kind='DDR5', speed_mhz=5600, capacity_bytes=8*2**30)]*2, slots_used=2, slots_total=4),
+            disks=[dict(model='Demo SSD', kind='NVMe', size_bytes=512*2**30, health='Healthy')],
+            board=dict(manufacturer='Demo manufacturer', model='Demo board', bios_vendor='Demo BIOS', bios_version='1.23', bios_date='2025-06-01'),
+            gpus=[dict(name='Demo graphics', driver='123.45', vram_bytes=8*2**30)],
+            displays=[dict(width=2560, height=1440, hz=144)],
+            os=dict(name='Windows 11', build='26100', architecture='64-bit', installed='2025-06-01',
+                    last_boot=(observed-dt.timedelta(hours=6)).isoformat(), uptime_seconds=21600))
         def readings(stamp, sample):
             return dict(observed_at=stamp.isoformat(), specs=specs,
                         performance=dict(cpu_percent=12 + (sample * 13 + index) % 65,

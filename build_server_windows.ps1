@@ -1,3 +1,4 @@
+# Shared hardware modules: lifetime_system.py, lifetime_system_gui.py (included by lifetime_*.py).
 # Separate server build. Never changes the desktop package or its dependencies.
 [CmdletBinding()]
 param(
@@ -27,7 +28,7 @@ try {
     $dashboardImage = (Join-Path $PSScriptRoot 'assets\lifetime.png') + ';assets'
     $creditImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation.png') + ';assets'
     $creditLightImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png') + ';assets'
-    $common = @('--noconfirm', '--clean', '--onefile', '--icon', $icon,
+    $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
                 '--distpath', $output, '--workpath', $work, '--specpath', $work)
     $ErrorActionPreference = 'Continue'
     & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --hidden-import lifetime_ws_server --exclude-module PyQt6 lifetime_server.py
