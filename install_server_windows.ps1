@@ -24,6 +24,17 @@ if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$uri) -or $uri.Sch
     throw 'Address must be an explicit HTTPS origin whose port matches Port, for example https://server.example:8443.'
 }
 if ($AdminPort -eq $Port) { throw 'Public and loopback administration ports must differ.' }
+if ($Mode -ne 'PackagedTask') {
+    # Resolve Python before anything is copied, so a missing or per-user Python leaves the machine untouched.
+    # Get-Command can return several matches (a real Python plus the Microsoft Store stub in WindowsApps);
+    # the stub is not a Python, and an array would crash GetFullPath with an unreadable .NET message.
+    $found = @(Get-Command $Python -CommandType Application -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notlike '*\Microsoft\WindowsApps\*' })
+    if (-not $found) { throw "Python was not found ('$Python'). Install Python 3.11 or newer for all users, or pass its full path with -Python." }
+    $Python = $found[0].Source
+    $userRoot = [IO.Path]::GetFullPath((Join-Path $env:SystemDrive 'Users')).TrimEnd('\') + '\'
+    if ([IO.Path]::GetFullPath($Python).StartsWith($userRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "SYSTEM needs a machine-wide Python installation outside user profiles, and '$Python' is inside one. Install Python for all users (for example: winget install Python.Python.3.12 --scope machine) or pass its full path with -Python." }
+}
 if (Get-Service -Name LifetimeServer -ErrorAction SilentlyContinue) { throw 'Stop and uninstall the existing LifetimeServer registration before upgrading; data is preserved.' }
 if (Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -ErrorAction SilentlyContinue) { throw 'Uninstall the existing Lifetime Server task registration before upgrading; data is preserved.' }
 
@@ -92,8 +103,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\SERVER_OPERATIONS.md') -Destination (Join-Path $InstallDirectory 'docs') -Force
 
 if ($Mode -ne 'PackagedTask') {
-    $command = Get-Command $Python -CommandType Application -ErrorAction Stop
-    $Python = $command.Source
+    # $Python was resolved and checked above, before any file was copied; this check stays as a second guard.
     $userRoot = [IO.Path]::GetFullPath((Join-Path $env:SystemDrive 'Users')).TrimEnd('\') + '\'
     if ([IO.Path]::GetFullPath($Python).StartsWith($userRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'SYSTEM needs a machine-wide Python installation outside user profiles. Pass its full path with -Python.' }
     $environmentDir = Join-Path $InstallDirectory '.venv'
