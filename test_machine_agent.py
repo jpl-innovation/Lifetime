@@ -51,6 +51,26 @@ class AgentFixture(unittest.TestCase):
 
 
 class MachineTests(AgentFixture):
+    def test_inventory_read_is_cached_without_waiting(self):
+        import lifetime_signals as signals
+        started, release = threading.Event(), threading.Event()
+        def read():
+            started.set()
+            release.wait(3)
+            return dict(fans=[], cpu={'current_mhz': 2400})
+        with patch.object(signals, 'probe_inventory', side_effect=read) as probe:
+            try:
+                self.assertIsNone(self.machine._remote_inventory())
+                self.assertTrue(started.wait(1))
+                self.assertIsNone(self.machine._remote_inventory())
+            finally:
+                release.set()
+            self.machine._inventory_job.result(timeout=2)
+            self.assertEqual(self.machine._remote_inventory()['fans'], [])
+            self.assertEqual(probe.call_count, 1)
+            self.machine.set_policy(dict(history=False, resources=False))
+            self.assertIsNone(self.machine._inventory_value)
+
     def test_extended_health_read_does_not_wait_for_logs(self):
         import lifetime_health as health
         started, release = threading.Event(), threading.Event()

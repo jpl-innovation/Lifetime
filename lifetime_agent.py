@@ -174,6 +174,8 @@ def _resources(state=None):
                      mac_addresses=[m.upper().replace('-', ':') for m in hardware.get('mac_addresses', []) or [] if m][:8],
                      hostname=text(signals.safe(socket.gethostname)()))
         state.update(specs=specs, specs_collected_at=now)
+    if state.get('_inventory') is not None:
+        state['specs']['hardware'] = state['_inventory']
     wear = battery.get('wear')
     if capacity.get('design') is not None and capacity.get('unit') == 'Wh':
         state['specs']['battery_design_wh'] = capacity['design']
@@ -400,6 +402,10 @@ class MachineAgent:
             state.pop('battery_capacity', None)
             state['ledger'].pop('health_capacity', None)
         if not policy['resources']:
+            self._inventory_value, self._inventory_due = None, 0
+            if getattr(self, '_inventory_job', None) is not None:
+                self._inventory_job.cancel()
+                self._inventory_job = None
             self._health_value = None
             self._health_due = 0
             if getattr(self, '_health_job', None) is not None:
@@ -503,6 +509,8 @@ class MachineAgent:
                 snapshot['battery_capacity'] = packs[0] if len(packs) == 1 else {}
         resource_data = None
         if snapshot['policy']['resources']:
+            if resources_sampler is None:
+                snapshot['_inventory'] = self._remote_inventory()
             resource_data = dict(resources_sampler() if resources_sampler else _resources(snapshot), observed_at=timestamp)
         if resource_data is not None and resources_sampler is None:
             remote_health = self._remote_health()
@@ -564,6 +572,27 @@ class MachineAgent:
             self._health_job = self._health_reader.submit(read)
             self._health_due = time.monotonic()+21600
         return copy.deepcopy(self._health_value)
+
+    def _remote_inventory(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from lifetime_system import validate
+        if not hasattr(self, '_inventory_reader'):
+            self._inventory_reader = ThreadPoolExecutor(max_workers=1, thread_name_prefix='hardware-report')
+            self._inventory_job, self._inventory_due, self._inventory_value = None, 0, None
+        if self._inventory_job is not None and self._inventory_job.done():
+            try:
+                value = self._inventory_job.result()
+                if isinstance(value, dict):
+                    validate(value)
+                    self._inventory_value = value
+            except Exception:
+                pass
+            self._inventory_job = None
+        if self._inventory_job is None and time.monotonic() >= self._inventory_due:
+            import lifetime_signals as signals
+            self._inventory_job = self._inventory_reader.submit(signals.probe_inventory)
+            self._inventory_due = time.monotonic()+21600
+        return copy.deepcopy(self._inventory_value)
 
     def set_health_consent(self, enabled):
         """Update just Health without overwriting other reporting choices."""
@@ -718,6 +747,8 @@ class MachineAgent:
                 sync_thread.join()
 
     def close(self):
+        if hasattr(self, '_inventory_reader'):
+            self._inventory_reader.shutdown(wait=False, cancel_futures=True)
         if hasattr(self, '_health_reader'):
             self._health_reader.shutdown(wait=False, cancel_futures=True)
         with self._lock:

@@ -159,7 +159,7 @@ class SyncClient:
             raise ResponseError('No approved reporting credential')
         message = self.agent.batch()
         message['client_version'] = protocol.CLIENT_VERSION
-        extended = 'health' in message.get('readings', {}) or 'detail' in message.get('health', {}) or bool(set(message.get('history', {})) & set(protocol.HISTORY_EXTRA))
+        extended = 'hardware' in message.get('readings', {}).get('specs', {}) or 'health' in message.get('readings', {}) or 'detail' in message.get('health', {}) or bool(set(message.get('history', {})) & set(protocol.HISTORY_EXTRA))
         if extended and time.time() < state.get('legacy_server_until', 0):
             message = protocol.without_extended(message)
             extended = False

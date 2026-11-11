@@ -156,7 +156,7 @@ def allowed_probes(settings):
     for category, probes in (
         ('battery', ('power', 'battery')), ('network', ('network', 'counters')),
         ('wifi_name', ('wifi',)), ('graphics', ('gpu',)),
-        ('resources', ('cpu', 'ram', 'disks', 'identity'))):
+        ('resources', ('cpu', 'ram', 'disks', 'identity', 'inventory'))):
         if settings.get(category):
             names.update(probes)
     return names

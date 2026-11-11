@@ -155,6 +155,20 @@ class ServerGuiTests(unittest.TestCase):
         self.addCleanup(self.cleanup_window)
         self.wait_idle()
 
+    def test_shared_hardware_panel_follows_resources(self):
+        row = device(0)
+        row['policy']['resources'] = True
+        row['specs'] = dict(hardware=dict(cpu={'temperature_c': 53}, fans=[]))
+        self.window._render_specs(row)
+        self.assertFalse(self.window.hardware_detail.isHidden())
+        texts = [value.text() for _, value in self.window.hardware_detail.fields]
+        self.assertIn('53', texts[0])
+        self.assertIn('firmware', texts[2])
+        row['policy']['resources'] = False
+        self.window._render_specs(row)
+        self.assertTrue(self.window.hardware_detail.isHidden())
+        self.assertNotIn('53', self.window.hardware_detail.fields[0][1].text())
+
     def test_remote_pages_use_resources_and_history_consent(self):
         row = device(0)
         row['policy'] = dict(history=True, resources=True)

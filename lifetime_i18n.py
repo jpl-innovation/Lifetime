@@ -1528,3 +1528,32 @@ _SERVER_SWITCH_VI = {
     'Theme: {current}. Click to switch to {next}.': 'Giao diện: {current}. Bấm để chuyển sang {next}.',
 }
 SERVER_DASHBOARD_VI.update(_SERVER_SWITCH_VI)
+
+_HARDWARE_VI = {
+    'Windows did not expose an identified CPU temperature sensor': 'Windows không cung cấp cảm biến nhiệt độ CPU được xác định rõ',
+    'Access denied by Windows': 'Windows từ chối quyền truy cập',
+    'Windows did not expose network driver information': 'Windows không cung cấp thông tin trình điều khiển mạng',
+    'Link speed': 'Tốc độ liên kết',
+    'Driver': 'Trình điều khiển',
+    'Hardware details': 'Chi tiết phần cứng',
+    'Hardware inventory refreshes about every six hours': 'Thông tin phần cứng được cập nhật khoảng sáu giờ một lần',
+    'The operating system did not expose this reading': 'Hệ điều hành không cung cấp thông số này',
+    "Not reported by this computer's firmware": 'Firmware của máy tính này không cung cấp thông tin',
+    'CPU temperature': 'Nhiệt độ CPU',
+    'CPU current / maximum clock': 'Xung nhịp CPU hiện tại / tối đa',
+    'Cooling fans': 'Quạt làm mát',
+    'Network cards': 'Card mạng',
+    'RAM modules': 'Các thanh RAM',
+    'RAM slots used / total': 'Khe RAM đã dùng / tổng số',
+    'Physical disks': 'Ổ đĩa vật lý',
+    'Motherboard': 'Bo mạch chủ',
+    'BIOS vendor / version / date': 'Nhà cung cấp / phiên bản / ngày BIOS',
+    'GPU driver / VRAM': 'Trình điều khiển GPU / VRAM',
+    'Displays': 'Màn hình',
+    'OS build / architecture / installed': 'Bản dựng / kiến trúc / ngày cài hệ điều hành',
+    'Uptime / last boot': 'Thời gian chạy / lần khởi động gần nhất',
+}
+for _key, _text in _HARDWARE_VI.items():
+    EN[_key] = _key
+    VI[_key] = _text
+    SERVER_DASHBOARD_VI[_key] = _text

@@ -281,6 +281,8 @@ def without_extended(message):
         result['health'] = {k: v for k, v in result['health'].items() if k != 'detail'}
     if 'readings' in result:
         result['readings'] = {k: v for k, v in result['readings'].items() if k != 'health'}
+    if 'specs' in result.get('readings', {}):
+        result['readings']['specs'] = {k: v for k, v in result['readings']['specs'].items() if k != 'hardware'}
     return result
 
 
@@ -293,9 +295,17 @@ def _list(value):
 def validate_specs(value):
     strings = ('manufacturer', 'model', 'cpu_name', 'os_name', 'os_version', 'hostname')
     integers = ('cpu_cores', 'cpu_threads', 'ram_bytes')
-    _object(value, (*strings, *integers, 'gpu_names', 'disks', 'battery_design_wh', 'mac_addresses'))
+    _object(value, (*strings, *integers, 'gpu_names', 'disks', 'battery_design_wh', 'mac_addresses', 'hardware'))
     for key, item in value.items():
-        if key in strings:
+        if key == 'hardware':
+            from lifetime_system import validate
+            try:
+                if not isinstance(item, dict):
+                    raise ValueError('Invalid hardware inventory')
+                validate(item)
+            except ValueError as error:
+                raise ProtocolError(str(error)) from None
+        elif key in strings:
             if item is not None:
                 _text(item)
         elif key in integers:

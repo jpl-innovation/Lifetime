@@ -36,7 +36,7 @@ if ($ExePackage) {
     $Names = @('Lifetime.exe', 'LifetimeTracker.exe', 'LifetimeImport.exe', 'LifetimeAgent.exe',
                'install_agent_windows.ps1', 'uninstall_agent_windows.ps1')
 } else {
-    $Names = @('lifetime_tracker.py', 'lifetime_gui.py', 'lifetime_health.py', 'lifetime_health_gui.py', 'lifetime_shell.py', 'lifetime_signals.py', 'lifetime_dashboard.py',
+    $Names = @('lifetime_system.py', 'lifetime_system_gui.py', 'lifetime_tracker.py', 'lifetime_gui.py', 'lifetime_health.py', 'lifetime_health_gui.py', 'lifetime_shell.py', 'lifetime_signals.py', 'lifetime_dashboard.py',
                'lifetime_settings.py', 'lifetime_setup.py', 'lifetime_import.py', 'lifetime_import_windows.py',
                'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py',
                'lifetime_reports.py', 'lifetime_technician.py', 'lifetime_ledger.py', 'lifetime_identity.py', 'lifetime_theme.py',

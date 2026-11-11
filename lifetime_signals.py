@@ -188,8 +188,205 @@ def safe(probe):
             return probe(*args, **kwargs)
         except Exception:
             return None
-    run.__name__ = probe.__name__
+    run.__name__ = getattr(probe, '__name__', 'probe')
     return run
+
+
+@safe
+def probe_inventory():
+    """Infrequent optional hardware reads. Only selected, non-identifying fields.
+
+    Each Windows query has the existing five-second subprocess deadline. A failed
+    domain is omitted without losing the others. Call only from a worker.
+    """
+    from lifetime_system import clean
+    if sys.platform != 'win32':
+        return clean(linux_inventory())
+    date = "function iso($d) {if($d){([datetime]$d).ToString('yyyy-MM-ddTHH:mm:sszzz')}}; "
+    queries = {
+        # ACPI thermal zones do not identify CPU cores. Never relabel one as CPU temperature.
+        'cpu': "$p=Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1; "
+            "@{current_mhz=$p.CurrentClockSpeed;max_mhz=$p.MaxClockSpeed}",
+        'fans': "@(Get-CimInstance Win32_Fan -ErrorAction Stop | Select-Object -First 8 | ForEach-Object {"
+            "@{name=$_.Name}})",  # DesiredSpeed is a target, not a measured RPM.
+        'adapters': "@(Get-CimInstance Win32_NetworkAdapter -ErrorAction Stop | Where-Object NetConnectionID | Select-Object -First 16 | ForEach-Object {"
+            "@{name=$_.NetConnectionID;model=$_.Name;kind=$(if($_.Name -match 'Bluetooth'){'Bluetooth'}elseif($_.Name -match 'VPN|Virtual|TAP|TUN'){'Virtual / VPN'}elseif($_.Name -match 'Wireless|Wi-Fi|802.11'){'Wi-Fi'}else{'Ethernet'});"
+            "connected=($_.NetConnectionStatus -eq 2);speed_mbps=$(if($_.NetConnectionStatus -eq 2 -and $_.Speed -gt 0){[double]$_.Speed/1000000});vendor=$_.Manufacturer;mac=$_.MACAddress}})",
+        'memory': "$m=@(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop);$a=Get-CimInstance Win32_PhysicalMemoryArray;"
+            "@{slots_used=$m.Count;slots_total=($a|Measure-Object MemoryDevices -Sum).Sum;modules=@($m|Select-Object -First 8 | ForEach-Object {"
+            "@{kind=$(switch($_.SMBIOSMemoryType){18{'DDR'}19{'DDR2'}20{'DDR2 FB-DIMM'}24{'DDR3'}26{'DDR4'}27{'LPDDR'}28{'LPDDR2'}29{'LPDDR3'}30{'LPDDR4'}34{'DDR5'}35{'LPDDR5'}default{$null}});"
+            "speed_mhz=$(if($_.ConfiguredClockSpeed -gt 0){$_.ConfiguredClockSpeed}elseif($_.Speed -gt 0){$_.Speed});capacity_bytes=$_.Capacity}})}",
+        'disks': "@(Get-PhysicalDisk -ErrorAction Stop | Select-Object -First 8 | ForEach-Object {"
+            "@{model=$_.FriendlyName;kind=$(if($_.BusType -eq 17){'NVMe'}elseif($_.MediaType -eq 4){'SSD'}elseif($_.MediaType -eq 3){'HDD'}else{$null});size_bytes=$_.Size;health=[string]$_.HealthStatus}})",
+        'board': "$b=Get-CimInstance Win32_BaseBoard -ErrorAction Stop | Select-Object -First 1;$v=Get-CimInstance Win32_BIOS | Select-Object -First 1;"
+            "@{manufacturer=$b.Manufacturer;model=$b.Product;bios_vendor=$v.Manufacturer;bios_version=$v.SMBIOSBIOSVersion;bios_date=(iso $v.ReleaseDate)}",
+        'gpus': "@(Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object -First 8 | ForEach-Object {"
+            "@{name=$_.Name;driver=$_.DriverVersion;vram_bytes=$_.AdapterRAM}})",
+        'os': "$o=Get-CimInstance Win32_OperatingSystem -ErrorAction Stop;"
+            "@{name=$o.Caption;build=$o.BuildNumber;architecture=$o.OSArchitecture;installed=(iso $o.InstallDate);"
+            "last_boot=(iso $o.LastBootUpTime);uptime_seconds=([datetime]::Now-$o.LastBootUpTime).TotalSeconds}",
+    }
+    result = {'unavailable': {'cpu_temperature': 'Windows did not expose an identified CPU temperature sensor'}}
+    for key, query in queries.items():
+        expression = '@(& {'+query+'})' if key in ('fans', 'adapters', 'disks', 'gpus') else '$(& {'+query+'})'
+        output = powershell("$ErrorActionPreference='Stop'; "+date+"try {ConvertTo-Json -Depth 5 -Compress -InputObject "+expression+
+            "} catch {if($_.Exception.Message -match 'denied|0x80041003'){ '{\"_unavailable\":\"Access denied by Windows\"}' }"
+            "else { '{\"_unavailable\":\"The operating system did not expose this reading\"}' }}")
+        value = parse_json(output)
+        if isinstance(value, dict) and '_unavailable' in value:
+            result['unavailable'][key] = value['_unavailable']
+        elif value is not None:
+            result[key] = value
+    if 'adapters' not in result:
+        native = probe_counters(inventory=True)
+        if native is not None:
+            result['adapters'] = native
+    clocks = safe(windows_cpu_clocks)()
+    if clocks:
+        cpu = result.setdefault('cpu', {})
+        for key, value in clocks.items():
+            if cpu.get(key) is None:
+                cpu[key] = value
+    if 'os' not in result:
+        import platform, datetime
+        kernel = C.WinDLL('kernel32')
+        kernel.GetTickCount64.restype = C.c_ulonglong
+        uptime = kernel.GetTickCount64()/1000
+        result['os'] = dict(name=platform.system(), build=platform.version(), architecture=platform.machine(),
+            uptime_seconds=uptime, last_boot=(datetime.datetime.now().astimezone()-datetime.timedelta(seconds=uptime)).isoformat())
+    # Wi-Fi standard comes from the existing WLAN API, without sharing the SSID.
+    wifi = safe(windows_wifi)(include_ssid=False) or []
+    for adapter in result.get('adapters', []):
+        w = next((w for w in wifi if w.get('name') in (adapter.get('name'), adapter.get('model'))), {})
+        for key in ('wifi_standard', 'band'):
+            if w.get(key):
+                adapter[key] = w[key]
+    # The cheap network driver view includes disconnected adapters.
+    drivers = parse_json(powershell("@(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Select-Object -First 64 Name,DriverVersion)|ConvertTo-Json -Compress"))
+    for adapter in result.get('adapters', []):
+        driver = next((d for d in objects(drivers) if d.get('Name') == adapter.get('name')), {})
+        if driver.get('DriverVersion'):
+            adapter['driver'] = driver['DriverVersion']
+    if result.get('adapters'):
+        result['unavailable'].pop('adapters', None)
+        if not drivers:
+            result['unavailable']['adapter_driver'] = 'Windows did not expose network driver information'
+    # Win32_VideoController.AdapterRAM is a 32-bit value. Prefer the existing
+    # nvidia-smi reading when present; never present a wrapped capacity as real.
+    for gpu in result.get('gpus', []):
+        gpu['vram_bytes'] = None
+    memory = parse_json(powershell("@(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' -ErrorAction SilentlyContinue | "
+        "Select-Object DriverDesc,@{n='bytes';e={$_.'HardwareInformation.qwMemorySize'}})|ConvertTo-Json -Compress"))
+    for gpu in result.get('gpus', []):
+        known = next((m for m in objects(memory) if m.get('DriverDesc') == gpu.get('name')), {})
+        if number(known.get('bytes')) is not None:
+            gpu['vram_bytes'] = int(known['bytes'])
+    for measured in safe(probe_gpu)() or []:
+        for gpu in result.get('gpus', []):
+            if gpu.get('name') == measured.get('name') and measured.get('memory_total') is not None:
+                gpu['vram_bytes'] = int(measured['memory_total']*2**20)
+    displays = safe(windows_displays)()
+    if displays is not None:
+        result['displays'] = displays
+    return clean(result)
+
+
+def windows_cpu_clocks():
+    """Processor power information is readable without WMI permissions."""
+    import os
+    class Processor(C.Structure):
+        _fields_ = [(key, C.c_uint32) for key in ('number', 'maximum', 'current', 'limit', 'max_idle', 'idle')]
+    processors = (Processor*min(256, os.cpu_count() or 1))()
+    api = C.WinDLL('powrprof')
+    if api.CallNtPowerInformation(11, None, 0, C.byref(processors), C.sizeof(processors)) != 0:
+        return None
+    current = [p.current for p in processors if p.current > 0]
+    maximum = [p.maximum for p in processors if p.maximum > 0]
+    return dict(current_mhz=max(current) if current else None, max_mhz=max(maximum) if maximum else None)
+
+
+def windows_displays():
+    """Active desktop outputs, not GPU count; standard Windows user32 API."""
+    import struct
+    api = C.WinDLL('user32', use_last_error=True)
+    api.EnumDisplayDevicesW.argtypes = [C.c_wchar_p, C.c_uint32, C.c_void_p, C.c_uint32]
+    api.EnumDisplaySettingsW.argtypes = [C.c_wchar_p, C.c_uint32, C.c_void_p]
+    result = []
+    for index in range(32):
+        device = C.create_string_buffer(840)
+        struct.pack_into('<I', device, 0, 840)
+        if not api.EnumDisplayDevicesW(None, index, device, 0):
+            break
+        flags = struct.unpack_from('<I', device, 324)[0]
+        if not flags & 1 or flags & 8:
+            continue
+        name = C.wstring_at(C.addressof(device)+4, 32).split('\0')[0]
+        mode = C.create_string_buffer(220)
+        struct.pack_into('<H', mode, 68, 220)
+        if api.EnumDisplaySettingsW(name, 0xFFFFFFFF, mode):
+            width, height, _, hz = struct.unpack_from('<IIII', mode, 172)
+            result.append(dict(width=width, height=height, hz=hz if hz > 1 else None))
+    return result[:8]
+
+
+def linux_inventory():
+    """Read standard sysfs/hwmon interfaces; no extra drivers or sensor libraries."""
+    import platform
+    result, cpu, fans = {}, {}, []
+    temperatures = []
+    for zone in Path('/sys/class/thermal').glob('thermal_zone*'):
+        kind = read_file(zone/'type').lower()
+        if any(k in kind for k in ('cpu', 'x86_pkg', 'coretemp', 'k10temp')):
+            value = number(read_file(zone/'temp'))
+            if value is not None:
+                temperatures.append(value/1000)
+    for hwmon in Path('/sys/class/hwmon').glob('hwmon*'):
+        name = read_file(hwmon/'name')
+        if name in ('coretemp', 'k10temp'):
+            for path in hwmon.glob('temp*_input'):
+                value = number(read_file(path))
+                if value is not None:
+                    temperatures.append(value/1000)
+        for path in hwmon.glob('fan*_input'):
+            rpm = number(read_file(path))
+            if rpm is not None:
+                fans.append(dict(name=read_file(path.with_name(path.name.replace('_input', '_label'))) or name, rpm=rpm))
+    if temperatures:
+        cpu['temperature_c'] = max(temperatures)
+    for key, name in [('current_mhz', 'scaling_cur_freq'), ('max_mhz', 'cpuinfo_max_freq')]:
+        value = number(read_file(Path('/sys/devices/system/cpu/cpu0/cpufreq')/name))
+        if value is not None:
+            cpu[key] = value/1000
+    result.update(cpu=cpu, fans=fans)
+    result['board'] = {key: read_file('/sys/class/dmi/id/'+name) or None for key, name in
+                       [('manufacturer', 'board_vendor'), ('model', 'board_name'), ('bios_vendor', 'bios_vendor'),
+                        ('bios_version', 'bios_version'), ('bios_date', 'bios_date')]}
+    adapters = []
+    for path in sorted(Path('/sys/class/net').glob('*')):
+        if path.name == 'lo':
+            continue
+        driver = path/'device/driver'
+        adapters.append(dict(name=path.name, model=read_file(path/'device/uevent').split('MODALIAS=')[-1].splitlines()[0] if 'MODALIAS=' in read_file(path/'device/uevent') else None,
+            kind='Wi-Fi' if (path/'wireless').exists() else 'Bluetooth' if path.name.startswith('bnep') else 'Virtual / VPN' if not (path/'device').exists() else 'Ethernet',
+            connected=read_file(path/'operstate') == 'up', speed_mbps=number(read_file(path/'speed')),
+            mac=read_file(path/'address'), driver=driver.resolve().name if driver.exists() else None,
+            vendor=read_file(path/'device/vendor') or None))
+    result['adapters'] = adapters
+    result['disks'] = [dict(model=read_file(p/'device/model') or p.name,
+        kind='NVMe' if p.name.startswith('nvme') else 'HDD' if read_file(p/'queue/rotational') == '1' else 'SSD' if read_file(p/'queue/rotational') == '0' else None,
+        size_bytes=int(number(read_file(p/'size')))*512 if number(read_file(p/'size')) is not None else None) for p in Path('/sys/block').glob('*') if (p/'device').exists()]
+    displays = []
+    for path in Path('/sys/class/drm').glob('card*-*'):
+        if read_file(path/'status') == 'connected':
+            # modes lists supported resolutions, not the active resolution.
+            mode = read_file(path/'mode').splitlines()
+            if mode and re.fullmatch(r'\d+x\d+', mode[0]):
+                width, height = map(int, mode[0].split('x'))
+                displays.append(dict(width=width, height=height))
+    result['displays'] = displays
+    result['os'] = dict(name=platform.system(), build=platform.release(), architecture=platform.machine(),
+                        uptime_seconds=number(read_file('/proc/uptime').split(' ')[0]))
+    return result
 
 
 def read_file(path):
@@ -459,7 +656,7 @@ def linux_gpu(root='/sys/class/drm', namer=None):
     return result
 
 
-def windows_wifi():
+def windows_wifi(include_ssid=True):
     """Native WLAN structs use fixed-width DWORDs and native pointer alignment."""
     DWORD = C.c_uint32
     class Guid(C.Structure):
@@ -502,8 +699,12 @@ def windows_wifi():
                 if interface.state == 1 and not api.WlanQueryInterface(handle, C.byref(interface.guid), 7, None,
                         C.byref(size), C.byref(data), C.byref(opcode_type)) and size.value >= C.sizeof(Connection):
                     a = C.cast(data, C.POINTER(Connection)).contents.association
-                    row.update(ssid=bytes(a.ssid.bytes[:min(a.ssid.length, 32)]).decode('utf-8', errors='replace'),
-                               signal=a.quality, rx_mbps=a.rx/1000, tx_mbps=a.tx/1000)
+                    row.update(signal=a.quality, rx_mbps=a.rx/1000, tx_mbps=a.tx/1000,
+                               wifi_standard={4:'802.11a',5:'802.11b',6:'802.11g',7:'802.11n',8:'802.11ac',9:'802.11ad',10:'802.11ax',11:'802.11be'}.get(a.phy))
+                    if include_ssid:
+                        row['ssid'] = bytes(a.ssid.bytes[:min(a.ssid.length, 32)]).decode('utf-8', errors='replace')
+                    else:
+                        row['band'] = safe(windows_wifi_band)(api, handle, interface.guid, bytes(a.mac))
             finally:
                 if data.value:
                     api.WlanFreeMemory(data)
@@ -513,6 +714,37 @@ def windows_wifi():
         if pointer:
             api.WlanFreeMemory(pointer)
         api.WlanCloseHandle(handle, None)
+
+
+def windows_wifi_band(api, handle, guid, mac):
+    """Read only the associated BSSID's center frequency, without retaining SSIDs."""
+    class SSID(C.Structure):
+        _fields_ = [('length', C.c_uint32), ('bytes', C.c_ubyte*32)]
+    class Rates(C.Structure):
+        _fields_ = [('length', C.c_uint32), ('rates', C.c_uint16*126)]
+    class Entry(C.Structure):
+        _fields_ = [('ssid', SSID), ('phy_id', C.c_uint32), ('mac', C.c_ubyte*6),
+            ('bss_type', C.c_uint32), ('phy_type', C.c_uint32), ('rssi', C.c_int32),
+            ('quality', C.c_uint32), ('reg_domain', C.c_ubyte), ('beacon', C.c_uint16),
+            ('timestamp', C.c_uint64), ('host', C.c_uint64), ('capability', C.c_uint16),
+            ('frequency', C.c_uint32), ('rates', Rates), ('ie_offset', C.c_uint32), ('ie_size', C.c_uint32)]
+    class Table(C.Structure):
+        _fields_ = [('size', C.c_uint32), ('count', C.c_uint32), ('entries', Entry*1)]
+    pointer = C.POINTER(Table)()
+    api.WlanGetNetworkBssList.argtypes = [C.c_void_p, C.c_void_p, C.c_void_p, C.c_uint32, C.c_int32, C.c_void_p, C.c_void_p]
+    if api.WlanGetNetworkBssList(handle, C.byref(guid), None, 3, False, None, C.byref(pointer)):
+        return None
+    try:
+        table = pointer.contents
+        if not Table.entries.offset+table.count*C.sizeof(Entry) <= table.size <= 1024*1024:
+            return None
+        entries = C.cast(C.addressof(table)+Table.entries.offset, C.POINTER(Entry))
+        for i in range(min(table.count, 2048)):
+            if bytes(entries[i].mac) == mac:
+                mhz = entries[i].frequency/1000
+                return '2.4 GHz' if 2400 <= mhz < 2500 else '5 GHz' if 4900 <= mhz < 5925 else '6 GHz' if 5925 <= mhz <= 7125 else None
+    finally:
+        api.WlanFreeMemory(pointer)
 
 
 def parse_journal_awake(text):
@@ -815,7 +1047,7 @@ def probe_disks():
 
 
 @safe
-def probe_counters():
+def probe_counters(inventory=False):
     if sys.platform != 'win32':
         active = {row['Name'] for row in linux_network()}
         return {k: v for k, v in parse_net_dev(Path('/proc/net/dev').read_text()).items() if k in active}
@@ -840,6 +1072,13 @@ def probe_counters():
         return None
     try:
         rows = C.cast(C.addressof(pointer.contents) + Table.rows.offset, C.POINTER(Row))
+        if inventory:
+            return [dict(name=row.alias, model=row.description,
+                kind='Bluetooth' if 'bluetooth' in row.description.lower() else 'Virtual / VPN' if not row.flags & 1 else 'Wi-Fi' if row.type == 71 else 'Ethernet',
+                connected=row.oper == 1, speed_mbps=row.tx_speed/1000000 if row.oper == 1 and row.tx_speed > 0 else None,
+                mac=':'.join(f'{b:02X}' for b in row.address[:min(row.address_length, 32)]))
+                for row in sorted((rows[i] for i in range(min(pointer.contents.count, 256))), key=lambda r: not r.flags & 1)
+                if row.type != 24 and not row.flags & 2][:16]  # Filter layers are not additional network cards.
         return {row.index: (row.in_bytes, row.out_bytes) for row in (rows[i] for i in range(pointer.contents.count))
                 if row.oper == 1 and row.type != 24 and not re.search(r'vmware|hyper-v|loopback|vethernet', row.alias+' '+row.description, re.I)
                 and row.flags & 1}

@@ -15,6 +15,7 @@ from lifetime_i18n import duration, ui_text
 import lifetime_signals as signals
 from lifetime_settings import allowed_probes, defaults
 from lifetime_charts import LiveSparklines
+from lifetime_system_gui import HardwarePanel
 from lifetime_reveal import Intro, progress
 from lifetime_glass import solid
 
@@ -42,7 +43,7 @@ class ProbeWorker(QWidget):
         self.closed = False
         self.probes = {name: (getattr(signals, 'probe_'+name), interval) for name, interval in
                        [('power', 2), ('clocks', 2), ('cpu', 2), ('ram', 2), ('disks', 2), ('counters', 2),
-                        ('battery', 10), ('network', 10), ('wifi', 10), ('gpu', 10), ('identity', 10)]}
+                        ('battery', 10), ('network', 10), ('wifi', 10), ('gpu', 10), ('identity', 10), ('inventory', 21600)]}
         self.catalog = dict(self.probes)
         self.set_settings(settings or defaults())
         self.timer = QTimer(self)
@@ -65,7 +66,7 @@ class ProbeWorker(QWidget):
         now = time.monotonic()
         dirty = False
         for key, (future, started, expired) in list(self.jobs.items()):
-            limit = VERIFY_LIMIT if key == 'verify' else 5     # Verify may read a large system journal
+            limit = 90 if key == 'inventory' else VERIFY_LIMIT if key == 'verify' else 5     # Verify may read a large system journal
             if not future.done() and now-started <= limit:
                 continue
             result = None
@@ -298,6 +299,8 @@ class SystemDashboard(QWidget):
         layout.addLayout(self.grid)
         self.set_columns(1)
         layout.addWidget(self.sparklines)
+        self.hardware = HardwarePanel()
+        layout.addWidget(self.hardware)
         self.settings = dict(battery=True, network=True, wifi_name=True, graphics=True, resources=True)
         # The meters fill once, the first time the page is open with real readings, then just follow the data.
         self.intro = Intro(self, 900, 100)
@@ -314,6 +317,9 @@ class SystemDashboard(QWidget):
         self.sparklines.set_settings(settings)
         any_enabled = any(settings.get(key) for key in ('battery', 'network', 'wifi_name', 'graphics', 'resources'))
         self.empty.setVisible(not any_enabled)
+        self.hardware.setVisible(bool(settings.get('resources')))
+        if not settings.get('resources'):
+            self.hardware.set_data({})
         self.data_toggle.setVisible(any_enabled)
         self.sparklines.setVisible(any_enabled and self.data_toggle.isChecked())
         self.freshness.setVisible(any_enabled)
@@ -336,6 +342,7 @@ class SystemDashboard(QWidget):
 
     def update_values(self, data, tokens):
         self.sparklines.update_values(data)
+        self.hardware.set_data(data.get('inventory'))
         p, b = data.get('power') or {}, data.get('battery') or {}
         rate = '0 W · battery idle' if p.get('ac') and b.get('watts') == 0 else fmt(b.get('watts'), 'W')
         power = [('Battery', fmt(p.get('percent'), '%', 0), p.get('percent')),

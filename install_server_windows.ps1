@@ -1,3 +1,4 @@
+# Shared hardware modules: lifetime_system.py, lifetime_system_gui.py (included by lifetime_*.py).
 # Run explicitly from an elevated PowerShell prompt; installs only the server edition.
 [CmdletBinding()]
 param(
