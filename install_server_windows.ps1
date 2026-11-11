@@ -62,7 +62,12 @@ foreach ($path in @($InstallDirectory, $DataDirectory)) {
     }
 }
 if (Test-Path -LiteralPath $InstallDirectory -PathType Container) {
-    if ((Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1) -and -not (Test-Path -LiteralPath (Join-Path $InstallDirectory 'server-install.json') -PathType Leaf)) { throw 'The existing nonempty install directory is not a registered Lifetime Server installation.' }
+    # server-install.json is written last, so an install that stopped part way (no network for pip, a failed
+    # service registration) has only the copied program files. Those mark the directory as ours as well,
+    # otherwise the administrator could never simply run the installer again.
+    if ((Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1) -and
+        -not (Test-Path -LiteralPath (Join-Path $InstallDirectory 'server-install.json') -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $InstallDirectory 'lifetime_server.py') -PathType Leaf)) { throw 'The existing nonempty install directory is not a registered Lifetime Server installation.' }
 }
 if (Test-Path -LiteralPath $DataDirectory -PathType Container) {
     if ((Get-ChildItem -LiteralPath $DataDirectory -Force | Select-Object -First 1) -and
