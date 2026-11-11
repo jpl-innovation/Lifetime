@@ -4,11 +4,11 @@ import weakref
 THEMES = {
     'dark': dict(bg='#0B1426', card='#12203A', text='#FFFFFF',
                  muted='#9FB0CC', border='#22345A', accent='#FFC93C', accent_hover='#FFD761', track='#1B2A46',
-                 bar='#3A5688', thumb='#2A3E66', line='#34445E', sidebar='#08101F', danger='#FF8A8A', bg2='#0F1A30', raise_='#243C63', skel_a='#263A60', skel_b='#34507F', tile='#182944', tile_hover='#1E3254', tile_border='#2A3E66', border2='#223959', good='#4CC38A', heat=('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')),
+                 bar='#3A5688', thumb='#2A3E66', line='#34445E', sidebar='#08101F', danger='#FF8A8A', bg2='#0F1A30', raise_='#243C63', skel_a='#263A60', skel_b='#34507F', tile='#182944', tile_hover='#1E3254', tile_border='#2A3E66', border2='#223959', good='#4CC38A', tab_on='#FFF0BF', heat=('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')),
     # Light mode: the same layout in a calm paper palette. The amber is darkened so it stays readable as text and lines.
     'light': dict(bg='#F3F4F1', card='#FCFCFA', text='#252D2D',
                   muted='#5F6B69', border='#D3D9D5', accent='#9A5B00', accent_hover='#7F4A00', track='#E1E6E1',
-                  bar='#B8C4D6', thumb='#FDFDFC', line='#C5CDC8', sidebar='#E8EBE6', danger='#B3261E', bg2='#ECEEEA', raise_='#DDE3EB', skel_a='#E4E7E2', skel_b='#D5DAD3', tile='#F7F8F5', tile_hover='#EEF0EB', tile_border='#CBD2CC', border2='#D3D9D5', good='#2E8B57', heat=('#E9E5D6', '#E0CE98', '#D2B25A', '#B98A1F', '#9A5B00')),
+                  bar='#B8C4D6', thumb='#FDFDFC', line='#C5CDC8', sidebar='#E8EBE6', danger='#B3261E', bg2='#ECEEEA', raise_='#DDE3EB', skel_a='#E4E7E2', skel_b='#D5DAD3', tile='#F7F8F5', tile_hover='#EEF0EB', tile_border='#CBD2CC', border2='#D3D9D5', good='#2E8B57', tab_on='#6B3F00', heat=('#E9E5D6', '#E0CE98', '#D2B25A', '#B98A1F', '#9A5B00')),
 }
 
 _active = 'dark'
@@ -54,7 +54,7 @@ _DARK_LITERALS = {
     '#FFC93C': 'accent', '#FFD761': 'accent_hover', '#1B2A46': 'track', '#3A5688': 'bar', '#34445E': 'line',
     '#08101F': 'sidebar', '#4CC38A': 'good', '#65D782': 'good', '#FF8A8A': 'danger', '#0F1A30': 'bg2',
     '#243C63': 'raise_', '#263A60': 'skel_a', '#34507F': 'skel_b', '#182944': 'tile', '#1E3254': 'tile_hover',
-    '#2A3E66': 'tile_border', '#223959': 'border2',
+    '#2A3E66': 'tile_border', '#223959': 'border2', '#FFF0BF': 'tab_on',
 }
 
 
