@@ -718,7 +718,7 @@ class ModeSwitch(QWidget):
 
 
 class Sidebar(QWidget):
-    def __init__(self, select, settings, motion_reduced, language_control, status, dot, theme_control=None):
+    def __init__(self, select, motion_reduced, language_control, status, dot, theme_control=None):
         super().__init__()
         self.setObjectName('sidebar')
         self.collapsed = False
@@ -764,10 +764,11 @@ class Sidebar(QWidget):
             self.rows.append(row)
             box.addWidget(row)
         self.group.button(0).setChecked(True)
-        self.group.idClicked.connect(select)
         box.addStretch(1)
-        self.settings_button = NavRow('Settings', 'settings', self)
-        self.settings_button.clicked.connect(settings)
+        self.settings_button = NavRow('Settings', 'settings', self)      # a page like the others, id 6
+        self.settings_button.setCheckable(True)
+        self.group.addButton(self.settings_button, 6)
+        self.group.idClicked.connect(select)
         self.rows.append(self.settings_button)
         box.addWidget(self.settings_button)
         box.addSpacing(16)

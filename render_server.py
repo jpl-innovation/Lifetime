@@ -114,7 +114,7 @@ def main():
             window.show()
             settle(app, window)
             for language in ('en', 'vi'):
-                window.language_choice.setCurrentIndex(0 if language == 'en' else 1)
+                window.language_button.set_index(0 if language == 'en' else 1, True)
                 settle(app, window)
                 name = f'empty-{language}-1600x1000.png'
                 window.grab().save(str(destination/name))
@@ -145,7 +145,7 @@ def main():
             window.device_order.setCurrentIndex(window.device_order.findData('problem'))
             settle(app, window)
             for language in ('en', 'vi'):
-                window.language_choice.setCurrentIndex(0 if language == 'en' else 1)
+                window.language_button.set_index(0 if language == 'en' else 1, True)
                 window.resize(1600, 1000)
                 window.tabs.setCurrentIndex(0)
                 settle(app, window)

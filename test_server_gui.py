@@ -484,7 +484,7 @@ class ServerGuiTests(unittest.TestCase):
 
     def test_vietnamese_live_translation_native_keyboard_and_small_window(self):
         self.load([device(1)])
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.assertEqual(self.window.tabs.tabText(0), 'Tổng quan')
         self.assertEqual(self.window.tabs.tabText(1), 'Thiết bị')
         self.assertEqual(self.window.save_identity_button.text(), 'Lưu thông tin')
@@ -535,7 +535,7 @@ class ServerGuiTests(unittest.TestCase):
         field = self.window.identity_fields['display_name']
         field.setText('Unsaved')
         field.textEdited.emit('Unsaved')
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.wait_idle()
         self.assertEqual(field.text(), 'Unsaved')
         self.assertTrue(self.window.retention_boundary.text().startswith('Mốc lưu giữ'))
@@ -586,7 +586,7 @@ class ServerGuiTests(unittest.TestCase):
         self.assertNotRegex(self.window.detail_text.toPlainText(), r'\d{4}-\d{2}-\d{2}')
         self.window.copy_device_id.click()
         self.assertEqual(self.app.clipboard().text(), row['device_id'])
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.wait_idle()
         self.assertNotIn('2026-01-02', self.window.identity_fields['deployment_date'].text())
         self.window.save_identity_button.click()
@@ -604,7 +604,7 @@ class ServerGuiTests(unittest.TestCase):
         stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=12)).isoformat()
         self.assertIn(self.window._relative(stamp), ('12 s ago', '13 s ago'))
         self.assertEqual(self.window._relative('2020-01-02T12:00:00Z'), '2 Jan 2020')
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.assertEqual(self.window._relative('2020-01-02T12:00:00Z'), self.window._date('2020-01-02'))
 
     def test_administration_row_actions_expiry_and_busy_state(self):
@@ -633,7 +633,7 @@ class ServerGuiTests(unittest.TestCase):
         approve.click()
         self.wait_idle()
         self.assertEqual(self.arguments('approve'), [{'request_id': request_id}])
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.window._render_server_info(result)
         self.assertIn(gui.text('month.1', 'vi'), invitation_table.item(0, 1).text())
         self.assertNotRegex(invitation_table.item(0, 1).text(), r'\d{4}-\d{2}-\d{2}')
@@ -912,7 +912,7 @@ class ServerGuiTests(unittest.TestCase):
         self.addCleanup(set_theme, active_theme())
         glass_sheet = self.window.styleSheet()
         self.assertIn('qlineargradient(x1:0, y1:0, x2:1', glass_sheet)
-        self.window.style_choice.setCurrentIndex(1)       # one live switch (retint_all is slow with many open widgets)
+        self.window.style_control.group.button(1).click()       # one live switch (retint_all is slow with many open widgets)
         self.wait(lambda: active_style() == 'classic')
         self.assertEqual(gui.read_style_preference(self.root), 'classic')
         self.assertNotEqual(self.window.styleSheet(), glass_sheet)

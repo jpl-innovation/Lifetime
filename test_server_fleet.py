@@ -162,7 +162,7 @@ class FleetGuiTests(unittest.TestCase):
 
     def test_native_keyboard_indicator_reduced_motion_and_compact_vietnamese(self):
         self.seed()
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.window.resize(1024, 700)
         self.wait()
         self.assertEqual(self.window.width(), 1024)

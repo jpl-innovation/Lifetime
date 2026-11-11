@@ -1511,3 +1511,16 @@ for _key, _text in _CONNECT_PLAIN_VI.items():
 EN['Connection requests'] = 'Connection requests'
 VI['Connection requests'] = 'Yêu cầu kết nối'
 SERVER_DASHBOARD_VI['Connection requests'] = VI['Connection requests']
+
+_SWITCH_VI = {
+    'Choose what Lifetime tracks and how it looks. Changes apply and save straight away.':
+        'Chọn nội dung Lifetime theo dõi và giao diện. Thay đổi được áp dụng và lưu ngay.',
+}
+VI.update(_SWITCH_VI)
+EN.update({key: key for key in _SWITCH_VI})
+
+_SERVER_SWITCH_VI = {
+    'Language: {current}. Click to switch to {next}.': 'Ngôn ngữ: {current}. Bấm để chuyển sang {next}.',
+    'Theme: {current}. Click to switch to {next}.': 'Giao diện: {current}. Bấm để chuyển sang {next}.',
+}
+SERVER_DASHBOARD_VI.update(_SERVER_SWITCH_VI)

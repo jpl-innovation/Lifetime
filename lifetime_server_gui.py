@@ -23,20 +23,21 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEd
 from lifetime_admin import AdminClient
 import lifetime_i18n as catalog
 from lifetime_protocol import CLIENT_VERSION, IDENTITY_FIELDS, validate_identity
-from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, set_theme, resolve_theme, active_theme, retint_all, CONTROL_RADIUS
+from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, tokens, set_theme, resolve_theme, active_theme, retint_all, CONTROL_RADIUS
 import json
 import os
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
-from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
+from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
 from lifetime_reveal import RollLabel, fade_in
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
-from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
+from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
+THEME_KEYS = ('auto', 'light', 'dark')
 
 
 def _create_bundle(client, directory, address, ttl, uses):
@@ -181,30 +182,27 @@ class ServerWindow(QMainWindow):
         self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(150, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.bind(self.credit, 'Made by JPL Innovation', 'setToolTip')
         actions.addWidget(self.credit)
-        self.language_choice = QComboBox()
-        self.language_choice.addItem('English', 'en')
-        self.language_choice.addItem('Tiếng Việt', 'vi')
-        self.language_choice.setCurrentIndex(0 if language == 'en' else 1)
-        self.language_choice.setAccessibleName(self.t('Language'))
-        self.language_choice.setMinimumWidth(164)
-        self.language_choice.setMaximumWidth(180)
-        self.theme_choice = QComboBox()
-        for key, name in (('auto', 'Auto'), ('light', 'Light'), ('dark', 'Dark')):
-            self.theme_choice.addItem(self.t(name), key)
+        # Language and theme: one compact glass button each in the header. A click moves to the next value.
+        self.chrome_switches = QWidget()
+        switches = QHBoxLayout(self.chrome_switches)
+        switches.setContentsMargins(0, 0, 0, 0)
+        switches.setSpacing(8)
+        self.language_button = CycleButton(2, self._draw_language, 0 if language == 'en' else 1, (52, 40), 16)   # a soft rounded rectangle
+        self.language_button.cycled.connect(self._language_cycled)
         saved = read_theme_preference(self.directory)
-        self.theme_choice.setCurrentIndex(('auto', 'light', 'dark').index(saved))
-        self.theme_choice.setAccessibleName(self.t('Theme'))
-        self.theme_choice.setMinimumWidth(164)
-        self.theme_choice.setMaximumWidth(180)
-        self.theme_choice.currentIndexChanged.connect(self._theme_changed)
-        self.style_choice = QComboBox()
-        for key, name in (('glass', 'Glass'), ('classic', 'Classic')):
-            self.style_choice.addItem(self.t(name), key)
-        self.style_choice.setCurrentIndex(STYLES.index(active_style()))
-        self.style_choice.setAccessibleName(self.t('Style'))
-        self.style_choice.setMinimumWidth(164)
-        self.style_choice.setMaximumWidth(180)
-        self.style_choice.currentIndexChanged.connect(self._style_changed)
+        self.theme_button = CycleButton(3, self._draw_theme, THEME_KEYS.index(saved), (40, 40), 20)      # a circle
+        self.theme_button.cycled.connect(self._theme_cycled)
+        for button in (self.language_button, self.theme_button):
+            glass(button, button.radius, pill=True)
+            switches.addWidget(button)
+        actions.insertWidget(1, self.chrome_switches)
+        self._describe_switches()
+        self.style_control = ModeSwitch([self.t('Glass'), self.t('Classic')], lambda index: self._style_changed(STYLES[index]))
+        self.style_control.setFixedWidth(260)
+        self.style_control.setAccessibleName(self.t('Style'))
+        for segment in self.style_control.group.buttons():
+            segment.setProperty('glass', True)        # the segments paint themselves; the window must not put glass under them
+        self.style_control.group.button(STYLES.index(active_style())).setChecked(True)
         self.tabs = ServerPages()
         layout.addWidget(self.chrome)
         self.loading_bar = LoadingBar()
@@ -241,7 +239,6 @@ class ServerWindow(QMainWindow):
         self._manual_refresh = False
         self._refresh_started = 0.0
         self._make_skeletons()
-        self.language_choice.currentIndexChanged.connect(self._language_changed)
         self.export_requested.connect(self._show_export)
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -1375,14 +1372,8 @@ class ServerWindow(QMainWindow):
         # Superseded by Add a computer. Keep the legacy helper for scripted callers.
         enrollment.setParent(self)
         enrollment.hide()
-        language_panel, language_layout = self._section('Language')
-        language_layout.addWidget(self.language_choice, 0, Qt.AlignmentFlag.AlignLeft)
-        self.admin_layout.addWidget(language_panel)
-        theme_panel, theme_layout = self._section('Theme')
-        theme_layout.addWidget(self.theme_choice, 0, Qt.AlignmentFlag.AlignLeft)
-        self.admin_layout.addWidget(theme_panel)
         style_panel, style_layout = self._section('Style')
-        style_layout.addWidget(self.style_choice, 0, Qt.AlignmentFlag.AlignLeft)
+        style_layout.addWidget(self.style_control, 0, Qt.AlignmentFlag.AlignLeft)
         self.admin_layout.addWidget(style_panel)
         backups, layout = self._section('Backup and restore')
         self.backup_button = self.button('Save backup', self.backup)
@@ -1457,21 +1448,45 @@ class ServerWindow(QMainWindow):
             QHeaderView::section { background: transparent; font-weight: 600; font-size: 12px; color: #9FB0CC; border: none; border-bottom: 1px solid #2A3E66; }
         """)
 
-    def _theme_changed(self):
-        """Save the choice and change in place: the new theme spreads out from the control."""
-        value = self.theme_choice.currentData()
+    def _draw_language(self, p, rect, index):
+        font = p.font()
+        font.setPixelSize(14)
+        font.setWeight(QFont.Weight.DemiBold)
+        p.setFont(font)
+        p.setPen(QColor(tokens()['text']))
+        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, ('EN', 'VI')[index])
+
+    def _draw_theme(self, p, rect, index):
+        draw_mode_icon(p, THEME_KEYS[index], rect.center(), QColor(tokens()['accent']), 1.0)
+
+    def _describe_switches(self):
+        """Tooltip and accessible name: the current value, and what a click does."""
+        names = (('English', 'Tiếng Việt'), tuple(self.t(name) for name in ('Auto', 'Light', 'Dark')))
+        for button, key, choices in ((self.language_button, 'Language: {current}. Click to switch to {next}.', names[0]),
+                                     (self.theme_button, 'Theme: {current}. Click to switch to {next}.', names[1])):
+            sentence = self.t(key, current=choices[button.index], next=choices[(button.index + 1) % button.count])
+            button.setToolTip(sentence)
+            button.setAccessibleName(sentence)
+
+    def _language_cycled(self, index):
+        self.language = ('en', 'vi')[index]
+        self.retranslate()
+
+    def _theme_cycled(self, index):
+        """Save the choice and change in place: the new theme spreads out from the button."""
+        value = THEME_KEYS[index]
         write_theme_preference(self.directory, value)
+        self._describe_switches()
         name = resolve_theme(value)
         if name != active_theme():
-            origin = self.theme_choice.mapTo(self, self.theme_choice.rect().center())
+            origin = self.theme_button.mapTo(self, self.theme_button.rect().center())
             theme_reveal(self, origin, lambda: self._apply_live_theme(name))
 
-    def _style_changed(self):
+    def _style_changed(self, value):
         """Save the choice and swap the surfaces in place, spreading out from the control like the theme does."""
-        value = self.style_choice.currentData()
         write_style_preference(self.directory, value)
         if value != active_style():
-            origin = self.style_choice.mapTo(self, self.style_choice.rect().center())
+            origin = self.style_control.mapTo(self, self.style_control.rect().center())
             theme_reveal(self, origin, lambda: self._apply_live_style(value))
 
     def _apply_live_style(self, name):
@@ -1485,10 +1500,6 @@ class ServerWindow(QMainWindow):
         self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(150, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.about_logo.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.refresh()
-
-    def _language_changed(self):
-        self.language = self.language_choice.currentData()
-        self.retranslate()
 
     def retranslate(self):
         if hasattr(self, 'performance_range'):
@@ -1532,7 +1543,11 @@ class ServerWindow(QMainWindow):
             self.code_expiry.setText(local_expiry(self._bundle_expiry, self.t) if self._bundle_expiry else '')
         for field, key in (('display_name', 'Display name'), ('asset_tag', 'Asset tag'), ('department', 'Department'), ('location', 'Location'), ('deployment_date', 'Deployment date')):
             self.identity_fields[field].setAccessibleName(self.t(key))
-        for widget, key in ((self.language_choice, 'Language'), (self.status_filter, 'Status'),
+        self._describe_switches()
+        for segment, key in zip(self.style_control.group.buttons(), ('Glass', 'Classic')):
+            segment.setText(self.t(key))
+        self.style_control.setAccessibleName(self.t('Style'))
+        for widget, key in ((self.status_filter, 'Status'),
                             (self.table, 'Devices'), (self.detail_text, 'Device details'),
                             (self.page_size, 'Page size'), (self.pending_requests, 'Pending requests'),
                             (self.interval, 'Reporting interval (seconds)'), (self.events, 'Recent events'),
@@ -2194,14 +2209,22 @@ class ServerWindow(QMainWindow):
         wide = self.width() >= 1180
         navigation = self.tabs.tabBar()
         navigation.set_compact(self.width() < 720)
+        compact = self.width() < 600        # too narrow for the switches beside the status: they join the menu's row
         self.chrome_grid.addWidget(self.chrome_brand, 0, 0)
         self.chrome_grid.addWidget(self.chrome_actions, 0, 2 if wide else 1)
         if wide:
             self.chrome_grid.addWidget(navigation, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        elif compact:
+            self.chrome_grid.addWidget(navigation, 1, 0, Qt.AlignmentFlag.AlignLeft)
         else:
             self.chrome_grid.addWidget(navigation, 1, 0, 1, 2, Qt.AlignmentFlag.AlignCenter)
+        # Language and theme sit beside the status and Refresh; on a narrow window they move to the menu's row.
+        if compact:
+            self.chrome_grid.addWidget(self.chrome_switches, 1, 1, Qt.AlignmentFlag.AlignRight)
+        elif self.chrome_actions.layout().indexOf(self.chrome_switches) < 0:
+            self.chrome_actions.layout().insertWidget(1, self.chrome_switches)
         self.chrome_grid.setColumnStretch(0, 1)
-        self.chrome_grid.setColumnStretch(1, 0 if wide else 1)
+        self.chrome_grid.setColumnStretch(1, 0 if wide or compact else 1)
         self.chrome_grid.setColumnStretch(2, 1 if wide else 0)
         self.credit.setVisible(self.width() >= 1400)
         self.chrome_states.setVisible(self.width() >= 640)

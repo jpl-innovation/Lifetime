@@ -9,6 +9,7 @@ from unittest.mock import patch
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QDialog
 from qt_test_support import qt_app
 import lifetime_gui as gui
 from lifetime_i18n import set_language
@@ -253,10 +254,13 @@ class DashboardShellTests(unittest.TestCase):
                                   ('Coverage details', gui.CoverageDialog)):
                 QTest.mouseClick(self.w.technician_actions[title], Qt.MouseButton.LeftButton)
                 action.assert_called_with(dialog)
-        # The settings row uses the existing dialog, not a dead fifth page.
-        with patch.object(gui.SetupDialog, 'exec', return_value=0) as settings:
+        # Settings is a page of the window like the others: no dialog opens.
+        with patch.object(gui.SetupDialog, 'exec', return_value=0) as dialog:
             QTest.mouseClick(self.w.sidebar.settings_button, Qt.MouseButton.LeftButton)
-            settings.assert_called_once()
+            dialog.assert_not_called()
+        self.assertEqual(self.w.pages.currentWidget(), self.w.settings_page)
+        self.assertEqual(self.w.navigation.group.checkedButton(), self.w.sidebar.settings_button)
+        self.assertFalse([d for d in gui.QApplication.topLevelWidgets() if isinstance(d, QDialog) and d.isVisible()])
 
     def test_consent_hides_activity_and_live_language_relabels_the_shell(self):
         self.w.select_page(2)
@@ -287,9 +291,9 @@ class DashboardShellTests(unittest.TestCase):
 
 class DesktopStyleTests(unittest.TestCase):
     """The desktop's two looks: Classic is how it always looked, Glass is the server's material on the desktop's layout."""
-    # sha256 of the Classic window stylesheet before Glass existed (font family normalised), dark and light
-    CLASSIC = {'dark': '30d99b5e9e6505a85b190b967aeea8e8d617341215517566380e3671f9a6751e',
-               'light': '493f6b22521f66778beef9344025abb974a9111ef93b87d8ef855fcd2c16889a'}
+    # sha256 of the Classic window stylesheet (font family normalised), dark and light. Re-pinned when tick boxes became switches.
+    CLASSIC = {'dark': '680bbb6522b0523ddcbb9e08bbb8de401933b9b59e4eacddb3e238654f130344',
+               'light': '03435fa976207249e1527c8cac17af3076329cad875469bb1ef5f71f146239f4'}
 
     @classmethod
     def setUpClass(cls):
@@ -403,21 +407,18 @@ class DesktopStyleTests(unittest.TestCase):
             QTest.qWait(700)
             self.assertAlmostEqual(side.marker_rect(row).height(), row.height())
 
-    def test_settings_dialog_offers_the_style_and_changes_the_window_live(self):
+    def test_settings_page_offers_the_style_and_changes_the_window_live(self):
         from lifetime_glass import active_style
-        from lifetime_setup import SetupDialog
         w = self.window()
-        dialog = SetupDialog(gui.THEMES[w.theme], w.settings, self.directory, w)
-        self.addCleanup(dialog.deleteLater)
-        self.assertEqual(set(dialog.style_buttons), {'glass', 'classic'})
-        self.assertTrue(dialog.style_buttons['classic'].isChecked())
-        self.assertNotIn('qlineargradient', dialog.styleSheet())
-        dialog.style_buttons['glass'].setChecked(True)
+        page = w.settings_page
+        self.assertEqual(set(page.style_buttons), {'glass', 'classic'})
+        self.assertTrue(page.style_buttons['classic'].isChecked())
+        self.assertNotIn('qlineargradient', self.sheet(w))
+        page.style_buttons['glass'].setChecked(True)
         self.assertEqual(active_style(), 'glass')
         self.assertEqual(load_settings(self.directory)['style'], 'glass')
-        self.assertIn('qlineargradient(x1:0, y1:0, x2:1', dialog.styleSheet())
         self.assertIn('qlineargradient(x1:0, y1:0, x2:1', self.sheet(w))
-        self.assertFalse(dialog.grab().isNull())
+        self.assertFalse(page.grab().isNull())
 
     def test_style_names_are_translated(self):
         from lifetime_i18n import VI
