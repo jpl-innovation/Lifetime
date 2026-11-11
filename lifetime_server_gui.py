@@ -31,7 +31,7 @@ from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
 from lifetime_reveal import RollLabel, fade_in
-from lifetime_server_devices import (glass, Glass, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
+from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
 from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
@@ -118,35 +118,8 @@ class ServerWindow(QMainWindow):
         self.setMinimumSize(420, 400)
         install()
         QApplication.instance().installEventFilter(self)
-        self.setStyleSheet(stylesheet() + server_surfaces() + """
-            QMainWindow, QDialog { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2353A0, stop:0.28 #15306A, stop:0.55 #0B1426, stop:0.8 #3A3220, stop:1 #8A6516); }
-            QWidget#chrome { background: transparent; }
-            QWidget#panel[glass="true"], QWidget#notice, QScrollArea#detailScroll { background: transparent; border: none; }
-            QPushButton[glass="true"] { background: transparent; border: 1px solid transparent; padding: 8px 16px; }
-            QPushButton[glass="true"]:focus { border-color: #FFC93C; }
-            QPushButton[glass="true"]:checked, QPushButton[glass="true"]:pressed { background: transparent; }
-            QPushButton[glass="true"]:disabled { background: transparent; border-color: transparent; }
-            QPushButton#link { background: transparent; border: 1px solid transparent; color: #FFC93C; padding: 4px 6px; font-weight: 600; }
-            QPushButton#link:hover { text-decoration: underline; }
-            QPushButton#link:focus { border-color: #FFC93C; }
-            QLineEdit, QComboBox, QSpinBox, QDateEdit, QPlainTextEdit {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0F1A30, stop:1 #12203A); border-color: #2A3E66; }
-            QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDateEdit:hover { border-color: #3A5688; }
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { border-color: #FFC93C; }
-            QLabel#statusText { font-size: 14px; }
-            QLabel#muted { color: #9FB0CC; font-size: 13px; }
-            QLabel#fieldLabel { color: #9FB0CC; }
-            QLabel#sectionTitle { font-size: 18px; font-weight: 600; }
-            QLabel#metric { font-size: 26px; font-weight: 600; }
-            QPushButton#deviceMenu { background: transparent; border: 1px solid transparent; }
-            QPushButton#deviceMenu:hover { border-color: #34445E; }
-            QPushButton#deviceMenu:focus { border-color: #FFC93C; }
-            QTableWidget { background: transparent; border: none; padding: 0; gridline-color: #22345A; }
-            QTableWidget::item { padding: 7px 10px; border-bottom: 1px solid #1B2A46; }
-            QTableWidget#approvalTable::item, QTableWidget#invitationTable::item { padding: 0; }
-            QTableWidget::item:selected { background: transparent; }
-            QHeaderView::section { background: transparent; font-weight: 600; font-size: 12px; color: #9FB0CC; border: none; border-bottom: 1px solid #2A3E66; }
-        """)
+        set_style(read_style_preference(self.directory))
+        self._apply_window_style()
         self.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets/lifetime.png')))
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -224,6 +197,14 @@ class ServerWindow(QMainWindow):
         self.theme_choice.setMinimumWidth(164)
         self.theme_choice.setMaximumWidth(180)
         self.theme_choice.currentIndexChanged.connect(self._theme_changed)
+        self.style_choice = QComboBox()
+        for key, name in (('glass', 'Glass'), ('classic', 'Classic')):
+            self.style_choice.addItem(self.t(name), key)
+        self.style_choice.setCurrentIndex(STYLES.index(active_style()))
+        self.style_choice.setAccessibleName(self.t('Style'))
+        self.style_choice.setMinimumWidth(164)
+        self.style_choice.setMaximumWidth(180)
+        self.style_choice.currentIndexChanged.connect(self._style_changed)
         self.tabs = ServerPages()
         layout.addWidget(self.chrome)
         self.loading_bar = LoadingBar()
@@ -1400,6 +1381,9 @@ class ServerWindow(QMainWindow):
         theme_panel, theme_layout = self._section('Theme')
         theme_layout.addWidget(self.theme_choice, 0, Qt.AlignmentFlag.AlignLeft)
         self.admin_layout.addWidget(theme_panel)
+        style_panel, style_layout = self._section('Style')
+        style_layout.addWidget(self.style_choice, 0, Qt.AlignmentFlag.AlignLeft)
+        self.admin_layout.addWidget(style_panel)
         backups, layout = self._section('Backup and restore')
         self.backup_button = self.button('Save backup', self.backup)
         self.restore_button = self.button('Restore backup', self.restore)
@@ -1436,6 +1420,43 @@ class ServerWindow(QMainWindow):
     def _mark_identity_dirty(self):
         self._identity_dirty = True
 
+    WINDOW_BACKGROUND = {
+        'glass': 'qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2353A0, stop:0.28 #15306A, stop:0.55 #0B1426, stop:0.8 #3A3220, stop:1 #8A6516)',
+        'classic': '#0B1426'}
+
+    def _apply_window_style(self):
+        """The window stylesheet; only the background differs between Glass and Classic."""
+        self.setStyleSheet(stylesheet() + server_surfaces() + """
+            QMainWindow, QDialog { background: %s; }
+""" % self.WINDOW_BACKGROUND[active_style()] + """
+            QWidget#chrome { background: transparent; }
+            QWidget#panel[glass="true"], QWidget#notice, QScrollArea#detailScroll { background: transparent; border: none; }
+            QPushButton[glass="true"] { background: transparent; border: 1px solid transparent; padding: 8px 16px; }
+            QPushButton[glass="true"]:focus { border-color: #FFC93C; }
+            QPushButton[glass="true"]:checked, QPushButton[glass="true"]:pressed { background: transparent; }
+            QPushButton[glass="true"]:disabled { background: transparent; border-color: transparent; }
+            QPushButton#link { background: transparent; border: 1px solid transparent; color: #FFC93C; padding: 4px 6px; font-weight: 600; }
+            QPushButton#link:hover { text-decoration: underline; }
+            QPushButton#link:focus { border-color: #FFC93C; }
+            QLineEdit, QComboBox, QSpinBox, QDateEdit, QPlainTextEdit {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0F1A30, stop:1 #12203A); border-color: #2A3E66; }
+            QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDateEdit:hover { border-color: #3A5688; }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { border-color: #FFC93C; }
+            QLabel#statusText { font-size: 14px; }
+            QLabel#muted { color: #9FB0CC; font-size: 13px; }
+            QLabel#fieldLabel { color: #9FB0CC; }
+            QLabel#sectionTitle { font-size: 18px; font-weight: 600; }
+            QLabel#metric { font-size: 26px; font-weight: 600; }
+            QPushButton#deviceMenu { background: transparent; border: 1px solid transparent; }
+            QPushButton#deviceMenu:hover { border-color: #34445E; }
+            QPushButton#deviceMenu:focus { border-color: #FFC93C; }
+            QTableWidget { background: transparent; border: none; padding: 0; gridline-color: #22345A; }
+            QTableWidget::item { padding: 7px 10px; border-bottom: 1px solid #1B2A46; }
+            QTableWidget#approvalTable::item, QTableWidget#invitationTable::item { padding: 0; }
+            QTableWidget::item:selected { background: transparent; }
+            QHeaderView::section { background: transparent; font-weight: 600; font-size: 12px; color: #9FB0CC; border: none; border-bottom: 1px solid #2A3E66; }
+        """)
+
     def _theme_changed(self):
         """Save the choice and change in place: the new theme spreads out from the control."""
         value = self.theme_choice.currentData()
@@ -1444,6 +1465,19 @@ class ServerWindow(QMainWindow):
         if name != active_theme():
             origin = self.theme_choice.mapTo(self, self.theme_choice.rect().center())
             theme_reveal(self, origin, lambda: self._apply_live_theme(name))
+
+    def _style_changed(self):
+        """Save the choice and swap the surfaces in place, spreading out from the control like the theme does."""
+        value = self.style_choice.currentData()
+        write_style_preference(self.directory, value)
+        if value != active_style():
+            origin = self.style_choice.mapTo(self, self.style_choice.rect().center())
+            theme_reveal(self, origin, lambda: self._apply_live_style(value))
+
+    def _apply_live_style(self, name):
+        set_style(name)
+        self._apply_window_style()
+        retint_all()
 
     def _apply_live_theme(self, name):
         set_theme(name)
@@ -2627,14 +2661,30 @@ def read_theme_preference(directory):
     return value if value in ('auto', 'light', 'dark') else 'auto'
 
 
+def read_style_preference(directory):
+    try:
+        value = json.loads((Path(directory) / 'ui.json').read_text(encoding='utf-8')).get('style')
+    except (OSError, ValueError, AttributeError):
+        value = None
+    return value if value in STYLES else 'glass'
+
+
+def write_style_preference(directory, value):
+    _write_ui(directory, 'style', value if value in STYLES else 'glass')
+
+
 def write_theme_preference(directory, value):
+    _write_ui(directory, 'theme', value if value in ('auto', 'light', 'dark') else 'auto')
+
+
+def _write_ui(directory, key, value):
     path = Path(directory) / 'ui.json'
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
         data = data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         data = {}
-    data['theme'] = value if value in ('auto', 'light', 'dark') else 'auto'
+    data[key] = value
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(data), encoding='utf-8')
     os.replace(temporary, path)

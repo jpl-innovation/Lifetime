@@ -892,6 +892,38 @@ class ServerGuiTests(unittest.TestCase):
         gate.set()
         self.wait(lambda: not self.window._jobs)
 
+    def test_style_preference_defaults_to_glass_and_round_trips(self):
+        directory = Path(self.temporary.name) / 'prefs'
+        directory.mkdir()
+        self.assertEqual(gui.read_style_preference(directory), 'glass')
+        gui.write_theme_preference(directory, 'light')
+        gui.write_style_preference(directory, 'classic')
+        self.assertEqual(gui.read_style_preference(directory), 'classic')
+        self.assertEqual(gui.read_theme_preference(directory), 'light')
+        gui.write_style_preference(directory, 'neon')
+        self.assertEqual(gui.read_style_preference(directory), 'glass')
+        (directory / 'ui.json').write_text('{"style": "bogus"}', encoding='utf-8')
+        self.assertEqual(gui.read_style_preference(directory), 'glass')
+
+    def test_style_switch_changes_background_and_both_styles_paint_in_both_themes(self):
+        from lifetime_server_devices import active_style, set_style
+        from lifetime_theme import active_theme, set_theme
+        self.addCleanup(set_style, 'glass')
+        self.addCleanup(set_theme, active_theme())
+        glass_sheet = self.window.styleSheet()
+        self.assertIn('qlineargradient(x1:0, y1:0, x2:1', glass_sheet)
+        self.window.style_choice.setCurrentIndex(1)       # one live switch (retint_all is slow with many open widgets)
+        self.wait(lambda: active_style() == 'classic')
+        self.assertEqual(gui.read_style_preference(self.root), 'classic')
+        self.assertNotEqual(self.window.styleSheet(), glass_sheet)
+        self.assertNotIn('qlineargradient(x1:0, y1:0, x2:1', self.window.styleSheet())
+        for style in ('glass', 'classic'):
+            for theme in ('dark', 'light'):
+                set_style(style)           # no retint_all here: it restyles every widget earlier tests left behind
+                set_theme(theme)
+                self.window._apply_window_style()
+                self.assertFalse(self.window.grab().isNull())
+
 
 
 class AddComputerSheetTests(unittest.TestCase):
