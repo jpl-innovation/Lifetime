@@ -12,11 +12,42 @@ from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_
 from lifetime_reveal import Intro, paint_roll, phase
 
 
+STYLES = ('glass', 'classic')
+_style = 'glass'
+
+
+def set_style(name):
+    """The one switch between the two surface renderings; unknown names fall back to glass."""
+    global _style
+    _style = name if name in STYLES else 'glass'
+
+
+def active_style():
+    return _style
+
+
+def paint_classic(painter, rect, radius, pill=False, base=None, lift=0):
+    """The classic surface: a solid rounded card with a hairline border; the menu pill is a plain solid pill."""
+    body = QPainterPath()
+    body.addRoundedRect(rect, radius, radius)
+    painter.fillPath(body, QColor(T('#223959') if pill else (base or T('#12203A'))))
+    if lift:
+        painter.fillPath(body, QColor(255, 255, 255, int((14 if active_theme() == 'dark' else 40) * lift)))
+    if not pill:
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(T('#22345A')), 1))
+        outer = QPainterPath()
+        outer.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        painter.drawPath(outer)
+
+
 def paint_glass(painter, rect, radius, pill=False, base=None, lift=0, strong=False):
     """The server's one material: translucent body, lit upper cap, faint amber along the lower edge, a hairline
     plus diagonal specular rim ending in amber, and a soft shadow under a raised (pill) piece. `base` tints a
     panel body; `lift` (0..1) brightens it a touch for hover. Two strengths: ordinary panels stay quiet, `strong`
     (selected or primary pieces) gets the brighter cap and rim."""
+    if _style == 'classic':
+        return paint_classic(painter, rect, radius, pill, base, lift)
     quiet = not (pill or strong)
     dark = active_theme() == 'dark'
     body = QPainterPath()
@@ -244,7 +275,7 @@ class SegmentedBar(QTabBar):
             option = QStyleOptionTab()
             self.initStyleOption(option, index)
             painter.drawControl(QStyle.ControlElement.CE_TabBarTabLabel, option)
-        if self.sheen < 1.0:                                    # one soft sweep of light, left to right
+        if self.sheen < 1.0 and _style == 'glass':               # one soft sweep of light, left to right
             t = self.sheen
             t = t * t * (3 - 2 * t)
             clip = QPainterPath()
