@@ -70,6 +70,22 @@ class DashboardShellTests(unittest.TestCase):
             QTest.mouseClick(self.w.navigation.group.button(3), Qt.MouseButton.LeftButton)
             self.assertTrue(self.w.reports.isVisible())
 
+    def test_sidebar_marker_stretches_towards_its_target_and_settles_exactly(self):
+        side = self.w.sidebar
+        self.w.select_page(0)
+        QTest.qWait(600)
+        self.w.select_page(3)                       # Reports is below Overview: the bottom edge leads
+        side.indicator_animation.setCurrentTime(80)
+        side.trail_animation.setCurrentTime(80)
+        row = side.group.checkedButton()
+        drawn = side.marker_rect(row)
+        self.assertAlmostEqual(drawn.bottom(), side.indicator_y + row.height())
+        self.assertLess(drawn.top(), side.indicator_y)          # the top edge is still catching up
+        QTest.qWait(700)
+        settled = side.marker_rect(row)
+        self.assertAlmostEqual(settled.top(), row.y())
+        self.assertAlmostEqual(settled.height(), row.height())
+
     def test_indicator_retargets_from_onscreen_position_and_last_page_wins(self):
         self.w.select_page(3)
         animation = self.w.sidebar.indicator_animation

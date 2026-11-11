@@ -244,7 +244,7 @@ class Skeleton(QWidget):
         self.fade = QVariantAnimation(self)
         self.fade.setStartValue(1.0)
         self.fade.setEndValue(0.0)
-        self.fade.setDuration(180)
+        self.fade.setDuration(260)          # long enough to read as the real content arriving beneath the placeholders
         self.fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.fade.valueChanged.connect(self._fade)
         self.fade.finished.connect(self.hide)
@@ -565,32 +565,41 @@ class ServerPages(QStackedWidget):
         self.page_fade = QVariantAnimation(self)
         self.page_fade.setStartValue(0.0)
         self.page_fade.setEndValue(1.0)
-        self.page_fade.setDuration(180)
+        self.page_fade.setDuration(240)
         self.page_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._fading = None
+        self._last_index = 0
+        self._direction = 1
         self.page_fade.valueChanged.connect(self._page_opacity)
         self.page_fade.finished.connect(self._page_settled)
         self.bar.animation.valueChanged.connect(lambda _: self.bar.update())
         self.shortcuts = []
 
     def _fade_in(self, index):
+        """The new page settles in from the side the menu pill moved towards: a short fade and a small slide."""
         self.page_fade.stop()
         self._page_settled()
+        previous, self._last_index = self._last_index, index
         page = self.widget(index)
         if page is None or reduced_motion() or not self.isVisible():
             return
+        self._direction = 1 if index >= previous else -1
         self._fading = page
         page.setGraphicsEffect(QGraphicsOpacityEffect(page))
-        page.graphicsEffect().setOpacity(0.0)
+        self._page_opacity(0.0)
         self.page_fade.start()
 
     def _page_opacity(self, value):
-        if self._fading is not None and self._fading.graphicsEffect() is not None:
-            self._fading.graphicsEffect().setOpacity(value)
+        page = self._fading
+        if page is not None and page.graphicsEffect() is not None:
+            page.graphicsEffect().setOpacity(0.15 + 0.85 * value)
+            base = self.contentsRect().topLeft()
+            page.move(base.x() + round(14 * self._direction * (1 - value)), base.y())
 
     def _page_settled(self):
         if self._fading is not None:
             self._fading.setGraphicsEffect(None)
+            self._fading.move(self.contentsRect().topLeft())
             self._fading = None
 
     def addTab(self, widget, title):
