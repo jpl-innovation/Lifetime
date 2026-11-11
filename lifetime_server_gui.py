@@ -834,6 +834,9 @@ class ServerWindow(QMainWindow):
 
     def _set_chip(self, code):
         self._chip = code
+        if code == 'all' and self.status_filter.currentIndex() > 0:
+            # Review sets the status box; "All" has to mean every computer, not "all that are still pending".
+            self.status_filter.setCurrentIndex(0)
         for key, button in self.device_chips.items():
             button.setChecked(key == code)
         self._filters_changed()
