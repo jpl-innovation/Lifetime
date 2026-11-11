@@ -609,9 +609,11 @@ class SwitchSegment(QPushButton):
 class ModeSwitch(QWidget):
     """A recessed track with one raised tile that slides to the choice. Theme segments open up to name the current mode."""
     HEIGHT, PAD, COMPACT = 42, 3, 40
+    TIGHT = 32      # a segment's height in the narrow column of a short window
 
     def __init__(self, items, callback, icons=None, globe=False):
         super().__init__()
+        self.segment_height = self.COMPACT
         self.group = QButtonGroup(self)
         self.vertical, self.globe, self.expanding = False, globe, bool(icons)
         self.position = 0.0
@@ -631,8 +633,12 @@ class ModeSwitch(QWidget):
 
     def set_vertical(self, vertical):
         self.vertical = vertical
-        self.setFixedHeight(len(self.segments) * self.COMPACT + 2 * self.PAD if vertical else self.HEIGHT)
+        self.setFixedHeight(len(self.segments) * self.segment_height + 2 * self.PAD if vertical else self.HEIGHT)
         self.place(self.position)
+
+    def set_tight(self, tight):
+        self.segment_height = self.TIGHT if tight else self.COMPACT
+        self.set_vertical(self.vertical)
 
     def move_to(self, index):
         self.animation.stop()
@@ -728,6 +734,7 @@ class Sidebar(QWidget):
         # The marker stretches as it moves: the edge it moves towards goes first, the other edge catches up.
         self.trail_animation = None
         self.trail_side, self.trail_from, self.trail_to, self.trail_value = 't', 0.0, 0.0, 1.0
+        self.tight = False
         self.setFixedWidth(232)
         box = QVBoxLayout(self)
         box.setContentsMargins(16, 24, 16, 16)
@@ -894,7 +901,7 @@ class Sidebar(QWidget):
         self.layout().setContentsMargins(10 if collapsed else 16, 24, 10 if collapsed else 16, 16)
         self.brand.setVisible(not collapsed)
         self.status.setVisible(not collapsed)
-        self.credit.setVisible(not collapsed)
+        self.credit.setVisible(not collapsed and not self.tight)
         self.credit_logo.setPixmap(crisp(self.credit_pixmap, 44 if collapsed else 200, CREDIT_HEIGHT, self))
         self.credit_logo.setToolTip(tr('Made by JPL Innovation'))
         for control in (self.language_control, self.theme_control):
@@ -903,6 +910,28 @@ class Sidebar(QWidget):
         self.move_indicator(False)
         for row in self.rows:
             row.update()
+
+    def set_tight(self, tight):
+        """A short window: drop the decorative credit and shrink rows so the language and theme switches stay reachable."""
+        if self.tight == tight:
+            return
+        self.tight = tight
+        self.layout().setSpacing(4 if tight else 8)
+        for row in self.rows:
+            row.setFixedHeight(36 if tight else 44)
+        self.credit_logo.setVisible(not tight)
+        self.credit.setVisible(not tight and not self.collapsed)
+        for control in (self.language_control, self.theme_control):
+            if control is not None:
+                control.set_tight(tight)
+        self.layout().invalidate()
+        self.move_indicator(False)
+
+    def fit_height(self, height):
+        """Use the roomy layout whenever it fits, the tight one only when the window is too short for it."""
+        self.set_tight(False)
+        if self.layout().minimumSize().height() > height:
+            self.set_tight(True)
 
 
 class PageStack(QWidget):

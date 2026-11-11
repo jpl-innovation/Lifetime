@@ -916,12 +916,19 @@ def probe_wifi():
     return windows_wifi()
 
 
+def unique_names(joined):
+    """A virtual machine with several identical processors lists the same name once per processor; show it once."""
+    return ', '.join(dict.fromkeys(part.strip() for part in joined.split(', ') if part.strip()))
+
+
 @safe
 def probe_identity():
     if sys.platform == 'win32':
         data = parse_json(powershell("$o=Get-CimInstance Win32_OperatingSystem; "
             "$c=Get-CimInstance Win32_Processor; "
             "@{cpu=($c.Name -join ', ');boot=([DateTimeOffset]$o.LastBootUpTime).ToUnixTimeSeconds()}|ConvertTo-Json -Compress"))
+        if isinstance(data, dict) and isinstance(data.get('cpu'), str):
+            data['cpu'] = unique_names(data['cpu'])
         return data
     text = Path('/proc/cpuinfo').read_text()
     match = re.search(r'(?:model name|Hardware|Processor)\s*:\s*(.+)', text)

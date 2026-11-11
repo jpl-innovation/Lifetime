@@ -25,6 +25,17 @@ if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$uri) -or $uri.Sch
     throw 'Address must be an explicit HTTPS origin whose port matches Port, for example https://server.example:8443.'
 }
 if ($AdminPort -eq $Port) { throw 'Public and loopback administration ports must differ.' }
+if ($Mode -ne 'PackagedTask') {
+    # Resolve Python before anything is copied, so a missing or per-user Python leaves the machine untouched.
+    # Get-Command can return several matches (a real Python plus the Microsoft Store stub in WindowsApps);
+    # the stub is not a Python, and an array would crash GetFullPath with an unreadable .NET message.
+    $found = @(Get-Command $Python -CommandType Application -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notlike '*\Microsoft\WindowsApps\*' })
+    if (-not $found) { throw "Python was not found ('$Python'). Install Python 3.11 or newer for all users, or pass its full path with -Python." }
+    $Python = $found[0].Source
+    $userRoot = [IO.Path]::GetFullPath((Join-Path $env:SystemDrive 'Users')).TrimEnd('\') + '\'
+    if ([IO.Path]::GetFullPath($Python).StartsWith($userRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "SYSTEM needs a machine-wide Python installation outside user profiles, and '$Python' is inside one. Install Python for all users (for example: winget install Python.Python.3.12 --scope machine) or pass its full path with -Python." }
+}
 if (Get-Service -Name LifetimeServer -ErrorAction SilentlyContinue) { throw 'Stop and uninstall the existing LifetimeServer registration before upgrading; data is preserved.' }
 if (Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -ErrorAction SilentlyContinue) { throw 'Uninstall the existing Lifetime Server task registration before upgrading; data is preserved.' }
 
@@ -52,7 +63,12 @@ foreach ($path in @($InstallDirectory, $DataDirectory)) {
     }
 }
 if (Test-Path -LiteralPath $InstallDirectory -PathType Container) {
-    if ((Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1) -and -not (Test-Path -LiteralPath (Join-Path $InstallDirectory 'server-install.json') -PathType Leaf)) { throw 'The existing nonempty install directory is not a registered Lifetime Server installation.' }
+    # server-install.json is written last, so an install that stopped part way (no network for pip, a failed
+    # service registration) has only the copied program files. Those mark the directory as ours as well,
+    # otherwise the administrator could never simply run the installer again.
+    if ((Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1) -and
+        -not (Test-Path -LiteralPath (Join-Path $InstallDirectory 'server-install.json') -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $InstallDirectory 'lifetime_server.py') -PathType Leaf)) { throw 'The existing nonempty install directory is not a registered Lifetime Server installation.' }
 }
 if (Test-Path -LiteralPath $DataDirectory -PathType Container) {
     if ((Get-ChildItem -LiteralPath $DataDirectory -Force | Select-Object -First 1) -and
@@ -93,8 +109,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\SERVER_OPERATIONS.md') -Destination (Join-Path $InstallDirectory 'docs') -Force
 
 if ($Mode -ne 'PackagedTask') {
-    $command = Get-Command $Python -CommandType Application -ErrorAction Stop
-    $Python = $command.Source
+    # $Python was resolved and checked above, before any file was copied; this check stays as a second guard.
     $userRoot = [IO.Path]::GetFullPath((Join-Path $env:SystemDrive 'Users')).TrimEnd('\') + '\'
     if ([IO.Path]::GetFullPath($Python).StartsWith($userRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'SYSTEM needs a machine-wide Python installation outside user profiles. Pass its full path with -Python.' }
     $environmentDir = Join-Path $InstallDirectory '.venv'
@@ -140,9 +155,34 @@ if ($Mode -eq 'SourceService') {
 # The configuration file contains no credentials and inherits the private DACL.
 $configuration = @{ Mode = $Mode; Directory = $DataDirectory; Address = $Address; Host = $HostAddress; Port = $Port; AdminPort = $AdminPort }
 $configuration | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDirectory 'server-install.json') -Encoding UTF8
-# One-code connection fallback is limited to TCP 8443 on the local subnet.
+# The dashboard cannot start without the data folder and the loopback port, so give the administrator a Start menu
+# shortcut that carries them. The administrator token is readable only by Administrators and SYSTEM, so the shortcut
+# asks to run as administrator (the "Run as administrator" bit of a .lnk file is byte 0x15, flag 0x20).
+$dashboardTarget = $null; $dashboardArguments = ''
+if ($Mode -eq 'PackagedTask') {
+    if (Test-Path -LiteralPath (Join-Path $InstallDirectory 'LifetimeServerDashboard.exe') -PathType Leaf) { $dashboardTarget = Join-Path $InstallDirectory 'LifetimeServerDashboard.exe' }
+} else {
+    $dashboardTarget = Join-Path $InstallDirectory '.venv\Scripts\pythonw.exe'
+    $dashboardArguments = '"' + (Join-Path $InstallDirectory 'lifetime_server_gui.py') + '" '
+}
+if ($dashboardTarget) {
+    $dashboardArguments += '--directory "' + $DataDirectory + '" --admin-port ' + $AdminPort
+    $startMenu = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+    $shortcutPath = Join-Path $startMenu 'Lifetime Server.lnk'
+    $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $dashboardTarget
+    $shortcut.Arguments = $dashboardArguments
+    $shortcut.WorkingDirectory = $InstallDirectory
+    $shortcut.IconLocation = (Join-Path $InstallDirectory 'assets\lifetime.ico')
+    $shortcut.Description = 'Lifetime Server dashboard'
+    $shortcut.Save()
+    $bytes = [IO.File]::ReadAllBytes($shortcutPath)
+    $bytes[0x15] = $bytes[0x15] -bor 0x20
+    [IO.File]::WriteAllBytes($shortcutPath, $bytes)
+}
+# One-code connection fallback is limited to the HTTPS port on the local subnet.
 if (-not (Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -Name 'LifetimeServer-Connect' -DisplayName 'Lifetime Server local connection' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8443 -RemoteAddress LocalSubnet -Profile Domain, Private | Out-Null
+    New-NetFirewallRule -Name 'LifetimeServer-Connect' -DisplayName 'Lifetime Server local connection' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress LocalSubnet -Profile Domain, Private | Out-Null
 }
 if ($OpenFirewall -and -not (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -Name 'LifetimeServer-HTTPS' -DisplayName 'Lifetime Server HTTPS' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress $FirewallRemoteAddress -Profile Domain, Private | Out-Null
@@ -151,4 +191,4 @@ if ($Start) {
     if ($Mode -eq 'SourceService') { Start-Service -Name LifetimeServer } else { Start-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server }
 }
 Write-Host "Installed $Mode. Data: $DataDirectory. Dashboard loopback port: $AdminPort."
-Write-Host 'TCP 8443 is allowed from LocalSubnet on Domain and Private networks. Use -Start or start the registered service/task explicitly.'
+Write-Host "TCP $Port is allowed from LocalSubnet on Domain and Private networks only (not on Public networks). Use -Start or start the registered service/task explicitly."

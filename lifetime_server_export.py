@@ -52,6 +52,18 @@ class ServerExportDialog(ExportDialog):
             return device_report(devices[0], **options)
         return fleet_report(devices, **options)
 
+    # When a computer last reported changes with every sync, so a connected computer would make every save
+    # "different from the review" and the file could never be written. The saved report still carries the
+    # newest times; only a change to the content the administrator reviewed asks for a new review.
+    VOLATILE_ROWS = ('Client observation time', 'Server receipt time', 'System reading time')
+
+    @staticmethod
+    def report_content(report):
+        result = ExportDialog.report_content(report)
+        result['extra_rows'] = [row for row in result.get('extra_rows', ())
+                                if row[1] not in ServerExportDialog.VOLATILE_ROWS]
+        return result
+
     def invalidate_preview(self, *unused):
         self._generation += 1
         super().invalidate_preview(*unused)

@@ -4,9 +4,9 @@ Lifetime Server is a separate, administrator-operated edition for collecting exp
 
 ## Scope and deployment status
 
-The server consists of a reporting runtime and a native Qt dashboard. Its HTTPS endpoint uses a pinned certificate bundle; its separate administration API listens on loopback. Administrators approve pending enrollment in the dashboard and create expiring enrollment bundles. Devices make no company requests until a user explicitly pairs them and enables reporting. Optional history and resource fields are opt-in. The product has no remote-control or remote-command feature.
+The server consists of a reporting runtime and a native Qt dashboard. Its HTTPS endpoint uses a pinned certificate bundle; its separate administration API listens on loopback. Administrators approve pending enrollment in the dashboard and create expiring enrollment bundles. Devices make no company requests until a user explicitly pairs them and enables reporting. Optional history and resource fields are opt-in. Remote sleep, restart and shutdown exist but stay off on every computer until its owner turns on remote power control (see [server-specs-control.md](server-specs-control.md)); there is no other remote administration.
 
-Install only on a dedicated Windows machine on a trusted, restricted LAN. Use a dedicated local install directory and data directory. The installer applies protected ACLs for Administrators and SYSTEM and refuses linked paths. Do not expose the loopback administration port or publish the HTTPS port to the public internet. Firewall access is not created unless explicitly requested; if needed, restrict remote addresses to the intended LAN.
+Install only on a dedicated Windows machine on a trusted, restricted LAN. Use a dedicated local install directory and data directory. The installer applies protected ACLs for Administrators and SYSTEM and refuses linked paths. Do not expose the loopback administration port or publish the HTTPS port to the public internet. The installer always adds one inbound rule, `LifetimeServer-Connect`, for the HTTPS port from `LocalSubnet` on Domain and Private networks only; computers on a Public network cannot reach the server until the network is reclassified or you add a rule on purpose. `-OpenFirewall` adds a second rule with the remote addresses you choose. If needed, restrict remote addresses to the intended LAN.
 
 Development verification has been performed on Windows 11 with Python 3.12, headless Qt, and local simulated clients using real HTTPS/TLS and SQLite. Windows Server service-control-manager behavior, production ACL behavior, firewall behavior, and reboot/startup behavior have not been tested. No Windows Server version is claimed as tested. Treat this package as requiring a supervised pilot and validate it in the intended environment before relying on it operationally.
 
@@ -43,7 +43,7 @@ To add an inbound firewall rule deliberately, specify the HTTPS port and an appr
 .\install_server_windows.ps1 -Address https://lifetime-host.example:8443 -Mode SourceTask -OpenFirewall -FirewallRemoteAddress LocalSubnet
 ```
 
-The installer creates a dedicated data directory, default `%ProgramData%\Lifetime\Server`, and protected server files. TLS certificate/key and the administrator token are created at first runtime start. Preserve these files and restrict backups. Launch the native dashboard from the installed package on the server machine; it connects to the loopback administration API. Keep that port loopback-only.
+The installer creates a dedicated data directory, default `%ProgramData%\Lifetime\Server`, and protected server files. TLS certificate/key and the administrator token are created at first runtime start. Preserve these files and restrict backups. Open **Lifetime Server** from the Start menu on the server machine (the installer adds the shortcut with the data directory and loopback port already filled in, and it asks to run as administrator because the administrator token is protected); the dashboard connects to the loopback administration API. To start it by hand, run `LifetimeServerDashboard.exe --directory <data directory> --admin-port <port>` elevated. Keep that port loopback-only.
 
 For a manual source runtime or dashboard, see the root README commands. The runtime CLI is `lifetime_server.py`; `python lifetime_server.py --help` lists its commands. Service configuration is stored under `HKLM\SYSTEM\CurrentControlSet\Services\LifetimeServer\Parameters`; task mode stores its command in `\Lifetime\Server`. The installer records non-secret selections in `server-install.json`.
 
@@ -71,7 +71,7 @@ For rollback, stop and unregister the current version, restore the previous pack
 
 ```powershell
 .\uninstall_server_windows.ps1
-# Optional: remove only the explicitly named installer-created firewall rule.
+# Optional: also remove the installer-created inbound rules (LifetimeServer-Connect and, if you added it, LifetimeServer-HTTPS).
 .\uninstall_server_windows.ps1 -RemoveFirewallRule
 ```
 
