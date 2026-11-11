@@ -147,7 +147,7 @@ VI = {
     'Starting hours': 'Số giờ ban đầu', 'Set baseline': 'Lưu số giờ ban đầu',
     'Add earlier usage': 'Thêm thời gian đã dùng trước đó',
     'Select all': 'Chọn tất cả',
-    'Auto': 'Tự động', 'Light': 'Sáng', 'Dark': 'Tối', 'Theme': 'Giao diện',
+    'Auto': 'Tự động', 'Light': 'Sáng', 'Dark': 'Tối', 'Theme': 'Giao diện', 'Style': 'Kiểu giao diện', 'Glass': 'Kính', 'Classic': 'Cổ điển',
     'history.banner': 'Lifetime hiện chỉ tính thời gian từ lần khởi động gần nhất. Thêm thời gian đã dùng trước đó để tổng thể hiện đúng máy đã được dùng bao lâu. Việc này đọc nhật ký của chính máy; không có dữ liệu nào rời khỏi máy.',
     'Start tracker': 'Bắt đầu theo dõi', 'Tracking active': 'Đang theo dõi', 'Tracker offline': 'Đã dừng theo dõi',
     'Ledger unavailable': 'Không đọc được dữ liệu',
@@ -245,6 +245,7 @@ VI = {
     'No, count from now on': 'Không, chỉ đếm từ bây giờ', 'No, I will start it myself': 'Không, tôi sẽ tự bắt đầu',
     'Ready to start': 'Sẵn sàng bắt đầu', 'You can change these choices at any time in Settings.': 'Bạn có thể thay đổi các lựa chọn này bất cứ lúc nào trong Cài đặt.',
     'Only the readings you choose will be collected.': 'Chỉ thu thập những dữ liệu bạn đã chọn.',
+    'To report to a Lifetime Server on your network, open Connect after setup.': 'Để báo cáo cho Lifetime Server trong mạng của bạn, hãy mở mục Kết nối sau khi cài đặt.',
     'Delete collected history': 'Xóa lịch sử đã thu thập', 'Back': 'Quay lại', 'Next': 'Tiếp tục',
     'Save settings': 'Lưu cài đặt', 'Start': 'Bắt đầu', 'Tracking\n': 'Nội dung theo dõi\n',
     '\n\nEarlier usage: ': '\n\nThời gian đã dùng trước đó: ', 'Add from the computer\'s own log': 'Thêm từ nhật ký của máy', 'Do not add': 'Không thêm',
@@ -276,7 +277,8 @@ VI = {
     'verify.compared': 'So sánh với {log} · {events:,.1f} giờ so với {awake:,.1f} giờ (chênh lệch {difference:.1f} giờ) · Cần kiểm tra chênh lệch',
     'verify.ledger_error': '{message} · Không thể cập nhật dữ liệu',
     'rebuild.busy': 'Đang thêm thời gian đã dùng trước đó từ {log}…', 'rebuild.done': 'Đã thêm thời gian đã dùng trước đó từ {log}.',
-    'rebuild.error': 'Không thể thêm thời gian đã dùng trước đó. {error}', 'ledger.error': 'Không đọc được dữ liệu: {error}',
+    'rebuild.error': 'Không thể thêm thời gian đã dùng trước đó. {error}',
+    'rebuild.clock': 'Không thể thêm thời gian đã dùng trước đó: nhật ký sự kiện của Windows có mốc thời gian không khớp nhau (có thể đồng hồ đã bị chỉnh), nên không thể tính chính xác. Lifetime sẽ tính từ bây giờ.','ledger.error': 'Không đọc được dữ liệu: {error}',
     'backup.saved': 'Bản sao lưu trên máy:\n{path}',
     'battery.capacity': 'Dung lượng pin {index}', 'battery.power': 'Công suất pin {index}',
     'disk': 'Ổ đĩa {path}', 'gpu.field': '{prefix}{field}',
@@ -308,7 +310,8 @@ EN.update({
     'verify.compared': 'Compared with {log} · {events:,.1f} h vs {awake:,.1f} h (difference {difference:.1f} h) · Review the difference',
     'verify.ledger_error': '{message} · Ledger could not be refreshed',
     'rebuild.busy': 'Adding your earlier usage from the {log}…', 'rebuild.done': 'Earlier usage added from the {log}.',
-    'rebuild.error': 'Could not add earlier usage. {error}', 'ledger.error': 'Could not read ledger: {error}',
+    'rebuild.error': 'Could not add earlier usage. {error}',
+    'rebuild.clock': "Could not add earlier usage: the Windows event log has times that do not line up (the clock was probably changed), so they cannot be counted reliably. Lifetime counts from now on.",'ledger.error': 'Could not read ledger: {error}',
     'backup.saved': 'Local backup saved in:\n{path}', 'battery.capacity': 'Battery {index} capacity',
     'battery.power': 'Battery {index} power', 'disk': 'Disk {path}', 'gpu.field': '{prefix}{field}',
     'coverage.partial': '{days} days of dated intervals; partial coverage',
@@ -898,6 +901,16 @@ for _key, _text in {
     VI[_key] = _text
 
 SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
+    'Awake time per day': 'Thời gian thức mỗi ngày', '14 days': '14 ngày', '30 days': '30 ngày',
+    'Disk free': 'Dung lượng trống',
+    'History is off on this computer': 'Máy tính này đang tắt lịch sử',
+    'System readings are off on this computer': 'Máy tính này đang tắt thông tin hệ thống',
+    'Health readings are off on this computer': 'Máy tính này đang tắt thông tin sức khỏe',
+    'No activity history reported yet': 'Chưa nhận được lịch sử hoạt động',
+    'No health details reported yet': 'Chưa nhận được chi tiết sức khỏe',
+    'Boots {boots} · current session {current} · longest session {longest}': 'Khởi động {boots} lần · phiên hiện tại {current} · phiên dài nhất {longest}',
+    'No awake time recorded yet': 'Chưa ghi nhận thời gian thức',
+    'Average {average} a day · longest day {longest} on {day}': 'Trung bình {average} mỗi ngày · ngày dài nhất {longest} vào {day}',
     'Live': 'Trực tiếp', '24 hours': '24 giờ', 'Performance range': 'Khoảng hiệu suất',
     'Live: {seconds}s ago': 'Trực tiếp: {seconds} giây trước',
     'Last seen: {seconds}s ago': 'Kết nối cuối: {seconds} giây trước',
@@ -1048,6 +1061,10 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
                                                                                                               'ký '
                                                                                                               'lại.',
  'Continue?': 'Tiếp tục?',
+ 'Continue': 'Tiếp tục',
+ 'Found {server}': 'Đã tìm thấy {server}',
+ 'Not connected right now': 'Hiện chưa kết nối',
+ 'The server removed this computer. Ask for a new code on the server to connect again.': 'Máy chủ đã gỡ máy tính này. Hãy lấy mã mới trên máy chủ để kết nối lại.',
  'Delete older records permanently? Latest totals remain, with their original timestamps.': 'Xóa '
                                                                                             'vĩnh '
                                                                                             'viễn '
@@ -1439,6 +1456,9 @@ CONNECT_VI = {
     'On this computer': 'Trên máy này',
     'Type that code below.': 'Nhập mã đó vào ô bên dưới.',
     'On the server': 'Trên máy chủ',
+    'Then, on this computer': 'Sau đó, trên máy này',
+    'Type the code below.': 'Nhập mã vào ô bên dưới.',
+    'First, on the server': 'Trước tiên, trên máy chủ',
     'Press Add device to get a code.': 'Nhấn Thêm thiết bị để lấy mã.',
     'Next you choose what to share. You can change it or disconnect any time.': 'Tiếp theo, bạn chọn nội dung chia sẻ. Bạn có thể đổi hoặc ngắt kết nối bất cứ lúc nào.',
     'Went offline': 'Đã ngoại tuyến',
@@ -1478,6 +1498,8 @@ CONNECT_VI = {
     'On the computer, open Lifetime, choose Connect, and enter this code.': 'Trên máy tính, mở Lifetime, chọn Kết nối và nhập mã này.',
     'Copy': 'Sao chép',
     'Valid until {time}': 'Có hiệu lực đến {time}',
+    'Valid until {date}, {time}': 'Có hiệu lực đến {date}, {time}',
+    'Select a computer to see its details.': 'Chọn một máy tính để xem chi tiết.',
     'Other network?': 'Mạng khác?',
     '{name} wants to connect': '{name} muốn kết nối',
     '{name} connected': '{name} đã kết nối',
@@ -1505,3 +1527,82 @@ for _key, _text in _CONNECT_PLAIN_VI.items():
 EN['Connection requests'] = 'Connection requests'
 VI['Connection requests'] = 'Yêu cầu kết nối'
 SERVER_DASHBOARD_VI['Connection requests'] = VI['Connection requests']
+
+_SWITCH_VI = {
+    'Choose what Lifetime tracks and how it looks. Changes apply and save straight away.':
+        'Chọn nội dung Lifetime theo dõi và giao diện. Thay đổi được áp dụng và lưu ngay.',
+}
+VI.update(_SWITCH_VI)
+EN.update({key: key for key in _SWITCH_VI})
+
+_SERVER_SWITCH_VI = {
+    'Language: {current}. Click to switch to {next}.': 'Ngôn ngữ: {current}. Bấm để chuyển sang {next}.',
+    'Theme: {current}. Click to switch to {next}.': 'Giao diện: {current}. Bấm để chuyển sang {next}.',
+}
+SERVER_DASHBOARD_VI.update(_SERVER_SWITCH_VI)
+
+_HARDWARE_VI = {
+    'MAC address': 'Địa chỉ MAC',
+    'Processor & cooling': 'Bộ xử lý và làm mát',
+    'Graphics & displays': 'Đồ họa và màn hình',
+    'Motherboard & BIOS': 'Bo mạch chủ và BIOS',
+    'Operating system': 'Hệ điều hành',
+    'Current clock': 'Xung nhịp hiện tại',
+    'Maximum clock': 'Xung nhịp tối đa',
+    'Reported fans': 'Số quạt được báo cáo',
+    'Fan speed': 'Tốc độ quạt',
+    'Fan {number}': 'Quạt {number}',
+    'Slots used': 'Khe đã dùng',
+    'Total slots': 'Tổng số khe',
+    'Memory module {number}': 'Thanh RAM {number}',
+    'Memory type': 'Loại RAM',
+    'Memory speed': 'Tốc độ RAM',
+    'Capacity': 'Dung lượng',
+    'Drive {number}': 'Ổ đĩa {number}',
+    'Drive type': 'Loại ổ đĩa',
+    'Disk health': 'Tình trạng ổ đĩa',
+    'Connection type': 'Loại kết nối',
+    'Network card {number}': 'Card mạng {number}',
+    'Graphics adapter {number}': 'Bộ xử lý đồ họa {number}',
+    'Video memory': 'Bộ nhớ đồ họa',
+    'Display {number}': 'Màn hình {number}',
+    'Resolution': 'Độ phân giải',
+    'Refresh rate': 'Tần số quét',
+    'BIOS vendor': 'Nhà cung cấp BIOS',
+    'BIOS version': 'Phiên bản BIOS',
+    'BIOS date': 'Ngày BIOS',
+    'OS name': 'Tên hệ điều hành',
+    'OS build': 'Bản dựng hệ điều hành',
+    'Architecture': 'Kiến trúc',
+    'Installed': 'Ngày cài đặt',
+    'Last boot': 'Khởi động gần nhất',
+    'Wi-Fi standard': 'Chuẩn Wi-Fi',
+    'Wi-Fi band': 'Băng tần Wi-Fi',
+    'Unavailable readings: {reasons}': 'Thông số chưa có: {reasons}',
+    'Windows did not expose an identified CPU temperature sensor': 'Windows không cung cấp cảm biến nhiệt độ CPU được xác định rõ',
+    'Access denied by Windows': 'Windows từ chối quyền truy cập',
+    'Windows did not expose network driver information': 'Windows không cung cấp thông tin trình điều khiển mạng',
+    'Link speed': 'Tốc độ liên kết',
+    'Driver': 'Trình điều khiển',
+    'Hardware details': 'Chi tiết phần cứng',
+    'Hardware inventory refreshes about every six hours': 'Thông tin phần cứng được cập nhật khoảng sáu giờ một lần',
+    'The operating system did not expose this reading': 'Hệ điều hành không cung cấp thông số này',
+    "Not reported by this computer's firmware": 'Firmware của máy tính này không cung cấp thông tin',
+    'CPU temperature': 'Nhiệt độ CPU',
+    'CPU current / maximum clock': 'Xung nhịp CPU hiện tại / tối đa',
+    'Cooling fans': 'Quạt làm mát',
+    'Network cards': 'Card mạng',
+    'RAM modules': 'Các thanh RAM',
+    'RAM slots used / total': 'Khe RAM đã dùng / tổng số',
+    'Physical disks': 'Ổ đĩa vật lý',
+    'Motherboard': 'Bo mạch chủ',
+    'BIOS vendor / version / date': 'Nhà cung cấp / phiên bản / ngày BIOS',
+    'GPU driver / VRAM': 'Trình điều khiển GPU / VRAM',
+    'Displays': 'Màn hình',
+    'OS build / architecture / installed': 'Bản dựng / kiến trúc / ngày cài hệ điều hành',
+    'Uptime / last boot': 'Thời gian chạy / lần khởi động gần nhất',
+}
+for _key, _text in _HARDWARE_VI.items():
+    EN[_key] = _key
+    VI[_key] = _text
+    SERVER_DASHBOARD_VI[_key] = _text

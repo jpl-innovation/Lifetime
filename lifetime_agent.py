@@ -113,7 +113,29 @@ def _history(ledger):
                   first_seen_source=ledger.get('first_seen_source', 'unknown'),
                   recording_started=ledger.get('recording_started'),
                   daily_estimated=bool(ledger.get('daily_allocation', {}).get('estimated', False)))
+    # Activity detail for the server: the same ledger fields the desktop charts read, bounded.
+    sessions = [dict(start=s['start'], seconds=s['seconds'], **({'imported': True} if s.get('imported') else {}))
+                for s in ledger.get('sessions', [])[-protocol.MAX_SESSIONS:] if isinstance(s, dict) and 'start' in s and 'seconds' in s]
+    extra = dict(hourly=list(ledger.get('hourly', [])), sessions=sessions,
+                 dated_hourly=dict(sorted(ledger.get('dated_hourly', {}).items())[-120:]),
+                 boots=ledger.get('boots'), current_session_seconds=ledger.get('current_session_seconds'),
+                 longest_session_seconds=ledger.get('longest_session_seconds'))
+    for key, value in extra.items():
+        if value is None:
+            continue
+        try:
+            protocol.validate_history_extra({key: value})
+            result[key] = value
+        except protocol.ProtocolError:
+            pass    # one malformed local field cannot hide the remaining charts
     return result
+
+
+def os_names(system, release):
+    """Python reports Windows Server 2025 as system 'Windows', release '2025Server'. Say 'Windows Server 2025'."""
+    import re
+    match = re.fullmatch(r'(\d{4})Server(R2)?', release or '')
+    return ('Windows Server', match[1] + (' R2' if match[2] else '')) if system == 'Windows' and match else (system, release)
 
 
 def _resources(state=None):
@@ -154,11 +176,14 @@ def _resources(state=None):
                      disks=[dict(name=text(d['path']), total_bytes=d.get('total'),
                                  free_bytes=d['total']-d['used'] if d.get('total') is not None and d.get('used') is not None else None)
                             for d in sorted(disks or [], key=lambda d: d.get('path') != system_path)[:8]],
-                     os_name=text(signals.safe(platform.system)()), os_version=text(signals.safe(platform.release)()),
+                     os_name=text(os_names(signals.safe(platform.system)(), signals.safe(platform.release)())[0]),
+                     os_version=text(os_names(signals.safe(platform.system)(), signals.safe(platform.release)())[1]),
                      battery_design_wh=battery.get('design_wh'),
                      mac_addresses=[m.upper().replace('-', ':') for m in hardware.get('mac_addresses', []) or [] if m][:8],
                      hostname=text(signals.safe(socket.gethostname)()))
         state.update(specs=specs, specs_collected_at=now)
+    if state.get('_inventory') is not None:
+        state['specs']['hardware'] = state['_inventory']
     wear = battery.get('wear')
     if capacity.get('design') is not None and capacity.get('unit') == 'Wh':
         state['specs']['battery_design_wh'] = capacity['design']
@@ -385,6 +410,15 @@ class MachineAgent:
             state.pop('battery_capacity', None)
             state['ledger'].pop('health_capacity', None)
         if not policy['resources']:
+            self._inventory_value, self._inventory_due = None, 0
+            if getattr(self, '_inventory_job', None) is not None:
+                self._inventory_job.cancel()
+                self._inventory_job = None
+            self._health_value = None
+            self._health_due = 0
+            if getattr(self, '_health_job', None) is not None:
+                self._health_job.cancel()
+                self._health_job = None
             state['readings'] = None
             for key in ('specs', 'specs_collected_at', 'cpu_counter', 'network_counters'):
                 state.pop(key, None)
@@ -483,7 +517,13 @@ class MachineAgent:
                 snapshot['battery_capacity'] = packs[0] if len(packs) == 1 else {}
         resource_data = None
         if snapshot['policy']['resources']:
+            if resources_sampler is None:
+                snapshot['_inventory'] = self._remote_inventory()
             resource_data = dict(resources_sampler() if resources_sampler else _resources(snapshot), observed_at=timestamp)
+        if resource_data is not None and resources_sampler is None:
+            remote_health = self._remote_health()
+            if remote_health is not None:
+                resource_data['health'] = remote_health
         with self._transaction() as state:
             ledger = state['ledger']
             before = ledger['total_seconds']
@@ -514,6 +554,53 @@ class MachineAgent:
             state['sampled'] = True
         self.write_status()
         return record
+
+    def _remote_health(self):
+        """Poll one background read; OS logs never delay the accounting sampler."""
+        from concurrent.futures import ThreadPoolExecutor
+        if not hasattr(self, '_health_reader'):
+            self._health_reader = ThreadPoolExecutor(max_workers=1, thread_name_prefix='health-report')
+            self._health_job, self._health_due, self._health_value = None, 0, None
+        if self._health_job is not None and self._health_job.done():
+            try:
+                value = self._health_job.result()
+                protocol.validate_health(value)
+                self._health_value = value
+            except Exception:
+                pass
+            self._health_job = None
+        if self._health_job is None and time.monotonic() >= self._health_due:
+            def read():
+                import lifetime_health as health
+                data = health.collect({'completed': True, 'health': True})
+                value = health.summary(data)
+                if value is not None:
+                    value['detail'] = health.detail(data)
+                return value
+            self._health_job = self._health_reader.submit(read)
+            self._health_due = time.monotonic()+21600
+        return copy.deepcopy(self._health_value)
+
+    def _remote_inventory(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from lifetime_system import validate
+        if not hasattr(self, '_inventory_reader'):
+            self._inventory_reader = ThreadPoolExecutor(max_workers=1, thread_name_prefix='hardware-report')
+            self._inventory_job, self._inventory_due, self._inventory_value = None, 0, None
+        if self._inventory_job is not None and self._inventory_job.done():
+            try:
+                value = self._inventory_job.result()
+                if isinstance(value, dict):
+                    validate(value)
+                    self._inventory_value = value
+            except Exception:
+                pass
+            self._inventory_job = None
+        if self._inventory_job is None and time.monotonic() >= self._inventory_due:
+            import lifetime_signals as signals
+            self._inventory_job = self._inventory_reader.submit(signals.probe_inventory)
+            self._inventory_due = time.monotonic()+21600
+        return copy.deepcopy(self._inventory_value)
 
     def set_health_consent(self, enabled):
         """Update just Health without overwriting other reporting choices."""
@@ -668,6 +755,10 @@ class MachineAgent:
                 sync_thread.join()
 
     def close(self):
+        if hasattr(self, '_inventory_reader'):
+            self._inventory_reader.shutdown(wait=False, cancel_futures=True)
+        if hasattr(self, '_health_reader'):
+            self._health_reader.shutdown(wait=False, cancel_futures=True)
         with self._lock:
             self._db.close()
 
@@ -741,8 +832,15 @@ def main(argv=None):
             command = ([sys.executable] if getattr(sys, 'frozen', False) else
                        [sys.executable, str(Path(__file__).resolve())])
             options = dict(creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW) if sys.platform == 'win32' else dict(start_new_session=True)
+            environment = None
+            if getattr(sys, 'frozen', False):
+                # A one-file PyInstaller program started again from itself would share this copy's temporary
+                # folder, and this copy deletes it when it exits, leaving the new one without the files it loads
+                # later (every sync then fails and the computer shows "unreachable"). Make it extract its own.
+                environment = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT='1')
             subprocess.Popen(command + ['--directory', str(directory), '--run'],
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             env=environment, **options)
         if args.run:
             agent.run()
         return agent.status()

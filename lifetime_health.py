@@ -419,6 +419,43 @@ def capacity_sample(ledger, data, today=None):
     ledger['health_capacity'] = dict(sorted(history.items())[-400:])
 
 
+def detail(data, now=None):
+    """Bounded series for the server, in the shapes the Health page already renders."""
+    now = now or dt.datetime.now(UTC)
+    cutoff = (now-dt.timedelta(days=399)).date().isoformat()
+    result = {}
+    events = data.get('stability')
+    if events is not None:
+        result['stability'] = [dict(date=r['date'], kind=r['kind']) for r in events
+                               if stamp(r['date']).date().isoformat() >= cutoff][-400:]
+    battery_data = data.get('battery')
+    if battery_data is not None:
+        packs = [{k: p.get(k) for k in ('full', 'design', 'cycles', 'chemistry', 'unit', 'health') if p.get(k) is not None}
+                 for p in battery_data.get('packs', [])[:4]]
+        for pack in packs:
+            if pack.get('cycles') is not None:
+                pack['cycles'] = int(pack['cycles'])
+        result['battery'] = dict(packs=packs)
+        history = [dict(date=r['date'], full=r['full'], **({} if r.get('health') is None else dict(health=r['health'])))
+                   for r in battery_data.get('history', []) if r['date'] >= cutoff][-400:]
+        if history:
+            result['battery']['history'] = history
+        usage = battery_data.get('usage')
+        if usage:
+            result['battery']['usage'] = {d: dict(ac=min(v['ac'], 86400), battery=min(v['battery'], 86400))
+                                          for d, v in sorted(usage.items()) if d >= cutoff}
+            result['battery']['usage'] = dict(list(result['battery']['usage'].items())[-400:])
+    sleep = data.get('sleep')
+    if sleep is not None:
+        result['sleep'] = dict(daily={d: dict(cycles=v['cycles'], seconds=min(v['seconds'], 86400))
+                                      for d, v in sorted(sleep['daily'].items()) if d >= cutoff},
+                               nights=[dict(date=n['date'], seconds=min(n['seconds'], 86400))
+                                       for n in sleep['nights'] if n['date'] >= cutoff])
+        result['sleep']['daily'] = dict(list(result['sleep']['daily'].items())[-400:])
+        result['sleep']['nights'] = result['sleep']['nights'][-400:]
+    return result
+
+
 def summary(data, now=None):
     if data is None:
         return None

@@ -155,11 +155,77 @@ class ServerGuiTests(unittest.TestCase):
         self.addCleanup(self.cleanup_window)
         self.wait_idle()
 
+    def test_shared_hardware_panel_follows_resources(self):
+        row = device(0)
+        row['policy']['resources'] = True
+        row['specs'] = dict(hardware=dict(cpu={'temperature_c': 53}, fans=[]))
+        self.window._render_specs(row)
+        self.assertFalse(self.window.hardware_detail.isHidden())
+        texts = [value.text() for _, value in self.window.hardware_detail.fields]
+        self.assertIn('53', texts[0])
+        self.assertTrue(any('firmware' in value.accessibleDescription() for _, value in self.window.hardware_detail.fields))
+        row['policy']['resources'] = False
+        self.window._render_specs(row)
+        self.assertTrue(self.window.hardware_detail.isHidden())
+        self.assertNotIn('53', self.window.hardware_detail.fields[0][1].text())
+
+    def test_hardware_sections_remain_readable_and_keep_disclosure_state(self):
+        from PyQt6.QtWidgets import QToolButton, QFormLayout
+        from lifetime_i18n import set_language
+        from lifetime_system_gui import HardwarePanel
+        panel = HardwarePanel(remote=True)
+        self.addCleanup(panel.deleteLater)
+        panel.set_data(dict(adapters=[dict(name='Office Ethernet', model='Gigabit adapter', kind='Ethernet',
+                                          connected=True, speed_mbps=1000, driver='1.2')]))
+        panel.resize(390, 900)
+        panel.show()
+        self.addCleanup(panel.close)
+        self.app.processEvents()
+        self.assertTrue(all(form.rowWrapPolicy() == QFormLayout.RowWrapPolicy.WrapAllRows for form in panel.forms))
+        self.assertLessEqual(panel.minimumSizeHint().width(), 390)
+        headings = panel.findChildren(QToolButton, 'hardwareSectionTitle')
+        self.assertEqual(len(headings), 7)
+        network = next(button for button in headings if button.text() == 'Network cards')
+        network.click()
+        first = panel.fields[0][1]
+        panel.set_data(panel.data)
+        self.assertIs(panel.fields[0][1], first)
+        set_language('vi')
+        self.addCleanup(set_language, 'en')
+        self.app.processEvents()
+        headings = panel.findChildren(QToolButton, 'hardwareSectionTitle')
+        current = [button for button in headings if not button.parentWidget().isHidden()]
+        network = next(button for button in current if button.text() == 'Card mạng')
+        self.assertFalse(network.isChecked())
+        self.assertTrue(any(value.text() == '1000 Mbps' for _, value in panel.fields))
+        network.setFocus()
+        QTest.keyClick(network, Qt.Key.Key_Space)
+        self.assertTrue(network.isChecked())
+
+    def test_remote_pages_use_resources_and_history_consent(self):
+        row = device(0)
+        row['policy'] = dict(history=True, resources=True)
+        row['history'] = dict(daily={dt.date.today().isoformat(): 3600}, hourly=[0]*24, boots=2)
+        row['readings'] = dict(health=dict(detail=dict(stability=[], battery={'packs': []}, sleep={'daily': {}, 'nights': []})))
+        with patch.object(gui.HealthPage, 'refresh', side_effect=AssertionError('local probe')):
+            self.window._render_remote(row)
+        self.assertFalse(self.window.remote_activity.isHidden())
+        self.assertFalse(self.window.remote_health.isHidden())
+        row['policy'] = dict(history=False, resources=False)
+        self.window._render_remote(row)
+        self.assertTrue(self.window.remote_activity.isHidden())
+        self.assertTrue(self.window.remote_health.isHidden())
+        self.assertEqual(self.window.health_state.text(), self.window.t('System readings are off on this computer'))
+
     def cleanup_window(self):
         for event in self.api.block.values():
             event.set()
         self.window.close()
         self.wait(lambda: not self.window._jobs)
+        for label in self.window.findChildren(gui.RollLabel):
+            label._rolling = None  # cancel delayed entrances before releasing the test window
+        self.window.deleteLater()
+        self.app.sendPostedEvents(None, gui.QEvent.Type.DeferredDelete)
 
     def wait(self, predicate, timeout=3):
         deadline = time.monotonic() + timeout
@@ -342,6 +408,28 @@ class ServerGuiTests(unittest.TestCase):
         self.assertIn('PRIVATE-OS', detail)
         self.assertIn('Received at: ' + self.window._timestamp('2020-01-01T00:01:00Z'), detail)
 
+    def test_device_daily_chart_and_empty_states_follow_policy(self):
+        row = device(1)
+        self.load([row])
+        self.select(row['device_id'])
+        self.assertEqual(self.window.device_daily.message, 'History is off on this computer')
+        self.assertEqual(self.window.performance_plots['disk_free_percent'].message, 'System readings are off on this computer')
+        today = dt.date.today()
+        self.api.rows[0]['policy']['history'] = True
+        self.api.rows[0]['history'] = {'daily': {today.isoformat(): 7200, (today - dt.timedelta(days=3)).isoformat(): 36000,
+                                                 (today - dt.timedelta(days=40)).isoformat(): 3600}}
+        self.window.refresh()
+        self.wait_idle()
+        chart = self.window.device_daily
+        self.assertEqual(chart.message, '')
+        self.assertEqual(len(chart.values), 14)
+        self.assertEqual(chart.values[-1], 2.0)
+        self.assertEqual(chart.values[-4], 10.0)
+        self.assertIn('10.0', self.window.daily_summary.text())
+        self.window.daily_range.setCurrentIndex(1)
+        self.assertEqual(len(chart.values), 30)
+        self.assertEqual(sum(v is not None for v in chart.values), 2)      # the 40-day-old entry stays out
+
     def test_identity_editor_validation_and_selected_device_only(self):
         self.load([device(1), device(2)])
         chosen = self.api.rows[1]['device_id']
@@ -462,7 +550,7 @@ class ServerGuiTests(unittest.TestCase):
 
     def test_vietnamese_live_translation_native_keyboard_and_small_window(self):
         self.load([device(1)])
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.assertEqual(self.window.tabs.tabText(0), 'Tổng quan')
         self.assertEqual(self.window.tabs.tabText(1), 'Thiết bị')
         self.assertEqual(self.window.save_identity_button.text(), 'Lưu thông tin')
@@ -513,7 +601,7 @@ class ServerGuiTests(unittest.TestCase):
         field = self.window.identity_fields['display_name']
         field.setText('Unsaved')
         field.textEdited.emit('Unsaved')
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.wait_idle()
         self.assertEqual(field.text(), 'Unsaved')
         self.assertTrue(self.window.retention_boundary.text().startswith('Mốc lưu giữ'))
@@ -564,7 +652,7 @@ class ServerGuiTests(unittest.TestCase):
         self.assertNotRegex(self.window.detail_text.toPlainText(), r'\d{4}-\d{2}-\d{2}')
         self.window.copy_device_id.click()
         self.assertEqual(self.app.clipboard().text(), row['device_id'])
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.wait_idle()
         self.assertNotIn('2026-01-02', self.window.identity_fields['deployment_date'].text())
         self.window.save_identity_button.click()
@@ -582,7 +670,7 @@ class ServerGuiTests(unittest.TestCase):
         stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=12)).isoformat()
         self.assertIn(self.window._relative(stamp), ('12 s ago', '13 s ago'))
         self.assertEqual(self.window._relative('2020-01-02T12:00:00Z'), '2 Jan 2020')
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.assertEqual(self.window._relative('2020-01-02T12:00:00Z'), self.window._date('2020-01-02'))
 
     def test_administration_row_actions_expiry_and_busy_state(self):
@@ -611,7 +699,7 @@ class ServerGuiTests(unittest.TestCase):
         approve.click()
         self.wait_idle()
         self.assertEqual(self.arguments('approve'), [{'request_id': request_id}])
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.window._render_server_info(result)
         self.assertIn(gui.text('month.1', 'vi'), invitation_table.item(0, 1).text())
         self.assertNotRegex(invitation_table.item(0, 1).text(), r'\d{4}-\d{2}-\d{2}')
@@ -649,6 +737,18 @@ class ServerGuiTests(unittest.TestCase):
         self.assertEqual(self.window.table.rowCount(), 0)
         self.assertIsNone(self.window._detail)
 
+    def test_all_chip_also_clears_the_pending_filter_that_review_sets(self):
+        # Review (on the overview) narrows the list through the status box. Choosing "All" afterwards used to
+        # leave that box on "Pending approval", so the page listed nothing while four computers existed.
+        self.load([device(i) for i in range(4)])
+        self.window.review_pending()
+        self.wait_idle()
+        self.assertEqual(self.window.table.rowCount(), 0)
+        self.window.device_chips['all'].click()
+        self.wait_idle()
+        self.assertEqual(self.window.status_filter.currentData(), '')
+        self.assertEqual(self.window.table.rowCount(), 4)
+
     def test_visible_readings_are_bounded_cached_and_scrubbed_on_revocation(self):
         rows = [device(i) for i in range(200)]
         for row in rows:
@@ -662,6 +762,7 @@ class ServerGuiTests(unittest.TestCase):
         self.assertGreater(calls, 0)
         self.assertLess(calls, 10)
         box = self.window.table.cellWidget(0, 0)
+        self.wait(lambda: box.meters['CPU'][1].value() == 42 and box.meters['RAM'][1].value() == 50)   # the meters fill in once
         self.assertEqual(box.meters['CPU'][1].value(), 42)
         self.assertEqual(box.meters['RAM'][1].value(), 50)
         self.window.refresh()
@@ -691,6 +792,40 @@ class ServerGuiTests(unittest.TestCase):
         self.window.status_label.setText(self.window.t('Ready'))
         self.assertTrue(self.window.notice.isHidden())
 
+    def test_pages_slide_in_from_the_side_the_menu_pill_moved_towards(self):
+        pages = self.window.tabs
+        pages.setCurrentIndex(0)
+        QTest.qWait(400)
+        with patch('lifetime_server_devices.reduced_motion', return_value=False):
+            pages.setCurrentIndex(2)
+            QTest.qWait(30)
+            self.assertGreater(pages.widget(2).x(), pages.contentsRect().x())     # arriving from the right
+            QTest.qWait(500)
+            self.assertEqual(pages.widget(2).pos(), pages.contentsRect().topLeft())
+            pages.setCurrentIndex(1)
+            QTest.qWait(30)
+            self.assertLess(pages.widget(1).x(), pages.contentsRect().x())        # arriving from the left
+            QTest.qWait(500)
+        self.assertIsNone(pages.widget(1).graphicsEffect())
+        self.assertEqual(pages.widget(1).pos(), pages.contentsRect().topLeft())
+
+    def test_menu_pill_stretches_leading_edge_first_and_settles_exactly(self):
+        from PyQt6.QtCore import QRectF
+        bar = self.window.tabs.tabBar()
+        self.window.tabs.setCurrentIndex(0)
+        QTest.qWait(700)
+        with patch('lifetime_server_devices.reduced_motion', return_value=False):
+            self.window.tabs.setCurrentIndex(2)
+            QTest.qWait(90)
+            drawn, leading = bar.pill_rect(), QRectF(bar.indicator.geometry())
+            self.assertEqual(drawn.right(), leading.right())    # moving right: the right edge leads
+            self.assertLess(drawn.left(), leading.left())       # the left edge is still catching up
+            QTest.qWait(700)
+        self.assertEqual(bar.pill_rect().toRect(), bar.tabRect(2).adjusted(5, 5, -5, -5))
+        with patch.dict('os.environ', {'LIFETIME_REDUCE_MOTION': '1'}):
+            self.window.tabs.setCurrentIndex(0)
+            self.assertEqual(bar.pill_rect().toRect(), bar.tabRect(0).adjusted(5, 5, -5, -5))
+
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget
         self.assertIsInstance(self.window.tabs, QStackedWidget)
@@ -705,7 +840,7 @@ class ServerGuiTests(unittest.TestCase):
             intermediate = bar.indicator.geometry()
             self.window.tabs.setCurrentIndex(2)
             self.assertEqual(bar.animation.startValue(), intermediate)
-            QTest.qWait(300)
+            QTest.qWait(700)
             self.assertEqual(bar.indicator.geometry(), bar.tabRect(2).adjusted(5, 5, -5, -5))
         with patch.dict('os.environ', {'LIFETIME_REDUCE_MOTION': '1'}):
             self.window.tabs.setCurrentIndex(3)
@@ -834,6 +969,38 @@ class ServerGuiTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 0.2)
         gate.set()
         self.wait(lambda: not self.window._jobs)
+
+    def test_style_preference_defaults_to_glass_and_round_trips(self):
+        directory = Path(self.temporary.name) / 'prefs'
+        directory.mkdir()
+        self.assertEqual(gui.read_style_preference(directory), 'glass')
+        gui.write_theme_preference(directory, 'light')
+        gui.write_style_preference(directory, 'classic')
+        self.assertEqual(gui.read_style_preference(directory), 'classic')
+        self.assertEqual(gui.read_theme_preference(directory), 'light')
+        gui.write_style_preference(directory, 'neon')
+        self.assertEqual(gui.read_style_preference(directory), 'glass')
+        (directory / 'ui.json').write_text('{"style": "bogus"}', encoding='utf-8')
+        self.assertEqual(gui.read_style_preference(directory), 'glass')
+
+    def test_style_switch_changes_background_and_both_styles_paint_in_both_themes(self):
+        from lifetime_server_devices import active_style, set_style
+        from lifetime_theme import active_theme, set_theme
+        self.addCleanup(set_style, 'glass')
+        self.addCleanup(set_theme, active_theme())
+        glass_sheet = self.window.styleSheet()
+        self.assertIn('qlineargradient(x1:0, y1:0, x2:1', glass_sheet)
+        self.window.style_control.group.button(1).click()       # one live switch (retint_all is slow with many open widgets)
+        self.wait(lambda: active_style() == 'classic')
+        self.assertEqual(gui.read_style_preference(self.root), 'classic')
+        self.assertNotEqual(self.window.styleSheet(), glass_sheet)
+        self.assertNotIn('qlineargradient(x1:0, y1:0, x2:1', self.window.styleSheet())
+        for style in ('glass', 'classic'):
+            for theme in ('dark', 'light'):
+                set_style(style)           # no retint_all here: it restyles every widget earlier tests left behind
+                set_theme(theme)
+                self.window._apply_window_style()
+                self.assertFalse(self.window.grab().isNull())
 
 
 

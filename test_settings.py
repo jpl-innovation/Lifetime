@@ -29,6 +29,21 @@ class SettingsTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def test_style_defaults_to_classic_round_trips_and_ignores_unknown_values(self):
+        self.assertEqual(settings.defaults()['style'], 'classic')
+        self.assertEqual(settings.load_settings(self.root)['style'], 'classic')
+        self.assertEqual(settings.update_settings({'style': 'glass'}, self.root)['style'], 'glass')
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        settings.save_settings(dict(settings.load_settings(self.root), completed=True), self.root)   # a full save keeps it
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        settings.save_settings({'completed': True}, self.root)                   # and so does one that does not mention it
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        settings.update_settings({'theme': 'light'}, self.root)                  # other preferences leave it alone
+        self.assertEqual(settings.load_settings(self.root)['style'], 'glass')
+        for bad in ('neon', None, 3, ['glass']):
+            (self.root/'settings.json').write_text(json.dumps({'style': bad}))
+            self.assertEqual(settings.load_settings(self.root)['style'], 'classic')
+
     def test_defaults_missing_invalid_and_partial(self):
         self.assertEqual(settings.load_settings(self.root), settings.defaults())
         path = self.root/'settings.json'
@@ -136,7 +151,7 @@ class ConsentGuiTests(unittest.TestCase):
         for category, expected in (
             ('battery', {'power', 'battery'}), ('network', {'network', 'counters'}),
             ('wifi_name', {'wifi'}), ('graphics', {'gpu'}),
-            ('resources', {'cpu', 'ram', 'disks', 'identity'})):
+            ('resources', {'cpu', 'ram', 'disks', 'identity', 'inventory'})):
             self.assertEqual(settings.allowed_probes(dict(completed=True, **{category: True})), expected | {'clocks'})
 
     def test_revoked_inflight_readings_are_discarded(self):
@@ -177,6 +192,20 @@ class ConsentGuiTests(unittest.TestCase):
         card.update_values({'power': {'state': 'No battery'}}, gui.THEMES['dark'])
         self.assertEqual(list(card.cards[0].fields), ['Battery'])
         self.assertEqual(card.cards[0].fields['Battery'][0].text(), 'No battery')
+
+    def test_the_last_setup_step_mentions_connecting_to_a_server(self):
+        dialog = SetupDialog(gui.THEMES['dark'], dict(completed=False))
+        self.assertIn('open Connect', dialog.connect_hint.text())
+
+    def test_the_empty_system_page_offers_a_way_to_settings_like_health_does(self):
+        opened = []
+        page = dashboard.SystemDashboard(lambda: opened.append('settings'))
+        page.set_settings({})
+        self.assertFalse(page.open_settings_button.isHidden())
+        page.open_settings_button.click()
+        self.assertEqual(opened, ['settings'])
+        page.set_settings(dict(battery=True, network=True, wifi_name=True, graphics=True, resources=True))
+        self.assertTrue(page.open_settings_button.isHidden())
 
     def test_delete_cancel_does_not_touch_data(self):
         dialog = SetupDialog(gui.THEMES['dark'], dict(completed=True))

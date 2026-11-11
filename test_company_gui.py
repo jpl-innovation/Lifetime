@@ -81,6 +81,69 @@ class ConnectTests(unittest.TestCase):
             self.page.tasks.resolve('private-bundle')
         self.assertEqual(self.page.step, 3)
 
+    def test_the_tutorial_puts_the_server_step_first_in_both_languages(self):
+        from lifetime_i18n import TABLES
+        for language in ('en', 'vi'):
+            page = ConnectPage(directory=self.root.name, machine_root=Path(self.root.name)/'agent', language=language)
+            self.addCleanup(page.close)
+            self.addCleanup(page.timer.stop)
+            words = [label.text() for label in page.findChildren(type(page.code_error))]
+            first, then = TABLES[language]['First, on the server'], TABLES[language]['Then, on this computer']
+            self.assertIn(first, words)
+            self.assertIn(then, words)
+            self.assertNotIn(TABLES[language]['Type that code below.'], words)    # "that code" had nothing to point at
+
+    def test_a_computer_the_server_removed_is_told_so_and_the_dead_code_is_cleared_once(self):
+        self.page._operation = 'status'
+        self.page.completed(0, dict(enabled=True, phase='approved', status='connected', reported=True, server='https://s:8443'))
+        self.assertEqual(self.page.step, 5)
+        self.page.code.setText(self.code)                          # the old code, still sitting in the box
+        removed = dict(enabled=False, status='revoked')
+        self.page.completed(0, removed)
+        self.assertEqual(self.page.step, 1)
+        self.assertIn('removed this computer', self.page.code_error.text())
+        self.assertEqual(self.page.code.text(), '')
+        self.page.code.setText(self.code)                          # a new code is typed ...
+        self.page.completed(0, removed)                            # ... and a later poll must not wipe it
+        self.assertEqual(self.page.code.text(), self.code)
+        self.page.completed(0, dict(enabled=False, status='denied'))
+        self.assertIn('This code cannot be used', self.page.code_error.text())
+
+    def test_the_last_report_is_shown_as_local_time_not_a_raw_utc_stamp(self):
+        import datetime as dt
+        from lifetime_i18n import datetime_text
+        self.page._operation = 'status'
+        self.page.completed(0, dict(enabled=True, phase='approved', status='connected', reported=True, server='https://s:8443',
+                                    last_sync='2026-11-10T17:03:17Z'))
+        shown = self.page.summary.text()
+        self.assertNotIn('T17:03:17Z', shown)
+        local = dt.datetime(2026, 11, 10, 17, 3, 17, tzinfo=dt.timezone.utc).astimezone()
+        self.assertIn('Last report: ' + str(datetime_text(local)), shown)
+        self.page.completed(0, dict(enabled=True, phase='approved', status='connected', reported=True, server='https://s:8443'))
+        self.assertIn('Last report: Not available', self.page.summary.text())
+
+    def test_the_title_never_says_connected_beside_cannot_reach_the_server(self):
+        self.page._operation = 'status'
+        up = dict(enabled=True, phase='approved', status='connected', reported=True, server='https://server:8443')
+        self.page.completed(0, up)
+        self.assertEqual(self.page.connected_title.text(), 'Connected')
+        self.assertTrue(self.page.unreachable.isHidden())
+        self.page.completed(0, dict(up, status='unreachable'))
+        self.assertEqual(self.page.connected_title.text(), 'Not connected right now')
+        self.assertFalse(self.page.unreachable.isHidden())
+        self.page.completed(0, up)                                 # and it recovers by itself
+        self.assertEqual(self.page.connected_title.text(), 'Connected')
+        self.assertTrue(self.page.unreachable.isHidden())
+
+    def test_the_review_step_says_found_not_connected_until_it_really_is(self):
+        self.find()
+        self.assertEqual(self.page.review_title.text(), 'Found server.test')
+        self.page._operation = 'status'
+        self.page.completed(0, dict(enabled=True, status='connected', phase='approved', reported=True,
+                                    server='https://server.test:8443', policy=dict(history=True)))
+        self.page.change_policy()                                  # already connected: changing what is shared
+        self.assertEqual(self.page.review_title.text(), 'Connected to server.test')
+
     def test_transitions_policy_and_no_send_before_finish(self):
         with patch('lifetime_connect.run_agent') as run:
             self.find()

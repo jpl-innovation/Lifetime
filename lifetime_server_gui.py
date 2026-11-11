@@ -10,11 +10,11 @@ from pathlib import Path
 import sys
 import time
 
-from PyQt6.QtCore import QDate, QItemSelectionModel, QLocale, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QEvent, QItemSelectionModel, QLocale, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6 import sip
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
-                            QFileDialog, QFormLayout, QGridLayout,
+                            QFileDialog, QFormLayout, QGridLayout, QFrame,
                             QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                             QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QHeaderView,
                             QSizePolicy, QSpinBox, QMenu, QTableWidget,
@@ -23,20 +23,23 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEd
 from lifetime_admin import AdminClient
 import lifetime_i18n as catalog
 from lifetime_protocol import CLIENT_VERSION, IDENTITY_FIELDS, validate_identity
-from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, set_theme, resolve_theme, active_theme, retint_all
+from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, tokens, set_theme, resolve_theme, active_theme, retint_all, CONTROL_RADIUS
 import json
 import os
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
-from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
-from lifetime_reveal import reveal, count_up
-from lifetime_server_devices import (ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
+from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
+from lifetime_reveal import RollLabel, fade_in
+from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
-from lifetime_charts import Plot
-from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
+from lifetime_charts import Plot, Insights
+from lifetime_health_gui import HealthPage
+from lifetime_system_gui import HardwarePanel
+from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
+THEME_KEYS = ('auto', 'light', 'dark')
 
 
 def _create_bundle(client, directory, address, ttl, uses):
@@ -65,6 +68,7 @@ class _Item(QTableWidgetItem):
 class ServerWindow(QMainWindow):
     export_requested = pyqtSignal(object)
     tray = None
+    CONTENT_WIDTH = 1920     # wide screens get a wider column; narrower windows simply fill it
 
     def __init__(self, directory, admin_port, language='en', parent=None):
         super().__init__(parent)
@@ -105,7 +109,8 @@ class ServerWindow(QMainWindow):
         self._readings_busy = False
         self._live_busy = False
         self.stream = None
-        self._revealed = False
+        self._entrance_played, self._overview_data = False, False
+        self.tile_icons = []
         self._paint_pending = False
         self._last_poll, self._poll_focus = 0.0, None
         self._live_items = {}
@@ -115,23 +120,9 @@ class ServerWindow(QMainWindow):
         self.resize(1600, 1000)
         self.setMinimumSize(420, 400)
         install()
-        self.setStyleSheet(stylesheet() + server_surfaces() + """
-            QWidget#chrome { background: #08101F; }
-            QWidget#notice { background: #1B2A46; }
-            QLabel#muted { color: #9FB0CC; font-size: 13px; }
-            QLabel#fieldLabel { color: #9FB0CC; }
-            QLabel#sectionTitle { font-size: 18px; font-weight: 600; }
-            QLabel#metric { font-size: 20px; font-weight: 500; }
-            QPushButton#deviceMenu { background: transparent; border: 1px solid transparent; }
-            QPushButton#deviceMenu:hover { border-color: #34445E; }
-            QPushButton#deviceMenu:focus { border-color: #FFC93C; }
-            QWidget#panel QLineEdit, QWidget#panel QComboBox, QWidget#panel QSpinBox, QWidget#panel QDateEdit { background: #0B1426; }
-            QTableWidget { background: transparent; border: none; padding: 0; gridline-color: #22345A; }
-            QTableWidget::item { padding: 7px 10px; border-bottom: 1px solid #22345A; }
-            QTableWidget#approvalTable::item, QTableWidget#invitationTable::item { padding: 0; }
-            QTableWidget::item:selected { background: transparent; }
-            QHeaderView::section { font-weight: 400; font-size: 13px; color: #9FB0CC; border-bottom: 1px solid #22345A; }
-        """)
+        QApplication.instance().installEventFilter(self)
+        set_style(read_style_preference(self.directory))
+        self._apply_window_style()
         self.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets/lifetime.png')))
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -141,7 +132,7 @@ class ServerWindow(QMainWindow):
         self.chrome.setObjectName('chrome')
         self.chrome.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.chrome_grid = QGridLayout(self.chrome)
-        self.chrome_grid.setContentsMargins(24, 10, 24, 10)
+        self.chrome_grid.setContentsMargins(32, 14, 32, 6)
         self.chrome_grid.setHorizontalSpacing(16)
         self.chrome_grid.setVerticalSpacing(8)
         self.chrome_brand = QWidget()
@@ -187,27 +178,33 @@ class ServerWindow(QMainWindow):
         actions.addWidget(self.chrome_states)
         self.refresh_button = self.button('Refresh', self.manual_refresh)
         self.refresh_button.setMinimumWidth(132)
+        glass(self.refresh_button, CONTROL_RADIUS, pill=True)
         actions.addWidget(self.refresh_button)
         self.credit = QLabel()
-        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(150, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.bind(self.credit, 'Made by JPL Innovation', 'setToolTip')
         actions.addWidget(self.credit)
-        self.language_choice = QComboBox()
-        self.language_choice.addItem('English', 'en')
-        self.language_choice.addItem('Tiếng Việt', 'vi')
-        self.language_choice.setCurrentIndex(0 if language == 'en' else 1)
-        self.language_choice.setAccessibleName(self.t('Language'))
-        self.language_choice.setMinimumWidth(164)
-        self.language_choice.setMaximumWidth(180)
-        self.theme_choice = QComboBox()
-        for key, name in (('auto', 'Auto'), ('light', 'Light'), ('dark', 'Dark')):
-            self.theme_choice.addItem(self.t(name), key)
+        # Language and theme: one compact glass button each in the header. A click moves to the next value.
+        self.chrome_switches = QWidget()
+        switches = QHBoxLayout(self.chrome_switches)
+        switches.setContentsMargins(0, 0, 0, 0)
+        switches.setSpacing(8)
+        self.language_button = CycleButton(2, self._draw_language, 0 if language == 'en' else 1, (52, 40), 16)   # a soft rounded rectangle
+        self.language_button.cycled.connect(self._language_cycled)
         saved = read_theme_preference(self.directory)
-        self.theme_choice.setCurrentIndex(('auto', 'light', 'dark').index(saved))
-        self.theme_choice.setAccessibleName(self.t('Theme'))
-        self.theme_choice.setMinimumWidth(164)
-        self.theme_choice.setMaximumWidth(180)
-        self.theme_choice.currentIndexChanged.connect(self._theme_changed)
+        self.theme_button = CycleButton(3, self._draw_theme, THEME_KEYS.index(saved), (40, 40), 20)      # a circle
+        self.theme_button.cycled.connect(self._theme_cycled)
+        for button in (self.language_button, self.theme_button):
+            glass(button, button.radius, pill=True)
+            switches.addWidget(button)
+        actions.insertWidget(1, self.chrome_switches)
+        self._describe_switches()
+        self.style_control = ModeSwitch([self.t('Glass'), self.t('Classic')], lambda index: self._style_changed(STYLES[index]))
+        self.style_control.setFixedWidth(260)
+        self.style_control.setAccessibleName(self.t('Style'))
+        for segment in self.style_control.group.buttons():
+            segment.setProperty('glass', True)        # the segments paint themselves; the window must not put glass under them
+        self.style_control.group.button(STYLES.index(active_style())).setChecked(True)
         self.tabs = ServerPages()
         layout.addWidget(self.chrome)
         self.loading_bar = LoadingBar()
@@ -215,15 +212,21 @@ class ServerWindow(QMainWindow):
         self.notice = QWidget()
         self.notice.setObjectName('notice')
         self.notice.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        glass(self.notice, 12, accent='#FFC93C')
+        self.notice.setMaximumWidth(self.CONTENT_WIDTH - 64)
         notice_row = QHBoxLayout(self.notice)
-        notice_row.setContentsMargins(24, 8, 24, 8)
+        notice_row.setContentsMargins(24, 12, 18, 12)
         self.status_label = StatusNotice(lambda value: value in (self.t('Ready'), self.t('Working…'), self.t('Changes saved.')))
         self.bind(self.status_label, 'Ready')
         self.status_label.setWordWrap(True)
         self.status_label.setAccessibleName(self.t('Local administration'))
+        self.status_label.setObjectName('statusText')
         notice_row.addWidget(self.status_label)
         self.notice.hide()
-        layout.addWidget(self.notice)
+        notice_holder = QHBoxLayout()
+        notice_holder.setContentsMargins(32, 10, 32, 0)
+        notice_holder.addWidget(self.notice)
+        layout.addLayout(notice_holder)
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(body)
         self._kpi_alerts = set()
@@ -238,7 +241,6 @@ class ServerWindow(QMainWindow):
         self._manual_refresh = False
         self._refresh_started = 0.0
         self._make_skeletons()
-        self.language_choice.currentIndexChanged.connect(self._language_changed)
         self.export_requested.connect(self._show_export)
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -251,7 +253,7 @@ class ServerWindow(QMainWindow):
         self.table.verticalScrollBar().valueChanged.connect(lambda: self._readings_timer.start())
         self.table.verticalScrollBar().valueChanged.connect(lambda: self._paint_live())
         self.tabs.currentChanged.connect(lambda: self._readings_timer.start())
-        self.tabs.currentChanged.connect(self._reveal_current)
+        self.tabs.currentChanged.connect(self._arm_overview_entrance)
         self._fleet_timer = QTimer(self)
         self._fleet_timer.setSingleShot(True)
         self._fleet_timer.setInterval(250)
@@ -274,6 +276,8 @@ class ServerWindow(QMainWindow):
         self.live_timer.setInterval(1000)
         self.live_timer.timeout.connect(self._load_live)
         self.live_timer.start()
+        for button in self.findChildren(QPushButton):     # buttons polished before they joined the window
+            self._glass_button(button)
         self.retranslate()
         QTimer.singleShot(0, self.refresh)
         # Open with nothing focused: a yellow focus outline at launch reads as a second selected state.
@@ -282,6 +286,23 @@ class ServerWindow(QMainWindow):
 
     def t(self, key, **values):
         return text(key, self.language, **values)
+
+    def eventFilter(self, watched, event):
+        # Three button kinds: amber primary (#primary), quiet text links (#link) and glass for everything else.
+        # Every other push button in this window or its dialogs becomes glass when it is first polished.
+        if (event.type() == QEvent.Type.Polish and isinstance(watched, QPushButton) and not watched.property('glass')
+                and watched.objectName() != 'deviceMenu'):
+            parent = watched
+            while parent is not None and parent is not self:
+                parent = parent.parentWidget()
+            if parent is self:
+                self._glass_button(watched)
+        return False
+
+    @staticmethod
+    def _glass_button(button):
+        if not button.property('glass') and button.objectName() != 'deviceMenu':
+            glass(button, CONTROL_RADIUS, pill=True)
 
     def bind(self, widget, key, setter='setText'):
         self._bindings.append((widget, key, setter))
@@ -304,7 +325,7 @@ class ServerWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(page)
-        page.setMaximumWidth(1440)
+        page.setMaximumWidth(self.CONTENT_WIDTH)
         scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 24, 32, 24)
@@ -323,13 +344,14 @@ class ServerWindow(QMainWindow):
         self.today_label = QLabel()
         self.today_label.setObjectName('muted')
         title_row.addWidget(self.today_label, 1)
-        self.fleet_date = QDateEdit(QDate.currentDate())
+        self._today = QDate.currentDate()
+        self.fleet_date = QDateEdit(self._today)
         self.fleet_date.setCalendarPopup(True)
         self.fleet_date.setDisplayFormat('d MMM yyyy')
         self.fleet_date.setMinimumWidth(180)
         self.fleet_date.setAccessibleName(self.t('Report date'))
         title_row.addWidget(self.fleet_date)
-        title_row.addWidget(self.button('Export report', lambda: self.export_requested.emit(None)))
+        title_row.addWidget(glass(self.button('Export report', lambda: self.export_requested.emit(None)), CONTROL_RADIUS, pill=True))
         self.add_device_button = self.button('Add device', self.add_device)
         self.add_device_button.setObjectName('primary')
         title_row.addWidget(self.add_device_button)
@@ -345,13 +367,17 @@ class ServerWindow(QMainWindow):
             top_row.setFixedHeight(44)      # the Review button must not push one tile's numbers out of line
             top = QHBoxLayout(top_row)
             top.setContentsMargins(0, 0, 0, 0)
-            top.addWidget(TileIcon(icon))
+            tile_icon = TileIcon(icon, delay=len(self.tile_icons) * 90)
+            self.tile_icons.append(tile_icon)
+            top.addWidget(tile_icon)
             top.addStretch()
             if key == 'Pending approval':
-                top.addWidget(self.button('Review', self.review_pending))
+                review = self.button('Review', self.review_pending)
+                review.setObjectName('link')
+                top.addWidget(review)
             tile_layout.addWidget(top_row)
             tile_layout.addSpacing(8)
-            value = QLabel(self.t('Not available'))
+            value = RollLabel(self.t('Not available'))
             value.setObjectName('metric')
             value.setMinimumHeight(38)
             self.kpis[key] = value
@@ -452,7 +478,10 @@ class ServerWindow(QMainWindow):
         self.events.setAccessibleName(self.t('Recent events'))
         self.events.horizontalHeader().hide()
         self.events.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.events.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        # The event ("Went offline") is what people read, so it gets the width it needs; the long computer name yields.
+        self.events.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.events.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.events.horizontalHeader().setMinimumSectionSize(40)     # the default 100 px pushed the time out of the panel
         self.events.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.events.verticalHeader().setDefaultSectionSize(40)
         self.events.setMinimumHeight(204)
@@ -488,7 +517,7 @@ class ServerWindow(QMainWindow):
         self.overview_health.setObjectName('muted')
         self.overview_health.setWordWrap(True)
         self.overview_health.hide()     # only a failure is worth a line here
-        layout.addWidget(self.overview_health)
+        layout.insertWidget(1, self.overview_health)     # in the column, under the title, not after the page
         # Cumulative source breakdown stays available under Administration.
         self.overview_usage = QWidget()
         usage_layout = QVBoxLayout(self.overview_usage)
@@ -524,7 +553,7 @@ class ServerWindow(QMainWindow):
     def _panel(self):
         panel = QWidget()
         panel.setObjectName('panel')
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        glass(panel)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
@@ -553,8 +582,10 @@ class ServerWindow(QMainWindow):
         title = self.label('Devices')
         title.setStyleSheet('font-size: 28px; font-weight: 600;')
         title_row.addWidget(title, 1)
-        title_row.addWidget(self.button('Add device', self.add_device))
-        self.export_button = self.button('Export selected', self.export_selection)
+        self.devices_add_button = self.button('Add device', self.add_device)
+        self.devices_add_button.setObjectName('primary')
+        title_row.addWidget(self.devices_add_button)
+        self.export_button = glass(self.button('Export selected', self.export_selection), CONTROL_RADIUS, pill=True)
         title_row.addWidget(self.export_button)
         layout.addLayout(title_row)
         self.search = QLineEdit()
@@ -633,7 +664,7 @@ class ServerWindow(QMainWindow):
         self.device_detail_panel, detail_layout = self._panel()
         self.detail_name = QLabel()
         self.detail_name.setWordWrap(True)
-        self.detail_name.setStyleSheet('font-size: 23px; font-weight: 600;')
+        self.detail_name.setStyleSheet('font-size: 22px; font-weight: 600;')
         detail_layout.addWidget(self.detail_name)
         status_row = QHBoxLayout()
         self.detail_group, self.detail_status = QLabel(), QLabel()
@@ -645,6 +676,23 @@ class ServerWindow(QMainWindow):
         status_row.addWidget(self.detail_status)
         status_row.addStretch()
         detail_layout.addLayout(status_row)
+        # Before anything is selected the rows below all read "Not available"; say why, at the top where it is seen.
+        self.detail_hint = QLabel()
+        self.detail_hint.setWordWrap(True)
+        self.detail_hint.setObjectName('muted')
+        detail_layout.addWidget(self.detail_hint)
+        # The actions and the reason a button is disabled sit at the top: below the specifications they scrolled out of sight.
+        self.control_reason = QLabel()
+        self.control_reason.setWordWrap(True)
+        self.control_reason.setObjectName('muted')
+        self.power_buttons = {}
+        self.power_grid = power_grid = QGridLayout()
+        for i, (action, key) in enumerate((('sleep', 'Sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
+            button = self.button(key, lambda checked=False, a=action: self._device_command(self._detail, a))
+            self.power_buttons[action] = button
+            power_grid.addWidget(button, i // 3, i % 3)
+        detail_layout.addLayout(power_grid)
+        detail_layout.addWidget(self.control_reason)
         self.spec_title = self.label('Computer specifications')
         self.spec_title.setStyleSheet('font-size:18px; font-weight:600;')
         detail_layout.addWidget(self.spec_title)
@@ -662,17 +710,6 @@ class ServerWindow(QMainWindow):
             self.spec_values[key] = value
             spec_form.addRow(self._field(key), value)
         detail_layout.addLayout(spec_form)
-        self.control_reason = QLabel()
-        self.control_reason.setWordWrap(True)
-        self.control_reason.setObjectName('muted')
-        self.power_buttons = {}
-        self.power_grid = power_grid = QGridLayout()
-        for i, (action, key) in enumerate((('sleep', 'Sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
-            button = self.button(key, lambda checked=False, a=action: self._device_command(self._detail, a))
-            self.power_buttons[action] = button
-            power_grid.addWidget(button, i // 3, i % 3)
-        detail_layout.addLayout(power_grid)
-        detail_layout.addWidget(self.control_reason)
         live_header = QHBoxLayout()
         self.live_marker = QLabel()
         live_header.addWidget(self.live_marker, 1)
@@ -684,7 +721,8 @@ class ServerWindow(QMainWindow):
         live_header.addWidget(self.performance_range)
         detail_layout.addLayout(live_header)
         self.performance_plots = {}
-        for field, key, unit in (('cpu_percent', 'CPU', '%'), ('ram_percent', 'RAM', '%'), ('battery_percent', 'Battery', '%'), ('temperature_c', 'Temperature', '°C')):
+        for field, key, unit in (('cpu_percent', 'CPU', '%'), ('ram_percent', 'RAM', '%'), ('disk_free_percent', 'Disk free', '%'),
+                                 ('battery_percent', 'Battery', '%'), ('temperature_c', 'Temperature', '°C')):
             detail_layout.addWidget(self.label(key))
             plot = Plot('line', unit)
             plot.bar_color = None
@@ -698,6 +736,58 @@ class ServerWindow(QMainWindow):
         self.detail_total.setStyleSheet('font-size: 32px; font-weight: 600;')
         detail_layout.addWidget(self.detail_total)
         detail_layout.addWidget(self.label('Recorded awake time'))
+        daily_header = QHBoxLayout()
+        daily_title = self.label('Awake time per day')
+        daily_title.setStyleSheet('font-size:18px; font-weight:600;')
+        daily_header.addWidget(daily_title, 1)
+        self.daily_range = QComboBox()
+        self.daily_range.addItem(self.t('14 days'), 14)
+        self.daily_range.addItem(self.t('30 days'), 30)
+        self.daily_range.setAccessibleName(self.t('Awake time per day'))
+        self.daily_range.currentIndexChanged.connect(lambda: self._render_daily(self._detail) if self._detail else None)
+        daily_header.addWidget(self.daily_range)
+        detail_layout.addLayout(daily_header)
+        self.device_daily = Plot('daily', 'h')      # the desktop's Overview bars, for this computer
+        self.device_daily.setFixedHeight(170)
+        self.device_daily.setAccessibleName(self.t('Awake time per day'))
+        detail_layout.addWidget(self.device_daily)
+        self.daily_summary = QLabel()
+        self.daily_summary.setObjectName('muted')
+        self.daily_summary.setWordWrap(True)
+        detail_layout.addWidget(self.daily_summary)
+        # The desktop's own Activity and Health pages, fed with what this computer reported.
+        self.hardware_detail = HardwarePanel(remote=True)
+        detail_layout.addWidget(self.hardware_detail)
+        self.activity_state = self.label('History is off on this computer')
+        self.activity_state.setObjectName('muted')
+        self.activity_stats = QLabel()
+        self.activity_stats.setObjectName('muted')
+        self.activity_stats.setWordWrap(True)
+        self.remote_activity = Insights()
+        # The server's split detail pane is narrower than the desktop page.
+        # Keep the same controls/charts, with ranges on their own row.
+        activity_box = self.remote_activity.layout()
+        activity_header = activity_box.itemAt(0).layout()
+        activity_header.removeWidget(self.remote_activity.ranges)
+        range_row = QHBoxLayout()
+        range_row.addWidget(self.remote_activity.ranges, alignment=Qt.AlignmentFlag.AlignLeft)
+        range_row.addStretch()
+        activity_box.insertLayout(1, range_row)
+        activity_box.itemAt(2).layout().setSpacing(12)
+        for value in self.remote_activity.figures:
+            value.setStyleSheet('font-size:16px; font-weight:600;')
+        self.remote_health = HealthPage({}, lambda: None, remote=True)
+        for card in self.remote_activity.cards:
+            glass(card)
+        for panel in self.remote_health.content.findChildren(QFrame):
+            if panel.objectName() == 'insetPanel':
+                glass(panel)
+        for page in (self.remote_activity, self.remote_health):
+            page.setStyleSheet('QLabel#pageTitle {font-size:22px; font-weight:600;} QLabel#caption {font-size:13px;} QLabel#groupTitle {font-size:17px; font-weight:600;}')
+        self.health_state = self.label('System readings are off on this computer')
+        self.health_state.setObjectName('muted')
+        for widget in (self.activity_stats, self.activity_state, self.remote_activity, self.health_state, self.remote_health):
+            detail_layout.addWidget(widget)
         self.detail_text = QTextBrowser()
         self.detail_text.setOpenExternalLinks(False)
         self.detail_text.setFrameShape(QTextBrowser.Shape.NoFrame)
@@ -769,6 +859,9 @@ class ServerWindow(QMainWindow):
         self.device_grid.addWidget(self.devices_panel, 0, 0)
         self.device_detail_scroll = QScrollArea()
         self.device_detail_scroll.setObjectName('detailScroll')
+        for layer in self.device_detail_panel.findChildren(Glass, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            self.device_detail_panel.removeEventFilter(layer)       # one strong pane, not glass inside glass
+        glass(self.device_detail_scroll, strong=True)
         self.device_detail_panel.setProperty('lifetimeScrollContent', True)
         self.device_detail_scroll.setWidgetResizable(True)
         self.device_detail_scroll.setWidget(self.device_detail_panel)
@@ -821,6 +914,9 @@ class ServerWindow(QMainWindow):
 
     def _set_chip(self, code):
         self._chip = code
+        if code == 'all' and self.status_filter.currentIndex() > 0:
+            # Review sets the status box; "All" has to mean every computer, not "all that are still pending".
+            self.status_filter.setCurrentIndex(0)
         for key, button in self.device_chips.items():
             button.setChecked(key == code)
         self._filters_changed()
@@ -861,26 +957,19 @@ class ServerWindow(QMainWindow):
         if not self._submit(lambda: self.client.call('live', **({'device_id': focus} if focus else {})), ready, quiet=True):
             self._live_busy = False
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        if not self._revealed:
-            self._revealed = True
-            QTimer.singleShot(0, self._reveal_current)      # the first page is uncovered as the window opens
-
-    def _reveal_current(self, *unused):
-        """Wipe the cards of the page now showing, and let the Overview numbers land as it uncovers."""
-        if self._closed or not self.isVisible():
+    def _arm_overview_entrance(self, *unused):
+        """The Overview plays its entrance once, when its first real numbers are on screen: the gauge sweeps, the
+        tile icons draw and the counts land one after another. Tab changes and refreshes never replay it."""
+        if self._closed or self._entrance_played or not self._overview_data or self.tabs.currentIndex() != 0:
             return
-        page = self.tabs.currentWidget()
-        inner = page.widget() if page is not None else None
-        if inner is None:
-            return
+        self._entrance_played = True
         reduced = reduced_motion()
-        cards = [w for w in inner.findChildren(QWidget, 'panel') if not w.property('lifetimeScrollContent')]
-        reveal(cards, reduced)
-        if self.tabs.currentIndex() == 0:
-            for key in ('Connected', 'Offline', 'Pending approval'):
-                count_up(self.kpis[key], reduced)
+        for index, key in enumerate(('Connected', 'Offline', 'Awake today', 'Pending approval')):
+            for icon in self.tile_icons[index:index + 1]:
+                icon.intro.ready()
+            self.kpis[key].roll_in(delay=160 + index * 90, reduced=reduced)
+            for caption in (self.kpi_titles[key], self.kpi_notes[key]):   # the words settle in just after their number starts
+                fade_in(caption, delay=420 + index * 90, reduced=reduced)
 
     def start_stream(self):
         """Subscribe to pushed live data. Without it the window polls, as before."""
@@ -1094,6 +1183,9 @@ class ServerWindow(QMainWindow):
         missing = self.t('Not available')
         allowed = (device.get('policy') or {}).get('resources') is True
         specs = (device.get('specs') or {}) if allowed else {}
+        if hasattr(self, 'hardware_detail'):
+            self.hardware_detail.setVisible(allowed)
+            self.hardware_detail.set_data(specs.get('hardware'))
         values = {'Manufacturer': specs.get('manufacturer'), 'Model': specs.get('model'),
                   'CPU': specs.get('cpu_name'), 'RAM': byte_text(specs.get('ram_bytes'), missing),
                   'Cores / threads': f"{specs.get('cpu_cores') if specs.get('cpu_cores') is not None else missing} / {specs.get('cpu_threads') if specs.get('cpu_threads') is not None else missing}",
@@ -1108,8 +1200,8 @@ class ServerWindow(QMainWindow):
             if field in ('cpu_percent', 'ram_percent') and self.performance_range.currentData() == 'live':
                 continue
             plot.set_data([dt.datetime.fromisoformat(r['observed_at'].replace('Z', '+00:00')).astimezone().strftime('%H:%M') for r in history], [r.get(field) for r in history],
-                          message='' if history and allowed else self.t('No recorded data in this range' if allowed else 'Not permitted'))
-            plot.setAccessibleName(self.t({'cpu_percent': 'CPU', 'ram_percent': 'RAM', 'battery_percent': 'Battery', 'temperature_c': 'Temperature'}[field]))
+                          message='' if history and allowed else self.t('No recorded data in this range' if allowed else 'System readings are off on this computer'))
+            plot.setAccessibleName(self.t({'cpu_percent': 'CPU', 'ram_percent': 'RAM', 'disk_free_percent': 'Disk free', 'battery_percent': 'Battery', 'temperature_c': 'Temperature'}[field]))
         self._paint_live_detail()
 
     def _make_this_server(self):
@@ -1265,9 +1357,9 @@ class ServerWindow(QMainWindow):
         self.admin_layout.addWidget(retention)
         about, about_layout = self._section('About')
         credit = QHBoxLayout()
-        image = QLabel()
-        image.setPixmap(QPixmap(str(Path(__file__).parent / 'assets/jpl_innovation.png')).scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        credit.addWidget(image)
+        self.about_logo = QLabel()
+        self.about_logo.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        credit.addWidget(self.about_logo)
         credit.addWidget(self.label('Made by JPL Innovation'), 1)
         credit.addWidget(QLabel(CLIENT_VERSION))
         about_layout.addLayout(credit)
@@ -1331,12 +1423,9 @@ class ServerWindow(QMainWindow):
         # Superseded by Add a computer. Keep the legacy helper for scripted callers.
         enrollment.setParent(self)
         enrollment.hide()
-        language_panel, language_layout = self._section('Language')
-        language_layout.addWidget(self.language_choice, 0, Qt.AlignmentFlag.AlignLeft)
-        self.admin_layout.addWidget(language_panel)
-        theme_panel, theme_layout = self._section('Theme')
-        theme_layout.addWidget(self.theme_choice, 0, Qt.AlignmentFlag.AlignLeft)
-        self.admin_layout.addWidget(theme_panel)
+        style_panel, style_layout = self._section('Style')
+        style_layout.addWidget(self.style_control, 0, Qt.AlignmentFlag.AlignLeft)
+        self.admin_layout.addWidget(style_panel)
         backups, layout = self._section('Backup and restore')
         self.backup_button = self.button('Save backup', self.backup)
         self.restore_button = self.button('Restore backup', self.restore)
@@ -1373,24 +1462,95 @@ class ServerWindow(QMainWindow):
     def _mark_identity_dirty(self):
         self._identity_dirty = True
 
-    def _theme_changed(self):
-        """Save the choice and change in place: the new theme spreads out from the control."""
-        value = self.theme_choice.currentData()
+    WINDOW_BACKGROUND = {
+        'glass': 'qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2353A0, stop:0.28 #15306A, stop:0.55 #0B1426, stop:0.8 #3A3220, stop:1 #8A6516)',
+        'classic': '#0B1426'}
+
+    def _apply_window_style(self):
+        """The window stylesheet; only the background differs between Glass and Classic."""
+        self.setStyleSheet(stylesheet() + server_surfaces() + """
+            QMainWindow, QDialog { background: %s; }
+""" % self.WINDOW_BACKGROUND[active_style()] + """
+            QWidget#chrome { background: transparent; }
+            QWidget#panel[glass="true"], QWidget#notice, QScrollArea#detailScroll { background: transparent; border: none; }
+            QPushButton[glass="true"] { background: transparent; border: 1px solid transparent; padding: 8px 16px; }
+            QPushButton[glass="true"]:focus { border-color: #FFC93C; }
+            QPushButton[glass="true"]:checked, QPushButton[glass="true"]:pressed { background: transparent; }
+            QPushButton[glass="true"]:disabled { background: transparent; border-color: transparent; }
+            QPushButton#link { background: transparent; border: 1px solid transparent; color: #FFC93C; padding: 4px 6px; font-weight: 600; }
+            QPushButton#link:hover { text-decoration: underline; }
+            QPushButton#link:focus { border-color: #FFC93C; }
+            QLineEdit, QComboBox, QSpinBox, QDateEdit, QPlainTextEdit {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0F1A30, stop:1 #12203A); border-color: #2A3E66; }
+            QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDateEdit:hover { border-color: #3A5688; }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { border-color: #FFC93C; }
+            QLabel#statusText { font-size: 14px; }
+            QLabel#muted { color: #9FB0CC; font-size: 13px; }
+            QLabel#fieldLabel { color: #9FB0CC; }
+            QLabel#sectionTitle { font-size: 18px; font-weight: 600; }
+            QLabel#metric { font-size: 26px; font-weight: 600; }
+            QPushButton#deviceMenu { background: transparent; border: 1px solid transparent; }
+            QPushButton#deviceMenu:hover { border-color: #34445E; }
+            QPushButton#deviceMenu:focus { border-color: #FFC93C; }
+            QTableWidget { background: transparent; border: none; padding: 0; gridline-color: #22345A; }
+            QTableWidget::item { padding: 7px 10px; border-bottom: 1px solid #1B2A46; }
+            QTableWidget#approvalTable::item, QTableWidget#invitationTable::item { padding: 0; }
+            QTableWidget::item:selected { background: transparent; }
+            QHeaderView::section { background: transparent; font-weight: 600; font-size: 12px; color: #9FB0CC; border: none; border-bottom: 1px solid #2A3E66; }
+        """)
+
+    def _draw_language(self, p, rect, index):
+        font = p.font()
+        font.setPixelSize(14)
+        font.setWeight(QFont.Weight.DemiBold)
+        p.setFont(font)
+        p.setPen(QColor(tokens()['text']))
+        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, ('EN', 'VI')[index])
+
+    def _draw_theme(self, p, rect, index):
+        draw_mode_icon(p, THEME_KEYS[index], rect.center(), QColor(tokens()['accent']), 1.0)
+
+    def _describe_switches(self):
+        """Tooltip and accessible name: the current value, and what a click does."""
+        names = (('English', 'Tiếng Việt'), tuple(self.t(name) for name in ('Auto', 'Light', 'Dark')))
+        for button, key, choices in ((self.language_button, 'Language: {current}. Click to switch to {next}.', names[0]),
+                                     (self.theme_button, 'Theme: {current}. Click to switch to {next}.', names[1])):
+            sentence = self.t(key, current=choices[button.index], next=choices[(button.index + 1) % button.count])
+            button.setToolTip(sentence)
+            button.setAccessibleName(sentence)
+
+    def _language_cycled(self, index):
+        self.language = ('en', 'vi')[index]
+        self.retranslate()
+
+    def _theme_cycled(self, index):
+        """Save the choice and change in place: the new theme spreads out from the button."""
+        value = THEME_KEYS[index]
         write_theme_preference(self.directory, value)
+        self._describe_switches()
         name = resolve_theme(value)
         if name != active_theme():
-            origin = self.theme_choice.mapTo(self, self.theme_choice.rect().center())
+            origin = self.theme_button.mapTo(self, self.theme_button.rect().center())
             theme_reveal(self, origin, lambda: self._apply_live_theme(name))
+
+    def _style_changed(self, value):
+        """Save the choice and swap the surfaces in place, spreading out from the control like the theme does."""
+        write_style_preference(self.directory, value)
+        if value != active_style():
+            origin = self.style_control.mapTo(self, self.style_control.rect().center())
+            theme_reveal(self, origin, lambda: self._apply_live_style(value))
+
+    def _apply_live_style(self, name):
+        set_style(name)
+        self._apply_window_style()
+        retint_all()
 
     def _apply_live_theme(self, name):
         set_theme(name)
         retint_all()
-        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(150, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.about_logo.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.refresh()
-
-    def _language_changed(self):
-        self.language = self.language_choice.currentData()
-        self.retranslate()
 
     def retranslate(self):
         if hasattr(self, 'performance_range'):
@@ -1420,7 +1580,7 @@ class ServerWindow(QMainWindow):
         self.setLocale(locale)
         self.fleet_date.setLocale(locale)
         self.retention_date.setLocale(locale)
-        self.today_label.setText(self.t('Today · {date}', date=locale.toString(QDate.currentDate(), 'd MMM yyyy')))
+        self._show_today()
         self.server_status.setText(self.t('Server running' if self._overview_result else 'Server unavailable'))
         if self._server_info:
             self.network_label.setText((self._server_info.get('organisation') or self._server_info['name']) + ' · ' + self.t('Local network'))
@@ -1434,7 +1594,11 @@ class ServerWindow(QMainWindow):
             self.code_expiry.setText(local_expiry(self._bundle_expiry, self.t) if self._bundle_expiry else '')
         for field, key in (('display_name', 'Display name'), ('asset_tag', 'Asset tag'), ('department', 'Department'), ('location', 'Location'), ('deployment_date', 'Deployment date')):
             self.identity_fields[field].setAccessibleName(self.t(key))
-        for widget, key in ((self.language_choice, 'Language'), (self.status_filter, 'Status'),
+        self._describe_switches()
+        for segment, key in zip(self.style_control.group.buttons(), ('Glass', 'Classic')):
+            segment.setText(self.t(key))
+        self.style_control.setAccessibleName(self.t('Style'))
+        for widget, key in ((self.status_filter, 'Status'),
                             (self.table, 'Devices'), (self.detail_text, 'Device details'),
                             (self.page_size, 'Page size'), (self.pending_requests, 'Pending requests'),
                             (self.interval, 'Reporting interval (seconds)'), (self.events, 'Recent events'),
@@ -1450,6 +1614,8 @@ class ServerWindow(QMainWindow):
             self._render_fleet_detail(None)
         if self._admin_result:
             self._render_server_info(self._admin_result)
+        self.detail_hint.setText(self.t('Select a computer to see its details.'))
+        self.detail_hint.setVisible(not self._detail)
         if self._detail:
             self._render_detail(self._detail, preserve_edits=self._identity_dirty)
         else:
@@ -1510,9 +1676,20 @@ class ServerWindow(QMainWindow):
         if not self._submit(lambda: client.call('overview'), self._overview_finished):
             self._overview_busy = False
 
+    def _set_stale(self, stale):
+        """While the server cannot be reached the numbers are only the last ones received. Dim them so they do not look live."""
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        if stale and self.tabs.graphicsEffect() is None:
+            effect = QGraphicsOpacityEffect(self.tabs)
+            effect.setOpacity(0.45)
+            self.tabs.setGraphicsEffect(effect)
+        elif not stale and self.tabs.graphicsEffect() is not None:
+            self.tabs.setGraphicsEffect(None)
+
     def _overview_finished(self, result, success):
         self._overview_busy = False
         self.overview_health.setVisible(not success)
+        self._set_stale(not success)
         if success:
             self._overview_result = result
             self._render_overview(result)
@@ -1705,6 +1882,7 @@ class ServerWindow(QMainWindow):
             box = self.table.cellWidget(row_number, 0)
             if box is None:
                 box = DeviceBox()
+                box.intro.delay = min(row_number, 8) * 45
                 box.activated.connect(self._select_box)
                 box.menu_requested.connect(self._device_menu)
                 self.table.setCellWidget(row_number, 0, box)
@@ -1782,10 +1960,14 @@ class ServerWindow(QMainWindow):
             if box:
                 box.set_selected(box.device_id in selected_ids)
         selected = self.selected_device_ids()
+        self.detail_hint.setVisible(len(selected) != 1)
         self.export_button.setEnabled(bool(selected))
         self.export_button.setObjectName('primary' if selected else '')
-        self.export_button.style().unpolish(self.export_button)
-        self.export_button.style().polish(self.export_button)
+        self.devices_add_button.setObjectName('' if selected else 'primary')     # one amber action at a time
+        for button in (self.export_button, self.devices_add_button):
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
         if len(selected) != 1:
             self._finish_skeletons('detail')
             self._detail_revision += 1
@@ -1835,11 +2017,71 @@ class ServerWindow(QMainWindow):
         self.copy_device_id.setEnabled(False)
         self.device_pending.hide()
         self._render_specs({})
+        self._render_remote({})
         self._power_state(None)
         self._fit_detail_text()
 
+    def _render_daily(self, device):
+        """Awake hours per local day from the history the computer already reports; missing days stay empty."""
+        allowed = (device.get('policy') or {}).get('history') is True
+        daily = ((device.get('history') or {}).get('daily') or {}) if allowed else {}
+        today = dt.date.today()
+        days = [today - dt.timedelta(days=i) for i in reversed(range(self.daily_range.currentData() or 14))]
+        values = [daily[d.isoformat()] / 3600 if isinstance(daily.get(d.isoformat()), (int, float)) else None for d in days]
+        recorded = [(v, d) for v, d in zip(values, days) if v is not None]
+        message = '' if recorded else self.t('No awake time recorded yet' if allowed else 'History is off on this computer')
+        self.device_daily.set_data([d.isoformat() for d in days], values, dates=days, message=message)
+        if recorded:
+            longest, day = max(recorded, key=lambda pair: pair[0])
+            average = sum(v for v, _ in recorded) / len(recorded)
+            self.daily_summary.setText(self.t('Average {average} a day · longest day {longest} on {day}',
+                                              average=self.t('{hours} h', hours=f'{average:.1f}'),
+                                              longest=self.t('{hours} h', hours=f'{longest:.1f}'),
+                                              day=self._date(day.isoformat(), year=False)))
+        self.daily_summary.setVisible(bool(recorded))
+
+    def _render_remote(self, device):
+        """Rebuild the inputs the desktop pages read from its local ledger and probes."""
+        policy = device.get('policy') or {}
+        history = device.get('history') if policy.get('history') is True else None
+        totals = device.get('totals') or {}
+        have = bool(history and history.get('daily'))
+        self.activity_state.setVisible(not have)
+        self.activity_state.setText(self.t('No activity history reported yet' if history is not None or policy.get('history') is True
+                                           else 'History is off on this computer') if not have else '')
+        if policy.get('history') is not True:
+            self.activity_state.setText(self.t('History is off on this computer'))
+        self.remote_activity.setVisible(have)
+        self.activity_stats.setVisible(have and history.get('boots') is not None)
+        if have:
+            imported = totals.get('imported_seconds', 0)
+            self.remote_activity.set_ledger(dict(
+                daily=history.get('daily') or {}, hourly=history.get('hourly', []), sessions=history.get('sessions', []),
+                dated_hourly=history.get('dated_hourly', {}), first_seen=(history.get('first_seen') or '')[:10] or None,
+                recording_started=history.get('recording_started'),
+                total_seconds=totals.get('measured_seconds', 0) + imported, baseline_seconds=totals.get('baseline_seconds', 0),
+                imported=dict(seconds=imported, daily=history.get('imported_daily') or {}),
+                **({'daily_allocation': {'estimated': True}} if history.get('daily_estimated') else {})))
+            if history.get('boots') is not None:
+                from lifetime_charts import hm
+                self.activity_stats.setText(self.t('Boots {boots} · current session {current} · longest session {longest}',
+                    boots=f"{history['boots']:,}", current=hm(history.get('current_session_seconds') or 0),
+                    longest=hm(history.get('longest_session_seconds') or 0)))
+        else:
+            self.remote_activity.set_ledger({})
+            self.activity_stats.clear()
+        health = (device.get('readings') or {}).get('health') if policy.get('resources') is True else None
+        detail = (health or {}).get('detail')
+        self.remote_health.setVisible(bool(detail))
+        self.health_state.setVisible(not detail)
+        self.health_state.setText(self.t('System readings are off on this computer' if policy.get('resources') is not True
+                                         else 'No health details reported yet'))
+        self.remote_health.set_remote(detail or {})
+
     def _render_detail(self, device, preserve_edits=False):
         self._render_specs(device)
+        self._render_daily(device)
+        self._render_remote(device)
         self._power_state(device)
         commands = device.get('commands') or []
         self.command_status.setText(self.t('Command status: {status}', status=self.t('command.' + commands[0]['status'])) if commands else '')
@@ -1879,7 +2121,7 @@ class ServerWindow(QMainWindow):
                 T('<tr><td style="color:#9FB0CC;">') + e(self.t(key)) +
                 '</td><td>' + e(value) + '</td></tr>' for key, value in rows) + '</table>'   # no colons, as on Overview
         contents = table(fields)
-        health = device.get('health') or {}
+        health = (device.get('readings') or {}).get('health') or device.get('health') or {}
         contents += '<p style="font-weight:600;margin:12px 0 4px">' + e(self.t('Health')) + '</p>'
         contents += table([(title, missing if health.get(field) is None else (self._timestamp(health[field]) if field == 'last_crash' else str(health[field]) + ('%' if field == 'battery_health' else ''))) for title, field in (('Crashes in 30 days', 'crashes_30d'), ('Unexpected shutdowns in 30 days', 'shutdowns_30d'), ('Battery health', 'battery_health'), ('Cycle count', 'cycle_count'), ('Last crash', 'last_crash'))])
         contents += '<p style="font-weight:600;margin:12px 0 4px">' + e(self.t('Usage snapshots (hours; never added together)')) + '</p>'
@@ -1999,7 +2241,7 @@ class ServerWindow(QMainWindow):
 
     def _confirm(self, message):
         dialog = QMessageBox(QMessageBox.Icon.Warning, self.t('Continue?'), self.t(message), parent=self)
-        yes = dialog.addButton(self.t('Continue?'), QMessageBox.ButtonRole.AcceptRole)
+        yes = dialog.addButton(self.t('Continue'), QMessageBox.ButtonRole.AcceptRole)
         no = dialog.addButton(self.t('Cancel'), QMessageBox.ButtonRole.RejectRole)
         dialog.setDefaultButton(no)
         dialog.setEscapeButton(no)
@@ -2072,21 +2314,32 @@ class ServerWindow(QMainWindow):
         wide = self.width() >= 1180
         navigation = self.tabs.tabBar()
         navigation.set_compact(self.width() < 720)
+        compact = self.width() < 600        # too narrow for the switches beside the status: they join the menu's row
         self.chrome_grid.addWidget(self.chrome_brand, 0, 0)
         self.chrome_grid.addWidget(self.chrome_actions, 0, 2 if wide else 1)
         if wide:
             self.chrome_grid.addWidget(navigation, 0, 1, Qt.AlignmentFlag.AlignCenter)
+        elif compact:
+            self.chrome_grid.addWidget(navigation, 1, 0, Qt.AlignmentFlag.AlignLeft)
         else:
             self.chrome_grid.addWidget(navigation, 1, 0, 1, 2, Qt.AlignmentFlag.AlignCenter)
+        # Language and theme sit beside the status and Refresh; on a narrow window they move to the menu's row.
+        if compact:
+            self.chrome_grid.addWidget(self.chrome_switches, 1, 1, Qt.AlignmentFlag.AlignRight)
+        elif self.chrome_actions.layout().indexOf(self.chrome_switches) < 0:
+            self.chrome_actions.layout().insertWidget(1, self.chrome_switches)
         self.chrome_grid.setColumnStretch(0, 1)
-        self.chrome_grid.setColumnStretch(1, 0 if wide else 1)
+        self.chrome_grid.setColumnStretch(1, 0 if wide or compact else 1)
         self.chrome_grid.setColumnStretch(2, 1 if wide else 0)
         self.credit.setVisible(self.width() >= 1400)
         self.chrome_states.setVisible(self.width() >= 640)
 
     def _style_kpis(self):
         for key, value in self.kpis.items():
-            color = T('#FFC93C') if key in self._kpi_alerts else T(T('#FFFFFF'))
+            if value.text() == self.t('Not available'):     # a placeholder must not read like a number
+                value.setStyleSheet('font-size: 15px; font-weight: 400; color: #9FB0CC;')
+                continue
+            color = '#FFC93C' if key in self._kpi_alerts else '#FFFFFF'
             value.setStyleSheet(f'font-size: 28px; font-weight: 600; color: {color};')
 
     def _make_skeletons(self):
@@ -2170,12 +2423,30 @@ class ServerWindow(QMainWindow):
         self._fleet_revision += 1
         self._load_fleet()
 
+    def _show_today(self):
+        locale = QLocale('vi_VN' if self.language == 'vi' else 'en_GB')
+        self.today_label.setText(self.t('Today · {date}', date=locale.toString(QDate.currentDate(), 'd MMM yyyy')))
+
+    def _roll_to_today(self):
+        """Left open past midnight, "today" moves on. Follow it, unless someone picked another date."""
+        today = QDate.currentDate()
+        if today == self._today:
+            return
+        follows = self.fleet_date.date() == self._today
+        self._today = today
+        self._show_today()
+        if follows:
+            self.fleet_date.blockSignals(True)      # the load below already uses the new date
+            self.fleet_date.setDate(today)
+            self.fleet_date.blockSignals(False)
+
     def _load_fleet(self):
         if self._closed:
             return
         if self._fleet_busy:
             self._fleet_again = True
             return
+        self._roll_to_today()
         header = self.fleet_table.horizontalHeader()
         arguments = dict(day=self.fleet_date.date().toString('yyyy-MM-dd'), days=self.chart_range.currentData(),
                          limit=6, offset=self._fleet_offset, search=self.fleet_search.text(),
@@ -2236,6 +2507,9 @@ class ServerWindow(QMainWindow):
         self.kpis['Awake today'].setText(self._duration(result['today']['seconds']))
         self.kpi_notes['Awake today'].setText(self.t('{count} reporting devices', count=result['today']['devices']))
         self.kpis['Pending approval'].setText(str(counts['pending']))
+        self._style_kpis()
+        self._overview_data = True
+        self._arm_overview_entrance()
         self.kpi_notes['Pending approval'].setText(self.t('Administrator review required'))
         self.fleet_empty.setVisible(counts['total'] == 0)
         selected_group = self.fleet_group.currentData()
@@ -2253,7 +2527,7 @@ class ServerWindow(QMainWindow):
         table.setFixedHeight(table.horizontalHeader().height() +
                              max(1, len(result['rows'])) * table.verticalHeader().defaultSectionSize() + 16)
         for row_index, row in enumerate(result['rows']):
-            values = (row['name'], row['group'] or self.t('Not available'),
+            values = (row['name'], row['group'] or self.t('No group'),
                       self._fleet_status(row['status']) + (' / ' + self.t('Unstable') if row.get('unstable') else ''), self._duration(row['today']), self._relative(row['last']))
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -2299,7 +2573,7 @@ class ServerWindow(QMainWindow):
         self.open_device_button.setEnabled(bool(row))
         self.today_bar.setVisible(bool(row and row['today'] is not None))
         if not row:
-            self.fleet_detail_text.setText('<h2>' + html.escape(self.t('Device details')) + '</h2><p>' +
+            self.fleet_detail_text.setText('<p style="font-size:18px; font-weight:600; margin:0 0 4px 0">' + html.escape(self.t('Device details')) + '</p><p>' +
                                           html.escape(self.t('Select a device to view its recorded usage.')) + '</p>')
             return
         e = lambda value: html.escape(str(value))
@@ -2311,7 +2585,7 @@ class ServerWindow(QMainWindow):
                   ('Client version', row.get('client_version') or self.t('Not available')),
                   ('Coverage', self.t('Partial') if row['coverage'] == 'partial' else self.t('Unknown')),
                   ('Tracking since', self._date(row['tracking_since']) if row.get('tracking_since') else self.t('Not available')))
-        contents = '<h2 style="margin:0 0 4px 0">' + e(row['name']) + '</h2>'
+        contents = '<p style="font-size:18px; font-weight:600; margin:0 0 4px 0">' + e(row['name']) + '</p>'
         contents += T('<p style="color:#9FB0CC;margin:4px 0">') + e(row['group'] or self.t('No group')) + ' · ' + e(self._fleet_status(row['status'])) + '</p>'
         contents += '<p style="font-size:32px;font-weight:600;margin:8px 0 2px">' + e(hours) + T('</p><p style="color:#9FB0CC;margin:2px 0 8px">') + e(self.t('Recorded awake time')) + '</p>'
         contents += '<table width="100%" cellspacing="0" cellpadding="3">'
@@ -2340,7 +2614,7 @@ class ServerWindow(QMainWindow):
                  'wake': 'Turn on sent'}
         colors = {'report-received': T(T('#65D782')), 'report-overdue': T('#FFC93C'), 'enrollment-pending': T('#FFC93C')}
         for index, event in enumerate(events):
-            values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time']))
+            values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time'])[:5])   # HH:MM; the tooltip has the full stamp
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(event['time'] if column == 2 else value)
@@ -2533,14 +2807,30 @@ def read_theme_preference(directory):
     return value if value in ('auto', 'light', 'dark') else 'auto'
 
 
+def read_style_preference(directory):
+    try:
+        value = json.loads((Path(directory) / 'ui.json').read_text(encoding='utf-8')).get('style')
+    except (OSError, ValueError, AttributeError):
+        value = None
+    return value if value in STYLES else 'glass'
+
+
+def write_style_preference(directory, value):
+    _write_ui(directory, 'style', value if value in STYLES else 'glass')
+
+
 def write_theme_preference(directory, value):
+    _write_ui(directory, 'theme', value if value in ('auto', 'light', 'dark') else 'auto')
+
+
+def _write_ui(directory, key, value):
     path = Path(directory) / 'ui.json'
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
         data = data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         data = {}
-    data['theme'] = value if value in ('auto', 'light', 'dark') else 'auto'
+    data[key] = value
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(data), encoding='utf-8')
     os.replace(temporary, path)

@@ -53,9 +53,10 @@ def text(value='', name=''):
 
 
 class HealthPage(QWidget):
-    def __init__(self, settings, open_settings):
+    def __init__(self, settings, open_settings, remote=False):
         super().__init__()
         install()
+        self.remote = remote      # the server shows a computer's reported readings and never probes this one
         self.settings, self.enabled = {}, False
         self.generation, self.jobs, self.data = 0, {}, {}
         self.tasks = Tasks(self)
@@ -141,12 +142,15 @@ class HealthPage(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(3600000)
         self.timer.timeout.connect(self.refresh)
-        self.set_settings(settings)
+        if remote:
+            self.set_remote({})
+        else:
+            self.set_settings(settings)
         on_language_change(self.render)
 
     def chart(self, layout, title, unit, kind='bars'):
         layout.addWidget(text(tr(title), 'caption'))
-        plot = HealthPlot(kind, unit)
+        plot = HealthPlot('daily' if self.remote and kind == 'bars' else kind, unit)
         plot.bar_color = None      # the active theme's accent
         plot.setMinimumWidth(0)
         plot.setFixedHeight(150)
@@ -178,8 +182,16 @@ class HealthPage(QWidget):
         self.machine.setVisible(enabled)
         self.render()
 
+    def set_remote(self, data):
+        """data uses the shapes the local probes return: stability list, battery and sleep mappings."""
+        self.enabled, self.data = True, dict(data)
+        self.disabled.hide()
+        self.content.show()
+        self.machine.hide()
+        self.render()
+
     def refresh(self):
-        if not self.enabled or any(g == self.generation for _, g in self.jobs.values()):
+        if self.remote or not self.enabled or any(g == self.generation for _, g in self.jobs.values()):
             return
         for key, probe in (('machine', health.probe_machine), ('stability', health.probe_stability),
                            ('battery', health.probe_battery), ('sleep', health.probe_sleep)):
@@ -211,7 +223,9 @@ class HealthPage(QWidget):
             return start <= health.stamp(date).date() <= end
         unavailable = tr('Health reading unavailable. Check system log access and try again later.')
         machine = self.data.get('machine')
-        if machine == 'loading':
+        if self.remote:
+            pass
+        elif machine == 'loading':
             self.machine.setText(tr('Loading…'))
         elif isinstance(machine, dict):
             def date(value):
@@ -263,6 +277,8 @@ class HealthPage(QWidget):
                 ('\n'+tr('Multiple batteries: showing the first pack') if len(packs) > 1 else ''))
             history = {dt.date.fromisoformat(r['date']): r['full'] for r in data.get('history', []) if selected(r['date'])}
             try:
+                if self.remote:
+                    raise OSError()
                 from lifetime_tracker import read_ledger
                 for day, samples in read_ledger().get('health_capacity', {}).items():
                     if samples and selected(day) and samples[0].get('unit') == pack.get('unit'):

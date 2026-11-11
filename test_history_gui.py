@@ -53,8 +53,8 @@ if __name__ == '__main__' and '--child' in sys.argv:
         # checks; Insights intentionally adds no entrance animation.
         legacy = gui.BarChart()
         legacy.show()
-        assert legacy.entrance.duration() == 350
-        QTest.qWait(400)
+        assert legacy.entrance.duration() == 750
+        QTest.qWait(800)
         assert legacy.progress == 1
         animation = legacy.entrance
         legacy.hide()

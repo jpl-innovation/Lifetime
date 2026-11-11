@@ -76,6 +76,20 @@ class ServerExportTests(unittest.TestCase):
         self.assertIn(created, exported)
         self.assertIn('Report saved.', self.dialog.result.text())
 
+    def test_a_computer_reporting_again_after_the_preview_does_not_block_the_save(self):
+        # A connected computer reports every second, so its observation and receipt times differ on every
+        # build. Only a real change (permissions, identity, totals) may ask for a fresh review.
+        self.dialog.refresh_preview()
+        self.wait()
+        self.source['last_observed_at'] = '2026-11-07T12:00:05+07:00'    # seconds later, same day
+        self.source['last_received_at'] = '2026-11-07T05:01:06Z'
+        path = Path(self.root.name) / 'live.csv'
+        with patch('lifetime_server_export.QFileDialog.getSaveFileName', return_value=(str(path), '')):
+            self.dialog.save_report('csv')
+        self.wait()
+        self.assertTrue(path.exists())
+        self.assertIn('Report saved.', self.dialog.result.text())
+
     def test_read_failure_is_visible(self):
         self.client.call = lambda *a, **k: (_ for _ in ()).throw(PermissionError('secret'))
         self.dialog.refresh_preview()

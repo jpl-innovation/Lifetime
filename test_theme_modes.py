@@ -62,6 +62,36 @@ class ThemeModeTests(unittest.TestCase):
                 if re.search(r"QColor\('#(?:0B1426|12203A|08101F|1B2A46|34445E)'", code):
                     self.fail(f'{name}:{number} hard-codes a dark surface colour: {line.strip()}')
 
+    def test_the_jpl_logo_has_a_light_version_with_no_dark_disc(self):
+        from qt_test_support import qt_app
+        from lifetime_shell import themed_logo
+        self.app = qt_app()     # keep a reference: a pixmap needs a live application
+        path = Path('assets/jpl_innovation.png')
+        self.assertTrue(Path('assets/jpl_innovation_light.png').is_file())
+
+        def brightest(image, xs, ys):
+            found = [image.pixelColor(x, y) for x in xs for y in ys]
+            return max(c.lightness() for c in found if c.alpha() > 200)
+
+        def opaque_share(image, xs, ys):
+            found = [image.pixelColor(x, y).alpha() > 200 for x in xs for y in ys]
+            return sum(found) / len(found)
+        theme.set_theme('dark')
+        dark_pixmap = themed_logo(path)         # keep the pixmaps alive while their images are read
+        dark = dark_pixmap.toImage()
+        theme.set_theme('light')
+        try:
+            light_pixmap = themed_logo(path)
+            light = light_pixmap.toImage()
+        finally:
+            theme.set_theme('dark')
+        jpl = (range(10, 110, 3), range(95, 165, 3))      # the "JPL" lettering
+        badge = (range(470, 690, 3), range(20, 235, 3))   # the round badge
+        self.assertGreater(brightest(dark, *jpl), 200)    # the original, for dark surfaces
+        self.assertLess(brightest(light, *jpl), 60)       # navy lettering, readable on paper
+        self.assertGreater(opaque_share(dark, *badge), 0.8)   # the original badge is a solid dark disc
+        self.assertLess(opaque_share(light, *badge), 0.6)     # the light badge is line art: no dark fill left behind
+
 
 if __name__ == '__main__':
     unittest.main()

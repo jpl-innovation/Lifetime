@@ -14,6 +14,34 @@ def message():
 
 
 class ReadingsV2Tests(unittest.TestCase):
+    def test_hardware_validation_consent_and_legacy_fallback(self):
+        from lifetime_protocol import without_extended
+        value = message()
+        value['policy']['resources'] = True
+        value['readings'] = dict(observed_at='2026-11-07T12:00:00Z',
+                                specs=dict(hardware={'cpu': {'temperature_c': 50}, 'fans': []}))
+        validate_sync(value)
+        self.assertNotIn('hardware', without_extended(value)['readings']['specs'])
+        self.assertIn('hardware', value['readings']['specs'])
+        for hardware in (
+            {'cpu': {'temperature_c': True}}, {'cpu': {'temperature_c': float('nan')}},
+            {'cpu': {'current_mhz': 10**1000}}, {'cpu': {'serial': 'private'}},
+            {'fans': [None]}, {'fans': [{}]*9}, {'adapters': [{}]*17},
+            {'adapters': [{'name': 'x'*161}]}, {'adapters': [{'name': 'line\nbreak'}]},
+            {'adapters': [{'connected': 1}]}, {'memory': {'slots_used': 1.5}},
+            {'displays': [{'width': 0}]}, {'gpus': [{'vram_bytes': -1}]},
+            {'unavailable': {'fans': 'x'*161}}, {'unavailable': {'serial': 'private'}},
+            {'unavailable': {'cpu_temperature': 1}},
+            {'unavailable': {'fans': 'unrecognized reason'}},
+        ):
+            with self.subTest(hardware=hardware), self.assertRaises(ProtocolError):
+                bad = copy.deepcopy(value)
+                bad['readings']['specs']['hardware'] = hardware
+                validate_sync(bad)
+        value['policy']['resources'] = False
+        with self.assertRaises(ProtocolError):
+            validate_sync(value)
+
     def test_readings_and_command_result(self):
         value = message()
         value['policy'].update(resources=True, control=True)

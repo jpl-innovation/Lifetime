@@ -222,5 +222,93 @@ class ProtocolHealthTests(unittest.TestCase):
             store.close()
 
 
+class RemoteDetailTests(unittest.TestCase):
+    def test_resource_health_persists_without_separate_health_consent_and_revokes(self):
+        import contextlib
+        import lifetime_server_store as storage
+        import secrets
+        with tempfile.TemporaryDirectory() as folder, contextlib.ExitStack() as cleanup:
+            store = storage.Store(Path(folder)/'server.sqlite')
+            cleanup.callback(store.close)
+            policy = dict(history=True, resources=True)
+            request = dict(version=1, request_id=str(uuid.uuid4()), device_id=str(uuid.uuid4()),
+                           code=store.create_code()['code'], poll_token=secrets.token_urlsafe(32),
+                           identity={}, policy=policy)
+            store.enroll(request)
+            store.approve(request['request_id'])
+            credential = store.claim(request['request_id'], request['poll_token'])['credential']
+            value = payload()
+            reading = dict(summary(), detail=dict(stability=[], battery={'packs': []}))
+            value.update(device_id=request['device_id'], policy=policy,
+                         readings=dict(observed_at=reading['observed_at'], health=reading),
+                         history=dict(daily={}, hourly=[0]*24, boots=7))
+            store.ingest(request['device_id'], credential, value)
+            store.close()
+            store = storage.Store(Path(folder)/'server.sqlite')
+            cleanup.callback(store.close)
+            saved = store.get_device(request['device_id'])
+            self.assertEqual(saved['readings']['health'], reading)
+            self.assertEqual(saved['history']['boots'], 7)
+            self.assertIsNone(saved['health'])
+            value.update(policy_version=2, policy=dict(history=False, resources=False))
+            value.pop('readings')
+            value.pop('history')
+            store.ingest(request['device_id'], credential, value)
+            saved = store.get_device(request['device_id'])
+            self.assertIsNone(saved['readings'])
+            self.assertIsNone(saved['history'])
+
+    def test_resources_consent_and_nested_bounds(self):
+        value = payload()
+        value['policy']['resources'] = True
+        reading = summary()
+        reading['detail'] = dict(stability=[], battery={'packs': []}, sleep={'daily': {}, 'nights': []})
+        value['readings'] = dict(observed_at=reading['observed_at'], health=reading)
+        validate_sync(value)
+        value['policy']['resources'] = False
+        with self.assertRaises(ProtocolError):
+            validate_sync(value)
+        value['policy']['resources'] = True
+        for bad in ([{'date': '2026-11-08T12:00:00Z', 'kind': 'Crash'}]*401,
+                    [{'date': '2026-11-08T12:00:00Z', 'kind': 'unknown'}]):
+            reading['detail']['stability'] = bad
+            with self.assertRaises(ProtocolError):
+                validate_sync(value)
+
+    def test_history_bounds_and_legacy_format(self):
+        import lifetime_protocol as protocol
+        value = payload()
+        value['policy']['history'] = True
+        value['history'] = dict(daily={}, hourly=[0]*24, sessions=[], boots=1)
+        validate_sync(value)
+        old = protocol.without_extended(value)
+        self.assertEqual(old['history'], {'daily': {}})
+        value['history']['sessions'] = [dict(start='2026-11-08T12:00:00Z', seconds=True)]
+        with self.assertRaises(ProtocolError):
+            validate_sync(value)
+
+    def test_retention_trims_nested_series_from_fresh_readings(self):
+        from lifetime_server_store import Store
+        reading = dict(observed_at='2026-11-08T12:00:00Z', health=dict(last_crash='2026-01-01T00:00:00Z', detail=dict(
+            stability=[dict(date='2026-01-01T00:00:00Z', kind='Crash')],
+            battery=dict(usage={'2026-01-01': dict(ac=1, battery=2)}, history=[dict(date='2026-01-01', full=30)]),
+            sleep=dict(daily={'2026-01-01': dict(cycles=1, seconds=3)}, nights=[dict(date='2026-01-01', seconds=3)]))))
+        result = Store._retained_reading(reading, '2026-11-01T00:00:00Z')
+        self.assertIsNone(result['health']['last_crash'])
+        self.assertEqual(result['health']['detail']['stability'], [])
+        self.assertEqual(result['health']['detail']['battery']['usage'], {})
+        self.assertEqual(result['health']['detail']['sleep']['nights'], [])
+        self.assertIsNotNone(reading['health']['last_crash'])
+
+    def test_detail_shaping_caps_and_privacy(self):
+        data = dict(stability=[], battery=dict(packs=[dict(full=50, design=60, cycles=42.0, serial='private')]),
+                    sleep=dict(daily={}, nights=[]))
+        detail = health.detail(data)
+        self.assertNotIn('serial', detail['battery']['packs'][0])
+        self.assertIs(type(detail['battery']['packs'][0]['cycles']), int)
+        from lifetime_protocol import validate_health_detail
+        validate_health_detail(detail)
+
+
 if __name__ == '__main__':
     unittest.main()
