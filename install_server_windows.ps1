@@ -154,9 +154,9 @@ if ($Mode -eq 'SourceService') {
 # The configuration file contains no credentials and inherits the private DACL.
 $configuration = @{ Mode = $Mode; Directory = $DataDirectory; Address = $Address; Host = $HostAddress; Port = $Port; AdminPort = $AdminPort }
 $configuration | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDirectory 'server-install.json') -Encoding UTF8
-# One-code connection fallback is limited to TCP 8443 on the local subnet.
+# One-code connection fallback is limited to the HTTPS port on the local subnet.
 if (-not (Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -Name 'LifetimeServer-Connect' -DisplayName 'Lifetime Server local connection' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8443 -RemoteAddress LocalSubnet -Profile Domain, Private | Out-Null
+    New-NetFirewallRule -Name 'LifetimeServer-Connect' -DisplayName 'Lifetime Server local connection' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress LocalSubnet -Profile Domain, Private | Out-Null
 }
 if ($OpenFirewall -and -not (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -Name 'LifetimeServer-HTTPS' -DisplayName 'Lifetime Server HTTPS' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress $FirewallRemoteAddress -Profile Domain, Private | Out-Null
@@ -165,4 +165,4 @@ if ($Start) {
     if ($Mode -eq 'SourceService') { Start-Service -Name LifetimeServer } else { Start-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server }
 }
 Write-Host "Installed $Mode. Data: $DataDirectory. Dashboard loopback port: $AdminPort."
-Write-Host 'TCP 8443 is allowed from LocalSubnet on Domain and Private networks. Use -Start or start the registered service/task explicitly.'
+Write-Host "TCP $Port is allowed from LocalSubnet on Domain and Private networks only (not on Public networks). Use -Start or start the registered service/task explicitly."
