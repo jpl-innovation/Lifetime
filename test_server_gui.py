@@ -163,11 +163,44 @@ class ServerGuiTests(unittest.TestCase):
         self.assertFalse(self.window.hardware_detail.isHidden())
         texts = [value.text() for _, value in self.window.hardware_detail.fields]
         self.assertIn('53', texts[0])
-        self.assertIn('firmware', texts[2])
+        self.assertTrue(any('firmware' in value.accessibleDescription() for _, value in self.window.hardware_detail.fields))
         row['policy']['resources'] = False
         self.window._render_specs(row)
         self.assertTrue(self.window.hardware_detail.isHidden())
         self.assertNotIn('53', self.window.hardware_detail.fields[0][1].text())
+
+    def test_hardware_sections_remain_readable_and_keep_disclosure_state(self):
+        from PyQt6.QtWidgets import QToolButton, QFormLayout
+        from lifetime_i18n import set_language
+        from lifetime_system_gui import HardwarePanel
+        panel = HardwarePanel(remote=True)
+        self.addCleanup(panel.deleteLater)
+        panel.set_data(dict(adapters=[dict(name='Office Ethernet', model='Gigabit adapter', kind='Ethernet',
+                                          connected=True, speed_mbps=1000, driver='1.2')]))
+        panel.resize(390, 900)
+        panel.show()
+        self.addCleanup(panel.close)
+        self.app.processEvents()
+        self.assertTrue(all(form.rowWrapPolicy() == QFormLayout.RowWrapPolicy.WrapAllRows for form in panel.forms))
+        self.assertLessEqual(panel.minimumSizeHint().width(), 390)
+        headings = panel.findChildren(QToolButton, 'hardwareSectionTitle')
+        self.assertEqual(len(headings), 7)
+        network = next(button for button in headings if button.text() == 'Network cards')
+        network.click()
+        first = panel.fields[0][1]
+        panel.set_data(panel.data)
+        self.assertIs(panel.fields[0][1], first)
+        set_language('vi')
+        self.addCleanup(set_language, 'en')
+        self.app.processEvents()
+        headings = panel.findChildren(QToolButton, 'hardwareSectionTitle')
+        current = [button for button in headings if not button.parentWidget().isHidden()]
+        network = next(button for button in current if button.text() == 'Card mạng')
+        self.assertFalse(network.isChecked())
+        self.assertTrue(any(value.text() == '1000 Mbps' for _, value in panel.fields))
+        network.setFocus()
+        QTest.keyClick(network, Qt.Key.Key_Space)
+        self.assertTrue(network.isChecked())
 
     def test_remote_pages_use_resources_and_history_consent(self):
         row = device(0)
