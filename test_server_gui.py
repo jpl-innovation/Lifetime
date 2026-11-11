@@ -342,6 +342,28 @@ class ServerGuiTests(unittest.TestCase):
         self.assertIn('PRIVATE-OS', detail)
         self.assertIn('Received at: ' + self.window._timestamp('2020-01-01T00:01:00Z'), detail)
 
+    def test_device_daily_chart_and_empty_states_follow_policy(self):
+        row = device(1)
+        self.load([row])
+        self.select(row['device_id'])
+        self.assertEqual(self.window.device_daily.message, 'History is off on this computer')
+        self.assertEqual(self.window.performance_plots['disk_free_percent'].message, 'System readings are off on this computer')
+        today = dt.date.today()
+        self.api.rows[0]['policy']['history'] = True
+        self.api.rows[0]['history'] = {'daily': {today.isoformat(): 7200, (today - dt.timedelta(days=3)).isoformat(): 36000,
+                                                 (today - dt.timedelta(days=40)).isoformat(): 3600}}
+        self.window.refresh()
+        self.wait_idle()
+        chart = self.window.device_daily
+        self.assertEqual(chart.message, '')
+        self.assertEqual(len(chart.values), 14)
+        self.assertEqual(chart.values[-1], 2.0)
+        self.assertEqual(chart.values[-4], 10.0)
+        self.assertIn('10.0', self.window.daily_summary.text())
+        self.window.daily_range.setCurrentIndex(1)
+        self.assertEqual(len(chart.values), 30)
+        self.assertEqual(sum(v is not None for v in chart.values), 2)      # the 40-day-old entry stays out
+
     def test_identity_editor_validation_and_selected_device_only(self):
         self.load([device(1), device(2)])
         chosen = self.api.rows[1]['device_id']
