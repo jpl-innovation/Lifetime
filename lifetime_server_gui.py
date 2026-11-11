@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 import time
 
-from PyQt6.QtCore import QDate, QItemSelectionModel, QLocale, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QEvent, QItemSelectionModel, QLocale, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6 import sip
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
@@ -31,7 +31,7 @@ from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
 from lifetime_reveal import RollLabel, fade_in
-from lifetime_server_devices import (glass, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
+from lifetime_server_devices import (glass, Glass, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
 from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
@@ -65,6 +65,7 @@ class _Item(QTableWidgetItem):
 class ServerWindow(QMainWindow):
     export_requested = pyqtSignal(object)
     tray = None
+    CONTENT_WIDTH = 1920     # wide screens get a wider column; narrower windows simply fill it
 
     def __init__(self, directory, admin_port, language='en', parent=None):
         super().__init__(parent)
@@ -116,27 +117,35 @@ class ServerWindow(QMainWindow):
         self.resize(1600, 1000)
         self.setMinimumSize(420, 400)
         install()
+        QApplication.instance().installEventFilter(self)
         self.setStyleSheet(stylesheet() + server_surfaces() + """
-            QMainWindow, QDialog { background: qlineargradient(x1:0, y1:0, x2:0.35, y2:1, stop:0 #0F1A30, stop:1 #08101F); }
-            QWidget#chrome { background: #08101F; }
-            QWidget#panel[glass="true"] { background: transparent; border: none; }
-            QPushButton[glass="true"] { background: transparent; border: 1px solid transparent; }
+            QMainWindow, QDialog { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2353A0, stop:0.28 #15306A, stop:0.55 #0B1426, stop:0.8 #3A3220, stop:1 #8A6516); }
+            QWidget#chrome { background: transparent; }
+            QWidget#panel[glass="true"], QWidget#notice, QScrollArea#detailScroll { background: transparent; border: none; }
+            QPushButton[glass="true"] { background: transparent; border: 1px solid transparent; padding: 8px 16px; }
             QPushButton[glass="true"]:focus { border-color: #FFC93C; }
-            QWidget#notice { background: #1B2A46; }
+            QPushButton[glass="true"]:checked, QPushButton[glass="true"]:pressed { background: transparent; }
+            QPushButton[glass="true"]:disabled { background: transparent; border-color: transparent; }
+            QPushButton#link { background: transparent; border: 1px solid transparent; color: #FFC93C; padding: 4px 6px; font-weight: 600; }
+            QPushButton#link:hover { text-decoration: underline; }
+            QPushButton#link:focus { border-color: #FFC93C; }
+            QLineEdit, QComboBox, QSpinBox, QDateEdit, QPlainTextEdit {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0F1A30, stop:1 #12203A); border-color: #2A3E66; }
+            QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDateEdit:hover { border-color: #3A5688; }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus { border-color: #FFC93C; }
+            QLabel#statusText { font-size: 14px; }
             QLabel#muted { color: #9FB0CC; font-size: 13px; }
             QLabel#fieldLabel { color: #9FB0CC; }
             QLabel#sectionTitle { font-size: 18px; font-weight: 600; }
-            QLabel#metric { font-size: 20px; font-weight: 500; }
+            QLabel#metric { font-size: 26px; font-weight: 600; }
             QPushButton#deviceMenu { background: transparent; border: 1px solid transparent; }
             QPushButton#deviceMenu:hover { border-color: #34445E; }
             QPushButton#deviceMenu:focus { border-color: #FFC93C; }
-            QWidget#panel QLineEdit, QWidget#panel QComboBox, QWidget#panel QSpinBox, QWidget#panel QDateEdit {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0F1A30, stop:1 #0B1426); }
             QTableWidget { background: transparent; border: none; padding: 0; gridline-color: #22345A; }
-            QTableWidget::item { padding: 7px 10px; border-bottom: 1px solid #22345A; }
+            QTableWidget::item { padding: 7px 10px; border-bottom: 1px solid #1B2A46; }
             QTableWidget#approvalTable::item, QTableWidget#invitationTable::item { padding: 0; }
             QTableWidget::item:selected { background: transparent; }
-            QHeaderView::section { font-weight: 400; font-size: 13px; color: #9FB0CC; border-bottom: 1px solid #22345A; }
+            QHeaderView::section { background: transparent; font-weight: 600; font-size: 12px; color: #9FB0CC; border: none; border-bottom: 1px solid #2A3E66; }
         """)
         self.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets/lifetime.png')))
         body = QWidget()
@@ -147,7 +156,7 @@ class ServerWindow(QMainWindow):
         self.chrome.setObjectName('chrome')
         self.chrome.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.chrome_grid = QGridLayout(self.chrome)
-        self.chrome_grid.setContentsMargins(24, 10, 24, 10)
+        self.chrome_grid.setContentsMargins(32, 14, 32, 6)
         self.chrome_grid.setHorizontalSpacing(16)
         self.chrome_grid.setVerticalSpacing(8)
         self.chrome_brand = QWidget()
@@ -196,7 +205,7 @@ class ServerWindow(QMainWindow):
         glass(self.refresh_button, CONTROL_RADIUS, pill=True)
         actions.addWidget(self.refresh_button)
         self.credit = QLabel()
-        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(150, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.bind(self.credit, 'Made by JPL Innovation', 'setToolTip')
         actions.addWidget(self.credit)
         self.language_choice = QComboBox()
@@ -222,15 +231,21 @@ class ServerWindow(QMainWindow):
         self.notice = QWidget()
         self.notice.setObjectName('notice')
         self.notice.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        glass(self.notice, 12, accent='#FFC93C')
+        self.notice.setMaximumWidth(self.CONTENT_WIDTH - 64)
         notice_row = QHBoxLayout(self.notice)
-        notice_row.setContentsMargins(24, 8, 24, 8)
+        notice_row.setContentsMargins(24, 12, 18, 12)
         self.status_label = StatusNotice(lambda value: value in (self.t('Ready'), self.t('Working…'), self.t('Changes saved.')))
         self.bind(self.status_label, 'Ready')
         self.status_label.setWordWrap(True)
         self.status_label.setAccessibleName(self.t('Local administration'))
+        self.status_label.setObjectName('statusText')
         notice_row.addWidget(self.status_label)
         self.notice.hide()
-        layout.addWidget(self.notice)
+        notice_holder = QHBoxLayout()
+        notice_holder.setContentsMargins(32, 10, 32, 0)
+        notice_holder.addWidget(self.notice)
+        layout.addLayout(notice_holder)
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(body)
         self._kpi_alerts = set()
@@ -281,6 +296,8 @@ class ServerWindow(QMainWindow):
         self.live_timer.setInterval(1000)
         self.live_timer.timeout.connect(self._load_live)
         self.live_timer.start()
+        for button in self.findChildren(QPushButton):     # buttons polished before they joined the window
+            self._glass_button(button)
         self.retranslate()
         QTimer.singleShot(0, self.refresh)
         # Open with nothing focused: a yellow focus outline at launch reads as a second selected state.
@@ -289,6 +306,23 @@ class ServerWindow(QMainWindow):
 
     def t(self, key, **values):
         return text(key, self.language, **values)
+
+    def eventFilter(self, watched, event):
+        # Three button kinds: amber primary (#primary), quiet text links (#link) and glass for everything else.
+        # Every other push button in this window or its dialogs becomes glass when it is first polished.
+        if (event.type() == QEvent.Type.Polish and isinstance(watched, QPushButton) and not watched.property('glass')
+                and watched.objectName() != 'deviceMenu'):
+            parent = watched
+            while parent is not None and parent is not self:
+                parent = parent.parentWidget()
+            if parent is self:
+                self._glass_button(watched)
+        return False
+
+    @staticmethod
+    def _glass_button(button):
+        if not button.property('glass') and button.objectName() != 'deviceMenu':
+            glass(button, CONTROL_RADIUS, pill=True)
 
     def bind(self, widget, key, setter='setText'):
         self._bindings.append((widget, key, setter))
@@ -311,7 +345,7 @@ class ServerWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(page)
-        page.setMaximumWidth(1440)
+        page.setMaximumWidth(self.CONTENT_WIDTH)
         scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 24, 32, 24)
@@ -357,7 +391,9 @@ class ServerWindow(QMainWindow):
             top.addWidget(tile_icon)
             top.addStretch()
             if key == 'Pending approval':
-                top.addWidget(self.button('Review', self.review_pending))
+                review = self.button('Review', self.review_pending)
+                review.setObjectName('link')
+                top.addWidget(review)
             tile_layout.addWidget(top_row)
             tile_layout.addSpacing(8)
             value = RollLabel(self.t('Not available'))
@@ -497,7 +533,7 @@ class ServerWindow(QMainWindow):
         self.overview_health.setObjectName('muted')
         self.overview_health.setWordWrap(True)
         self.overview_health.hide()     # only a failure is worth a line here
-        layout.addWidget(self.overview_health)
+        layout.insertWidget(1, self.overview_health)     # in the column, under the title, not after the page
         # Cumulative source breakdown stays available under Administration.
         self.overview_usage = QWidget()
         usage_layout = QVBoxLayout(self.overview_usage)
@@ -562,7 +598,9 @@ class ServerWindow(QMainWindow):
         title = self.label('Devices')
         title.setStyleSheet('font-size: 28px; font-weight: 600;')
         title_row.addWidget(title, 1)
-        title_row.addWidget(self.button('Add device', self.add_device))
+        self.devices_add_button = self.button('Add device', self.add_device)
+        self.devices_add_button.setObjectName('primary')
+        title_row.addWidget(self.devices_add_button)
         self.export_button = glass(self.button('Export selected', self.export_selection), CONTROL_RADIUS, pill=True)
         title_row.addWidget(self.export_button)
         layout.addLayout(title_row)
@@ -642,7 +680,7 @@ class ServerWindow(QMainWindow):
         self.device_detail_panel, detail_layout = self._panel()
         self.detail_name = QLabel()
         self.detail_name.setWordWrap(True)
-        self.detail_name.setStyleSheet('font-size: 23px; font-weight: 600;')
+        self.detail_name.setStyleSheet('font-size: 22px; font-weight: 600;')
         detail_layout.addWidget(self.detail_name)
         status_row = QHBoxLayout()
         self.detail_group, self.detail_status = QLabel(), QLabel()
@@ -798,6 +836,9 @@ class ServerWindow(QMainWindow):
         self.device_grid.addWidget(self.devices_panel, 0, 0)
         self.device_detail_scroll = QScrollArea()
         self.device_detail_scroll.setObjectName('detailScroll')
+        for layer in self.device_detail_panel.findChildren(Glass, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            self.device_detail_panel.removeEventFilter(layer)       # one strong pane, not glass inside glass
+        glass(self.device_detail_scroll, strong=True)
         self.device_detail_panel.setProperty('lifetimeScrollContent', True)
         self.device_detail_scroll.setWidgetResizable(True)
         self.device_detail_scroll.setWidget(self.device_detail_panel)
@@ -1407,7 +1448,7 @@ class ServerWindow(QMainWindow):
     def _apply_live_theme(self, name):
         set_theme(name)
         retint_all()
-        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(150, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.about_logo.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(100, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.refresh()
 
@@ -1808,8 +1849,11 @@ class ServerWindow(QMainWindow):
         selected = self.selected_device_ids()
         self.export_button.setEnabled(bool(selected))
         self.export_button.setObjectName('primary' if selected else '')
-        self.export_button.style().unpolish(self.export_button)
-        self.export_button.style().polish(self.export_button)
+        self.devices_add_button.setObjectName('' if selected else 'primary')     # one amber action at a time
+        for button in (self.export_button, self.devices_add_button):
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
         if len(selected) != 1:
             self._finish_skeletons('detail')
             self._detail_revision += 1
@@ -2130,7 +2174,10 @@ class ServerWindow(QMainWindow):
 
     def _style_kpis(self):
         for key, value in self.kpis.items():
-            color = T('#FFC93C') if key in self._kpi_alerts else T(T('#FFFFFF'))
+            if value.text() == self.t('Not available'):     # a placeholder must not read like a number
+                value.setStyleSheet('font-size: 15px; font-weight: 400; color: #9FB0CC;')
+                continue
+            color = '#FFC93C' if key in self._kpi_alerts else '#FFFFFF'
             value.setStyleSheet(f'font-size: 28px; font-weight: 600; color: {color};')
 
     def _make_skeletons(self):
@@ -2280,6 +2327,7 @@ class ServerWindow(QMainWindow):
         self.kpis['Awake today'].setText(self._duration(result['today']['seconds']))
         self.kpi_notes['Awake today'].setText(self.t('{count} reporting devices', count=result['today']['devices']))
         self.kpis['Pending approval'].setText(str(counts['pending']))
+        self._style_kpis()
         self._overview_data = True
         self._arm_overview_entrance()
         self.kpi_notes['Pending approval'].setText(self.t('Administrator review required'))
@@ -2345,7 +2393,7 @@ class ServerWindow(QMainWindow):
         self.open_device_button.setEnabled(bool(row))
         self.today_bar.setVisible(bool(row and row['today'] is not None))
         if not row:
-            self.fleet_detail_text.setText('<h2>' + html.escape(self.t('Device details')) + '</h2><p>' +
+            self.fleet_detail_text.setText('<p style="font-size:18px; font-weight:600; margin:0 0 4px 0">' + html.escape(self.t('Device details')) + '</p><p>' +
                                           html.escape(self.t('Select a device to view its recorded usage.')) + '</p>')
             return
         e = lambda value: html.escape(str(value))
@@ -2357,7 +2405,7 @@ class ServerWindow(QMainWindow):
                   ('Client version', row.get('client_version') or self.t('Not available')),
                   ('Coverage', self.t('Partial') if row['coverage'] == 'partial' else self.t('Unknown')),
                   ('Tracking since', self._date(row['tracking_since']) if row.get('tracking_since') else self.t('Not available')))
-        contents = '<h2 style="margin:0 0 4px 0">' + e(row['name']) + '</h2>'
+        contents = '<p style="font-size:18px; font-weight:600; margin:0 0 4px 0">' + e(row['name']) + '</p>'
         contents += T('<p style="color:#9FB0CC;margin:4px 0">') + e(row['group'] or self.t('No group')) + ' · ' + e(self._fleet_status(row['status'])) + '</p>'
         contents += '<p style="font-size:32px;font-weight:600;margin:8px 0 2px">' + e(hours) + T('</p><p style="color:#9FB0CC;margin:2px 0 8px">') + e(self.t('Recorded awake time')) + '</p>'
         contents += '<table width="100%" cellspacing="0" cellpadding="3">'
