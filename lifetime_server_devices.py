@@ -2,17 +2,26 @@
 import math
 
 from PyQt6.QtCore import Qt, QEvent, QPointF, QPropertyAnimation, QEasingCurve, QRectF, QTimer, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
+from PyQt6.QtGui import QBrush, QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QShortcut
 from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayout,
                             QHBoxLayout, QPushButton, QProgressBar, QStyle, QStyledItemDelegate,
                             QStyleOptionViewItem, QGraphicsOpacityEffect)
 
 from lifetime_server_widgets import reduced_motion, status_dot, more_icon
-from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T
+from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_theme
 from lifetime_reveal import Intro, paint_roll, phase
 
 
 class SegmentedBar(QTabBar):
+    """The server's page menu: a pane of glass with a lens-like pill for the current page.
+
+    The pill stretches as it moves. The edge it moves towards goes first and the edge it leaves catches up, so the
+    motion has a direction and a little weight. The bar is painted, not styled, so one pass draws both themes:
+    a translucent body that lets the surface through, a bright diagonal rim, and a highlight along the top edge."""
+    LEAD_MS = 320       # the leading edge arrives first
+    TRAIL_MS = 520      # the trailing edge catches up
+    SHEEN_MS = 1250     # one light sweep when the window first shows
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDrawBase(False)
@@ -25,8 +34,24 @@ class SegmentedBar(QTabBar):
         self.indicator.setStyleSheet('background:#223959; ')
         self.indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.animation = QPropertyAnimation(self.indicator, b'geometry', self)
-        self.animation.setDuration(260)
+        self.animation.setDuration(self.LEAD_MS)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.valueChanged.connect(lambda *unused: self.update())
+        self.trail = QVariantAnimation(self)
+        self.trail.setStartValue(0.0)
+        self.trail.setEndValue(1.0)
+        self.trail.setDuration(self.TRAIL_MS)
+        self.trail.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.trail.valueChanged.connect(lambda *unused: self.update())
+        self._trail_side, self._trail_from, self._trail_to = 'l', 0.0, 0.0
+        self.sheen = 1.0
+        self._sheen_played = False
+        self.sheen_animation = QVariantAnimation(self)
+        self.sheen_animation.setStartValue(0.0)
+        self.sheen_animation.setEndValue(1.0)
+        self.sheen_animation.setDuration(self.SHEEN_MS)
+        self.sheen_animation.valueChanged.connect(self._set_sheen)
+        self.sheen_animation.finished.connect(lambda: self._set_sheen(1.0))
         self.currentChanged.connect(self.move_indicator)
 
     def tabSizeHint(self, index):
@@ -46,37 +71,145 @@ class SegmentedBar(QTabBar):
             QTabBar::tab:selected {{color:#FFFFFF;}}
             QTabBar::tab:focus {{color:#FFC93C;}}''')
 
+    def _set_sheen(self, value):
+        self.sheen = float(value)
+        self.update()
+
+    def pill_rect(self):
+        """The pill as drawn: the leading edge is the animated geometry, the trailing edge lags behind it."""
+        rect = QRectF(self.indicator.geometry())
+        if self.trail.state() == self.trail.State.Running:
+            edge = self._trail_from + (self._trail_to - self._trail_from) * float(self.trail.currentValue())
+            if self._trail_side == 'l':
+                rect.setLeft(min(edge, rect.right() - 1))
+            else:
+                rect.setRight(max(edge, rect.left() + 1))
+        return rect
+
     def move_indicator(self, index, animate=True):
         target = self.tabRect(index).adjusted(5, 5, -5, -5)
+        drawn = self.pill_rect()
         self.animation.stop()
+        self.trail.stop()
         if reduced_motion() or not animate or not self.isVisible():
             self.indicator.setGeometry(target)
         else:
-            self.animation.setStartValue(self.indicator.geometry())
+            start = self.indicator.geometry()
+            self.animation.setStartValue(start)
             self.animation.setEndValue(target)
             self.animation.start()
+            forward = target.left() >= start.left()
+            self._trail_side = 'l' if forward else 'r'
+            self._trail_from = drawn.left() if forward else drawn.right()
+            self._trail_to = float(target.left() if forward else target.right())
+            self.trail.start()
         # Paint the animated geometry beneath the native labels in paintEvent.
         self.indicator.hide()
         self.update()
 
+    def _glass(self, painter, rect, pill):
+        dark = active_theme() == 'dark'
+        radius = rect.height() / 2
+        body = QPainterPath()
+        body.addRoundedRect(rect, radius, radius)
+        top, bottom = rect.topLeft(), rect.bottomLeft()
+        if pill:
+            for grow, alpha in ((6.0, 9), (3.5, 13), (1.5, 18)):      # a soft shadow under the lens
+                shadow = QPainterPath()
+                lifted = rect.adjusted(-grow, -grow / 3, grow, grow).translated(0, 2.5)
+                shadow.addRoundedRect(lifted, lifted.height() / 2, lifted.height() / 2)
+                painter.fillPath(shadow, QColor(0, 0, 0, alpha) if dark else QColor(20, 33, 61, alpha))
+            base = QColor(T('#3A5688')) if dark else QColor(255, 255, 255)
+            base.setAlpha(150 if dark else 238)
+            painter.fillPath(body, base)
+            wash = QLinearGradient(top, bottom)
+            wash.setColorAt(0.0, QColor(255, 255, 255, 62) if dark else QColor(255, 255, 255, 255))
+            wash.setColorAt(1.0, QColor(160, 190, 240, 22) if dark else QColor(228, 235, 246, 210))
+            painter.fillPath(body, wash)
+        else:
+            base = QColor(T('#0F1A30'))
+            base.setAlpha(150 if dark else 120)
+            painter.fillPath(body, base)
+            wash = QLinearGradient(top, bottom)
+            wash.setColorAt(0.0, QColor(255, 255, 255, 34) if dark else QColor(255, 255, 255, 210))
+            wash.setColorAt(0.5, QColor(255, 255, 255, 9) if dark else QColor(255, 255, 255, 80))
+            wash.setColorAt(1.0, QColor(255, 255, 255, 20) if dark else QColor(255, 255, 255, 150))
+            painter.fillPath(body, wash)
+        # The lit upper half: a curved highlight that fades out before the middle.
+        cap = QPainterPath()
+        cap_rect = QRectF(rect.left() + 2, rect.top() + 1.5, rect.width() - 4, rect.height() * 0.48)
+        cap.addRoundedRect(cap_rect, cap_rect.height() / 2, cap_rect.height() / 2)
+        lit = QLinearGradient(cap_rect.topLeft(), cap_rect.bottomLeft())
+        lit.setColorAt(0.0, QColor(255, 255, 255, (86 if pill else 40) if dark else (255 if pill else 170)))
+        lit.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.fillPath(cap.intersected(body), lit)
+        # The software's amber glows faintly along the lower edge, so the glass is blue with a warm light under it.
+        warm = QColor(T('#FFC93C'))
+        warm.setAlpha((56 if pill else 24) if dark else (48 if pill else 18))
+        glow_rect = QRectF(rect.left() + 2, rect.bottom() - rect.height() * 0.42, rect.width() - 4, rect.height() * 0.42 - 1.5)
+        glow_area = QPainterPath()
+        glow_area.addRect(glow_rect)
+        glow = QLinearGradient(glow_rect.bottomLeft(), glow_rect.topLeft())
+        faded = QColor(warm)
+        faded.setAlpha(0)
+        glow.setColorAt(0.0, warm)
+        glow.setColorAt(1.0, faded)
+        painter.fillPath(body.intersected(glow_area), glow)
+        # Rim: an outer hairline in the border colour, then a diagonal specular edge (bright top-left and bottom-right).
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        outer = QPainterPath()
+        outer.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        painter.setPen(QPen(QColor(20, 33, 61, 58) if (not dark and pill) else QColor(T('#22345A')), 1))
+        painter.drawPath(outer)
+        rim = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        strong, weak = (170, 26) if (dark and pill) else (110, 20) if dark else (255, 120)
+        rim.setColorAt(0.0, QColor(255, 255, 255, strong))
+        rim.setColorAt(0.4, QColor(255, 255, 255, weak))
+        rim.setColorAt(0.6, QColor(255, 255, 255, weak))
+        glint = QColor(T('#FFC93C'))                            # amber catches the lower-right edge
+        glint.setAlpha(200 if pill else 95)
+        rim.setColorAt(0.85, QColor(255, 255, 255, weak))
+        rim.setColorAt(1.0, glint)
+        inner = QPainterPath()
+        inner.addRoundedRect(rect.adjusted(1.5, 1.5, -1.5, -1.5), radius - 1, radius - 1)
+        painter.setPen(QPen(QBrush(rim), 1))
+        painter.drawPath(inner)
+
     def paintEvent(self, event):
-        from PyQt6.QtGui import QPainter
         from PyQt6.QtWidgets import QStyle, QStyleOptionTab, QStylePainter
         painter = QStylePainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        from PyQt6.QtGui import QPen
-        painter.setPen(QPen(QColor(T('#22345A')), 1))
-        painter.setBrush(QColor(T('#0F1A30')))
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), self.height() / 2, self.height() / 2)
-        painter.setPen(QPen(QColor(T('#3A5688')), 1))
-        painter.setBrush(QColor(T('#243C63')))
-        painter.drawRoundedRect(self.indicator.geometry().adjusted(0, 0, -1, -1), self.indicator.height() / 2, self.indicator.height() / 2)
+        bar = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        self._glass(painter, bar, pill=False)
+        # On load the pill fades up as the light passes, then it is an ordinary pill.
+        painter.setOpacity(min(1.0, self.sheen * 2.4))
+        self._glass(painter, self.pill_rect(), pill=True)
+        painter.setOpacity(1.0)
         painter.setPen(Qt.PenStyle.NoPen)
         for index in range(self.count()):
             option = QStyleOptionTab()
             self.initStyleOption(option, index)
             painter.drawControl(QStyle.ControlElement.CE_TabBarTabLabel, option)
+        if self.sheen < 1.0:                                    # one soft sweep of light, left to right
+            t = self.sheen
+            t = t * t * (3 - 2 * t)
+            clip = QPainterPath()
+            clip.addRoundedRect(bar, bar.height() / 2, bar.height() / 2)
+            width = bar.width() * 0.22
+            centre = bar.left() - width + (bar.width() + 2 * width) * t
+            band = QLinearGradient(centre - width, bar.top(), centre + width, bar.top() + bar.height() * 0.7)
+            light = QColor(255, 232, 170, 84) if active_theme() == 'dark' else QColor(T('#FFC93C'))   # a warm sweep
+            if active_theme() != 'dark':
+                light.setAlpha(120)
+            clear = QColor(light)
+            clear.setAlpha(0)
+            band.setColorAt(0.0, clear)
+            band.setColorAt(0.5, light)
+            band.setColorAt(1.0, clear)
+            painter.save()
+            painter.setClipPath(clip)
+            painter.fillRect(bar, band)
+            painter.restore()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -85,6 +218,11 @@ class SegmentedBar(QTabBar):
     def showEvent(self, event):
         super().showEvent(event)
         self.move_indicator(self.currentIndex(), False)
+        if not self._sheen_played:
+            self._sheen_played = True
+            if not reduced_motion():
+                self.sheen = 0.0
+                self.sheen_animation.start()
 
 
 class Skeleton(QWidget):

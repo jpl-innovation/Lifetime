@@ -692,6 +692,23 @@ class ServerGuiTests(unittest.TestCase):
         self.window.status_label.setText(self.window.t('Ready'))
         self.assertTrue(self.window.notice.isHidden())
 
+    def test_menu_pill_stretches_leading_edge_first_and_settles_exactly(self):
+        from PyQt6.QtCore import QRectF
+        bar = self.window.tabs.tabBar()
+        self.window.tabs.setCurrentIndex(0)
+        QTest.qWait(700)
+        with patch('lifetime_server_devices.reduced_motion', return_value=False):
+            self.window.tabs.setCurrentIndex(2)
+            QTest.qWait(90)
+            drawn, leading = bar.pill_rect(), QRectF(bar.indicator.geometry())
+            self.assertEqual(drawn.right(), leading.right())    # moving right: the right edge leads
+            self.assertLess(drawn.left(), leading.left())       # the left edge is still catching up
+            QTest.qWait(700)
+        self.assertEqual(bar.pill_rect().toRect(), bar.tabRect(2).adjusted(5, 5, -5, -5))
+        with patch.dict('os.environ', {'LIFETIME_REDUCE_MOTION': '1'}):
+            self.window.tabs.setCurrentIndex(0)
+            self.assertEqual(bar.pill_rect().toRect(), bar.tabRect(0).adjusted(5, 5, -5, -5))
+
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget
         self.assertIsInstance(self.window.tabs, QStackedWidget)
@@ -706,7 +723,7 @@ class ServerGuiTests(unittest.TestCase):
             intermediate = bar.indicator.geometry()
             self.window.tabs.setCurrentIndex(2)
             self.assertEqual(bar.animation.startValue(), intermediate)
-            QTest.qWait(300)
+            QTest.qWait(700)
             self.assertEqual(bar.indicator.geometry(), bar.tabRect(2).adjusted(5, 5, -5, -5))
         with patch.dict('os.environ', {'LIFETIME_REDUCE_MOTION': '1'}):
             self.window.tabs.setCurrentIndex(3)
