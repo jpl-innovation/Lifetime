@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEd
 from lifetime_admin import AdminClient
 import lifetime_i18n as catalog
 from lifetime_protocol import CLIENT_VERSION, IDENTITY_FIELDS, validate_identity
-from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, set_theme, resolve_theme, active_theme, retint_all
+from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, set_theme, resolve_theme, active_theme, retint_all, CONTROL_RADIUS
 import json
 import os
 from lifetime_layout import ControlRow
@@ -31,7 +31,7 @@ from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_widgets import AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
 from lifetime_reveal import RollLabel, fade_in
-from lifetime_server_devices import (ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
+from lifetime_server_devices import (glass, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot
 from lifetime_shell import PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
@@ -117,7 +117,11 @@ class ServerWindow(QMainWindow):
         self.setMinimumSize(420, 400)
         install()
         self.setStyleSheet(stylesheet() + server_surfaces() + """
+            QMainWindow, QDialog { background: qlineargradient(x1:0, y1:0, x2:0.35, y2:1, stop:0 #0F1A30, stop:1 #08101F); }
             QWidget#chrome { background: #08101F; }
+            QWidget#panel[glass="true"] { background: transparent; border: none; }
+            QPushButton[glass="true"] { background: transparent; border: 1px solid transparent; }
+            QPushButton[glass="true"]:focus { border-color: #FFC93C; }
             QWidget#notice { background: #1B2A46; }
             QLabel#muted { color: #9FB0CC; font-size: 13px; }
             QLabel#fieldLabel { color: #9FB0CC; }
@@ -126,7 +130,8 @@ class ServerWindow(QMainWindow):
             QPushButton#deviceMenu { background: transparent; border: 1px solid transparent; }
             QPushButton#deviceMenu:hover { border-color: #34445E; }
             QPushButton#deviceMenu:focus { border-color: #FFC93C; }
-            QWidget#panel QLineEdit, QWidget#panel QComboBox, QWidget#panel QSpinBox, QWidget#panel QDateEdit { background: #0B1426; }
+            QWidget#panel QLineEdit, QWidget#panel QComboBox, QWidget#panel QSpinBox, QWidget#panel QDateEdit {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0F1A30, stop:1 #0B1426); }
             QTableWidget { background: transparent; border: none; padding: 0; gridline-color: #22345A; }
             QTableWidget::item { padding: 7px 10px; border-bottom: 1px solid #22345A; }
             QTableWidget#approvalTable::item, QTableWidget#invitationTable::item { padding: 0; }
@@ -188,6 +193,7 @@ class ServerWindow(QMainWindow):
         actions.addWidget(self.chrome_states)
         self.refresh_button = self.button('Refresh', self.manual_refresh)
         self.refresh_button.setMinimumWidth(132)
+        glass(self.refresh_button, CONTROL_RADIUS, pill=True)
         actions.addWidget(self.refresh_button)
         self.credit = QLabel()
         self.credit.setPixmap(themed_logo(Path(__file__).parent / 'assets/jpl_innovation.png').scaled(90, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
@@ -330,7 +336,7 @@ class ServerWindow(QMainWindow):
         self.fleet_date.setMinimumWidth(180)
         self.fleet_date.setAccessibleName(self.t('Report date'))
         title_row.addWidget(self.fleet_date)
-        title_row.addWidget(self.button('Export report', lambda: self.export_requested.emit(None)))
+        title_row.addWidget(glass(self.button('Export report', lambda: self.export_requested.emit(None)), CONTROL_RADIUS, pill=True))
         self.add_device_button = self.button('Add device', self.add_device)
         self.add_device_button.setObjectName('primary')
         title_row.addWidget(self.add_device_button)
@@ -527,7 +533,7 @@ class ServerWindow(QMainWindow):
     def _panel(self):
         panel = QWidget()
         panel.setObjectName('panel')
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        glass(panel)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
@@ -557,7 +563,7 @@ class ServerWindow(QMainWindow):
         title.setStyleSheet('font-size: 28px; font-weight: 600;')
         title_row.addWidget(title, 1)
         title_row.addWidget(self.button('Add device', self.add_device))
-        self.export_button = self.button('Export selected', self.export_selection)
+        self.export_button = glass(self.button('Export selected', self.export_selection), CONTROL_RADIUS, pill=True)
         title_row.addWidget(self.export_button)
         layout.addLayout(title_row)
         self.search = QLineEdit()
