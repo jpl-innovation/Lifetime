@@ -250,6 +250,27 @@ class ActivityLayoutTests(unittest.TestCase):
             self.assertEqual(ranges.indicator, QRectF(ranges.buttons[0].geometry()))
             self.assertEqual(ranges.animation.state(), ranges.animation.State.Stopped)
 
+    def test_chart_entrance_plays_once_and_is_skipped_under_reduced_motion(self):
+        from PyQt6.QtTest import QTest
+        with patch.object(c, 'motion_reduced', return_value=False):
+            plot = c.Plot('line', '%')
+            self.addCleanup(plot.deleteLater)
+            plot.set_data(['a', 'b', 'c'], [1, 2, 3])
+            intro = plot.entrance[0]
+            plot.show()
+            QTest.qWait(40)
+            self.assertLess(intro.value, 1.0)
+            QTest.qWait(900)
+            self.assertTrue(intro.done)
+            plot.set_data(['a', 'b', 'c'], [3, 2, 1])      # a live refresh does not replay it
+            self.assertIs(plot.entrance[0], intro)
+            self.assertTrue(intro.done)
+        with patch.object(c, 'motion_reduced', return_value=True):
+            bars = c.Plot('bars')
+            self.addCleanup(bars.deleteLater)
+            bars.set_data(['a'], [1])
+            self.assertTrue(bars.entrance[0].done)
+
 
 if __name__ == '__main__':
     unittest.main()
