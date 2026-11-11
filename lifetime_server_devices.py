@@ -1,17 +1,28 @@
 """Reusable server presentation widgets. No network or filesystem access."""
 import math
 
-from PyQt6.QtCore import Qt, QEvent, QPointF, QPropertyAnimation, QEasingCurve, QRectF, QTimer, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
+from PyQt6.QtCore import Qt, QEvent, QObject, QPointF, QPropertyAnimation, QEasingCurve, QRectF, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QShortcut
 from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayout,
                             QHBoxLayout, QPushButton, QProgressBar, QStyle, QStyledItemDelegate,
                             QStyleOptionViewItem, QGraphicsOpacityEffect)
 
 from lifetime_server_widgets import reduced_motion, status_dot, more_icon
-from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T
+from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_theme
+from lifetime_glass import STYLES, set_style, active_style, paint_classic, paint_glass, Glass, glass   # shared with the desktop app
+from lifetime_reveal import Intro, paint_roll, phase
 
 
 class SegmentedBar(QTabBar):
+    """The server's page menu: a pane of glass with a lens-like pill for the current page.
+
+    The pill stretches as it moves. The edge it moves towards goes first and the edge it leaves catches up, so the
+    motion has a direction and a little weight. The bar is painted, not styled, so one pass draws both themes:
+    a translucent body that lets the surface through, a bright diagonal rim, and a highlight along the top edge."""
+    LEAD_MS = 320       # the leading edge arrives first
+    TRAIL_MS = 520      # the trailing edge catches up
+    SHEEN_MS = 1250     # one light sweep when the window first shows
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDrawBase(False)
@@ -24,8 +35,24 @@ class SegmentedBar(QTabBar):
         self.indicator.setStyleSheet('background:#223959; ')
         self.indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.animation = QPropertyAnimation(self.indicator, b'geometry', self)
-        self.animation.setDuration(260)
+        self.animation.setDuration(self.LEAD_MS)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.valueChanged.connect(lambda *unused: self.update())
+        self.trail = QVariantAnimation(self)
+        self.trail.setStartValue(0.0)
+        self.trail.setEndValue(1.0)
+        self.trail.setDuration(self.TRAIL_MS)
+        self.trail.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.trail.valueChanged.connect(lambda *unused: self.update())
+        self._trail_side, self._trail_from, self._trail_to = 'l', 0.0, 0.0
+        self.sheen = 1.0
+        self._sheen_played = False
+        self.sheen_animation = QVariantAnimation(self)
+        self.sheen_animation.setStartValue(0.0)
+        self.sheen_animation.setEndValue(1.0)
+        self.sheen_animation.setDuration(self.SHEEN_MS)
+        self.sheen_animation.valueChanged.connect(self._set_sheen)
+        self.sheen_animation.finished.connect(lambda: self._set_sheen(1.0))
         self.currentChanged.connect(self.move_indicator)
 
     def tabSizeHint(self, index):
@@ -42,40 +69,83 @@ class SegmentedBar(QTabBar):
         self.setStyleSheet(f'''QTabBar {{background:transparent; }}
             QTabBar::tab {{background:transparent; color:#9FB0CC; border:0; padding:13px {7 if compact else 30}px; font-size:{14 if compact else 15}px; font-weight:600;}}
             QTabBar::tab:hover {{color:#FFFFFF;}}
-            QTabBar::tab:selected {{color:#FFFFFF;}}
+            QTabBar::tab:selected {{color:#FFF0BF;}}
             QTabBar::tab:focus {{color:#FFC93C;}}''')
+
+    def _set_sheen(self, value):
+        self.sheen = float(value)
+        self.update()
+
+    def pill_rect(self):
+        """The pill as drawn: the leading edge is the animated geometry, the trailing edge lags behind it."""
+        rect = QRectF(self.indicator.geometry())
+        if self.trail.state() == self.trail.State.Running:
+            edge = self._trail_from + (self._trail_to - self._trail_from) * float(self.trail.currentValue())
+            if self._trail_side == 'l':
+                rect.setLeft(min(edge, rect.right() - 1))
+            else:
+                rect.setRight(max(edge, rect.left() + 1))
+        return rect
 
     def move_indicator(self, index, animate=True):
         target = self.tabRect(index).adjusted(5, 5, -5, -5)
+        drawn = self.pill_rect()
         self.animation.stop()
+        self.trail.stop()
         if reduced_motion() or not animate or not self.isVisible():
             self.indicator.setGeometry(target)
         else:
-            self.animation.setStartValue(self.indicator.geometry())
+            start = self.indicator.geometry()
+            self.animation.setStartValue(start)
             self.animation.setEndValue(target)
             self.animation.start()
+            forward = target.left() >= start.left()
+            self._trail_side = 'l' if forward else 'r'
+            self._trail_from = drawn.left() if forward else drawn.right()
+            self._trail_to = float(target.left() if forward else target.right())
+            self.trail.start()
         # Paint the animated geometry beneath the native labels in paintEvent.
         self.indicator.hide()
         self.update()
 
+    def _glass(self, painter, rect, pill):
+        paint_glass(painter, rect, rect.height() / 2, pill)
+
     def paintEvent(self, event):
-        from PyQt6.QtGui import QPainter
         from PyQt6.QtWidgets import QStyle, QStyleOptionTab, QStylePainter
         painter = QStylePainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        from PyQt6.QtGui import QPen
-        painter.setPen(QPen(QColor(T('#22345A')), 1))
-        painter.setBrush(QColor(T('#0F1A30')))
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), self.height() / 2, self.height() / 2)
-        painter.setPen(QPen(QColor(T('#3A5688')), 1))
-        painter.setBrush(QColor(T('#243C63')))
-        painter.drawRoundedRect(self.indicator.geometry().adjusted(0, 0, -1, -1), self.indicator.height() / 2, self.indicator.height() / 2)
+        bar = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        self._glass(painter, bar, pill=False)
+        # On load the pill fades up as the light passes, then it is an ordinary pill.
+        painter.setOpacity(min(1.0, self.sheen * 2.4))
+        self._glass(painter, self.pill_rect(), pill=True)
+        painter.setOpacity(1.0)
         painter.setPen(Qt.PenStyle.NoPen)
         for index in range(self.count()):
             option = QStyleOptionTab()
             self.initStyleOption(option, index)
             painter.drawControl(QStyle.ControlElement.CE_TabBarTabLabel, option)
+        if self.sheen < 1.0 and active_style() == 'glass':               # one soft sweep of light, left to right
+            t = self.sheen
+            t = t * t * (3 - 2 * t)
+            clip = QPainterPath()
+            clip.addRoundedRect(bar, bar.height() / 2, bar.height() / 2)
+            width = bar.width() * 0.22
+            centre = bar.left() - width + (bar.width() + 2 * width) * t
+            band = QLinearGradient(centre - width, bar.top(), centre + width, bar.top() + bar.height() * 0.7)
+            light = QColor(255, 232, 170, 84) if active_theme() == 'dark' else QColor(T('#FFC93C'))   # a warm sweep
+            if active_theme() != 'dark':
+                light.setAlpha(120)
+            clear = QColor(light)
+            clear.setAlpha(0)
+            band.setColorAt(0.0, clear)
+            band.setColorAt(0.5, light)
+            band.setColorAt(1.0, clear)
+            painter.save()
+            painter.setClipPath(clip)
+            painter.fillRect(bar, band)
+            painter.restore()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -84,6 +154,11 @@ class SegmentedBar(QTabBar):
     def showEvent(self, event):
         super().showEvent(event)
         self.move_indicator(self.currentIndex(), False)
+        if not self._sheen_played:
+            self._sheen_played = True
+            if not reduced_motion():
+                self.sheen = 0.0
+                self.sheen_animation.start()
 
 
 class Skeleton(QWidget):
@@ -105,7 +180,7 @@ class Skeleton(QWidget):
         self.fade = QVariantAnimation(self)
         self.fade.setStartValue(1.0)
         self.fade.setEndValue(0.0)
-        self.fade.setDuration(180)
+        self.fade.setDuration(260)          # long enough to read as the real content arriving beneath the placeholders
         self.fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.fade.valueChanged.connect(self._fade)
         self.fade.finished.connect(self.hide)
@@ -277,19 +352,26 @@ class StatusNotice(QLabel):
 
 class TileIcon(QWidget):
     """A shell symbol at tile size, so both editions share one icon family."""
-    def __init__(self, kind):
+    def __init__(self, kind, delay=0):
         super().__init__()
         self.kind = kind
         self.setFixedSize(32, 32)
+        self.intro = Intro(self, 700, delay, reduced_motion)    # the strokes draw themselves, tile by tile
 
     def paintEvent(self, event):
         from lifetime_shell import symbol
+        drawn = phase(self.intro.value, 0.0, 1.0) if not self.intro.done else 1.0
+        if drawn < 0.02:
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.scale(1.6, 1.6)
         pen = QPen(QColor(T('#FFFFFF')), 1.2)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        if drawn < 1.0:
+            # Every stroke grows from its own start: a dash that lengthens while the gap stays longer than the shape.
+            pen.setDashPattern([drawn * 18, 60])
         painter.setPen(pen)
         symbol(painter, self.kind)
 
@@ -302,6 +384,7 @@ class FleetGauge(QWidget):
         super().__init__()
         self.setMinimumHeight(176)
         self.value, self.connected = 0.0, 0
+        self.intro = Intro(self, 1200, 0, reduced_motion)
         self.motion = QVariantAnimation(self)
         self.motion.setDuration(520)
         self.motion.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -312,9 +395,11 @@ class FleetGauge(QWidget):
         self.setAccessibleName(description)
         target = connected / total if total else 0.0
         self.motion.stop()
-        if reduced_motion() or not self.isVisible():
-            self.value = target
+        first = not self.intro._armed
+        if reduced_motion() or not self.isVisible() or first:
+            self.value = target         # the first reading is revealed by the entrance, not by a second animation
             self.update()
+            self.intro.ready()
         else:
             self.motion.setStartValue(self.value)
             self.motion.setEndValue(target)
@@ -330,10 +415,22 @@ class FleetGauge(QWidget):
         middle, base = self.width() / 2, self.height() - 16.0
         outer = min(middle - 10, base - 8)
         inner = outer - 22
-        lit = round(self.value * self.TICKS)
+        entering = not self.intro.done
+        v = self.intro.value if entering else 1.0
+        sweep = phase(v, 0.18, 0.88) if entering else 1.0
+        lit = round(self.value * sweep * self.TICKS)
         for index in range(self.TICKS):
-            angle = math.pi * (1 - index / (self.TICKS - 1))
-            pen = QPen(QColor(T('#FFC93C') if index < lit else T(T('#22345A'))), 6)
+            along = index / (self.TICKS - 1)
+            angle = math.pi * (1 - along)
+            # The empty track settles in from the left first; the lit ticks follow it round.
+            arrive = phase(v, along * 0.30, along * 0.30 + 0.28) if entering else 1.0
+            if index < lit:
+                head = entering and index >= lit - 2 and sweep < 1.0     # the leading ticks are brighter while it travels
+                color = QColor(T('#FFD761') if head else T('#FFC93C'))
+            else:
+                color = QColor(T(T('#22345A')))
+                color.setAlphaF(arrive)
+            pen = QPen(color, 6)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             painter.drawLine(QPointF(middle + inner * math.cos(angle), base - inner * math.sin(angle)),
@@ -343,7 +440,8 @@ class FleetGauge(QWidget):
         font.setWeight(QFont.Weight.Light)
         painter.setFont(font)
         painter.setPen(QColor(T('#FFFFFF')))
-        painter.drawText(QRectF(0, base - 70, self.width(), 78), Qt.AlignmentFlag.AlignCenter, str(self.connected))
+        roll = min(1.0, max(0.0, (v - 0.2) / 0.7)) if entering else 1.0          # the digits roll as the sweep travels
+        paint_roll(painter, QRectF(0, base - 70, self.width(), 78), str(self.connected), roll, Qt.AlignmentFlag.AlignHCenter)
 
 
 class RowDelegate(QStyledItemDelegate):
@@ -384,7 +482,11 @@ class RowDelegate(QStyledItemDelegate):
             painter.setClipRect(option.rect)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setPen(QPen(QColor(T('#FFC93C')), 1) if focused else Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(T('#243C63') if selected else T(T('#182944'))))
+            # Rows are lit from the glass itself: a faint amber wash when selected, a faint white one on hover.
+            dark = active_theme() == 'dark'
+            wash = QColor(T('#FFC93C'))
+            wash.setAlpha(30 if dark else 34)
+            painter.setBrush(wash if selected else QColor(255, 255, 255, 12) if dark else QColor(20, 33, 61, 12))
             painter.drawRoundedRect(rect, CONTROL_RADIUS, CONTROL_RADIUS)
             painter.restore()
         plain = QStyleOptionViewItem(option)
@@ -403,32 +505,41 @@ class ServerPages(QStackedWidget):
         self.page_fade = QVariantAnimation(self)
         self.page_fade.setStartValue(0.0)
         self.page_fade.setEndValue(1.0)
-        self.page_fade.setDuration(180)
+        self.page_fade.setDuration(240)
         self.page_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._fading = None
+        self._last_index = 0
+        self._direction = 1
         self.page_fade.valueChanged.connect(self._page_opacity)
         self.page_fade.finished.connect(self._page_settled)
         self.bar.animation.valueChanged.connect(lambda _: self.bar.update())
         self.shortcuts = []
 
     def _fade_in(self, index):
+        """The new page settles in from the side the menu pill moved towards: a short fade and a small slide."""
         self.page_fade.stop()
         self._page_settled()
+        previous, self._last_index = self._last_index, index
         page = self.widget(index)
         if page is None or reduced_motion() or not self.isVisible():
             return
+        self._direction = 1 if index >= previous else -1
         self._fading = page
         page.setGraphicsEffect(QGraphicsOpacityEffect(page))
-        page.graphicsEffect().setOpacity(0.0)
+        self._page_opacity(0.0)
         self.page_fade.start()
 
     def _page_opacity(self, value):
-        if self._fading is not None and self._fading.graphicsEffect() is not None:
-            self._fading.graphicsEffect().setOpacity(value)
+        page = self._fading
+        if page is not None and page.graphicsEffect() is not None:
+            page.graphicsEffect().setOpacity(0.15 + 0.85 * value)
+            base = self.contentsRect().topLeft()
+            page.move(base.x() + round(14 * self._direction * (1 - value)), base.y())
 
     def _page_settled(self):
         if self._fading is not None:
             self._fading.setGraphicsEffect(None)
+            self._fading.move(self.contentsRect().topLeft())
             self._fading = None
 
     def addTab(self, widget, title):
@@ -474,6 +585,14 @@ class DeviceBox(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.device_id = ''
+        # A card eases in once, the first time it is on screen with its reading; cards cascade by row.
+        self.intro = Intro(self, 320, 0, reduced_motion)
+        self._fade = None
+        if not reduced_motion():
+            self._fade = QGraphicsOpacityEffect(self)
+            self._fade.setOpacity(0.0)
+            self.setGraphicsEffect(self._fade)
+            self.intro.changed.connect(self._intro_step)
         self.setObjectName('deviceBox')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -557,7 +676,7 @@ class DeviceBox(QWidget):
                 value = perf['ram_used_bytes'] / specs['ram_bytes'] * 100
             label, meter = self.meters[key]
             label.setText(t('{metric}: {value}', metric=t(key), value=missing if value is None else f'{value:.0f}%'))
-            meter.setValue(0 if value is None else round(value))
+            self._fill(meter, 0 if value is None else round(value), 0 if key == 'CPU' else 90)
             meter.setVisible(value is not None)
             label.setVisible(value is not None)     # the spec line above already says when nothing is known
             meter.setAccessibleName(label.text())
@@ -567,8 +686,36 @@ class DeviceBox(QWidget):
         self.bottom.setText(t('Disk free: {disk} · Battery: {battery} · Last seen: {seen}', disk=disk_text,
                              battery=missing if battery is None else f'{battery:.0f}%', seen=window._relative(device.get('last_received_at'))))
         self.menu_button.setAccessibleName(t('Actions for {name}', name=name))
+        self.intro.ready()
         self.setAccessibleName(' · '.join((self.name.text(), self.user.text(), self.status.text(), self.spec.text(), self.attention.text(), self.bottom.text())))
         self.setToolTip(self.accessibleName())
+
+    def _intro_step(self):
+        if self._fade is None:
+            return
+        if self.intro.done:
+            if self.graphicsEffect() is self._fade:
+                self.setGraphicsEffect(None)
+            self._fade = None
+        else:
+            self._fade.setOpacity(phase(self.intro.value, 0.0, 1.0))
+
+    def _fill(self, meter, value, delay):
+        """The first time a meter shows a reading it fills from empty; later live updates just move it."""
+        if getattr(meter, '_filled', False) or reduced_motion() or value <= 0 or not self.isVisible():
+            meter._filled = meter._filled if getattr(meter, '_filled', False) else bool(value)
+            meter.setValue(value)
+            return
+        meter._filled = True
+        meter.setValue(0)
+        fill = QVariantAnimation(meter)
+        fill.setStartValue(0)
+        fill.setEndValue(value)
+        fill.setDuration(650)
+        fill.setEasingCurve(QEasingCurve.Type.OutCubic)
+        fill.valueChanged.connect(lambda v: meter.setValue(int(v)))
+        fill.finished.connect(lambda: meter.setValue(value))
+        QTimer.singleShot(delay, fill.start)
 
     def set_selected(self, selected):
         if self.property('selected') != selected:
@@ -581,9 +728,18 @@ class DeviceBox(QWidget):
         from PyQt6.QtGui import QPainter, QPen
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(T('#1E3254') if self.underMouse() else T(T('#182944'))))   # lighter than its panel: each computer reads as its own box
-        painter.setPen(QPen(QColor(T('#FFC93C') if self.hasFocus() or self.property('selected') else T(T('#2A3E66'))), 1))
-        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -11), SOFT_RADIUS, SOFT_RADIUS)
+        box = QRectF(self.rect().adjusted(1, 1, -1, -11))
+        # Lighter than its panel, so each computer reads as its own piece of the same glass.
+        under = QPainterPath()
+        under.addRoundedRect(box, SOFT_RADIUS, SOFT_RADIUS)
+        painter.fillPath(under, QColor(T('#12203A')))      # opaque underneath: the table's own cell text must not show through
+        chosen = bool(self.property('selected'))
+        paint_glass(painter, box, SOFT_RADIUS, base=T('#182944' if chosen else '#12203A'), strong=chosen,
+                    lift=1.0 if self.underMouse() else 0.0)
+        if self.hasFocus() or self.property('selected'):
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(T('#FFC93C')), 1))
+            painter.drawRoundedRect(box, SOFT_RADIUS, SOFT_RADIUS)
 
     def enterEvent(self, event):
         super().enterEvent(event)

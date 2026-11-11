@@ -19,6 +19,7 @@ import uuid
 import lifetime_connection as connection
 import lifetime_discovery as discovery
 import lifetime_permissions as permissions
+import lifetime_protocol as protocol
 import lifetime_server_store as storage
 from lifetime_admin import AdminClient
 from lifetime_agent import MachineAgent, reporting_directory
@@ -237,7 +238,7 @@ class RealConnectionTests(unittest.TestCase):
         self.agent.sample(100, 'demo-boot', dt.datetime.now(dt.timezone.utc).isoformat())
         self.assertEqual(client.step(force=True)['status'], 'connected')
         device = self.admin.call('device', device_id=self.agent.device_id)
-        self.assertEqual(device['client_version'], '1.1.0')
+        self.assertEqual(device['client_version'], protocol.CLIENT_VERSION)
         self.assertEqual(device['record_count'], 1)
         self.assertEqual(self.admin.call('invitations')[0]['remaining'], 0)
         self.admin.call('revoke', device_id=self.agent.device_id)

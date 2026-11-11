@@ -5,16 +5,18 @@ import os
 import shlex
 import sys
 
-from PyQt6.QtCore import Qt, QRectF, QPointF, QLineF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent
+from PyQt6.QtCore import Qt, QObject, QRectF, QPointF, QLineF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
-from PyQt6.QtWidgets import QApplication, QButtonGroup, QHBoxLayout, QMenu, QSystemTrayIcon, QVBoxLayout, QSizePolicy
+from PyQt6 import QtWidgets
+from PyQt6.QtWidgets import QApplication, QButtonGroup, QFrame, QHBoxLayout, QMenu, QSystemTrayIcon, QVBoxLayout, QSizePolicy
 from lifetime_i18n import tr
 from lifetime_i18n_qt import QWidget, QPushButton, QLabel
-from lifetime_theme import CONTROL_RADIUS, install
+from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, install
+from lifetime_glass import Glass, active_style, paint_glass, paint_track
 
 
-from lifetime_theme import tokens
+from lifetime_theme import tokens, active_theme
 GREEN = '#4CC38A'   # use tokens()['good'] where the background can be light
 
 
@@ -316,12 +318,19 @@ class NavRow(QPushButton):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        lit = active_style() == 'glass'
         if self.underMouse() and not self.isChecked():
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(tokens()['card']))
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), CONTROL_RADIUS, CONTROL_RADIUS)
+            if lit:      # a faint white wash on the sidebar's glass
+                p.setBrush(QColor(255, 255, 255, 16 if active_theme() == 'dark' else 90))
+                p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), self.height() / 2 - 1, self.height() / 2 - 1)
+            else:
+                p.setBrush(QColor(tokens()['card']))
+                p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), CONTROL_RADIUS, CONTROL_RADIUS)
         ring = self.hasFocus() and self.keyboard_focus
         color = QColor(tokens()['text'] if self.isChecked() or ring else tokens()['muted'])
+        if lit and self.isChecked():
+            color = QColor(tokens()['tab_on'])       # the current page's name is the server menu's warm white-yellow
         p.setPen(QPen(color, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         p.save()
         p.translate((self.width()-20)/2 if self.sidebar.collapsed else 12, 12)
@@ -333,7 +342,8 @@ class NavRow(QPushButton):
         if ring:
             p.setPen(QPen(QColor(tokens()['accent']), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), CONTROL_RADIUS, CONTROL_RADIUS)
+            ring_radius = self.height() / 2 - 2 if lit else CONTROL_RADIUS
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), ring_radius, ring_radius)
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
@@ -372,24 +382,64 @@ class DisclosureButton(QPushButton):
 
 
 def themed_logo(path):
-    """The JPL Innovation logo has white lettering for dark surfaces; on the light theme turn that near-white ink dark."""
-    from PyQt6.QtGui import QImage
+    """The JPL Innovation logo for the active theme. The original is drawn for dark surfaces; light mode uses
+    assets/jpl_innovation_light.png (navy lettering, deeper cyan, badge unchanged), built by render_logo_light.py."""
     from lifetime_theme import active_theme
-    image = QImage(str(path))
-    if active_theme() == 'light' and not image.isNull():
-        image = image.convertToFormat(QImage.Format.Format_ARGB32)
-        ink = QColor(37, 45, 45)
-        for y in range(image.height()):
-            for x in range(image.width()):
-                c = image.pixelColor(x, y)
-                if c.alpha() and min(c.red(), c.green(), c.blue()) >= 150 and max(c.red(), c.green(), c.blue()) - min(c.red(), c.green(), c.blue()) < 45:
-                    ink.setAlpha(c.alpha())
-                    image.setPixelColor(x, y, ink)
-    return QPixmap.fromImage(image)
+    path = Path(path)
+    if active_theme() == 'light':
+        light = path.with_name(path.stem + '_light' + path.suffix)
+        if light.is_file():
+            return QPixmap(str(light))
+    return QPixmap(str(path))
 
 
 def reduced_motion():
     return os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
+
+
+GLASS_PANELS = ('signalCard', 'insetPanel', 'summary')
+FLAT_BUTTONS = ('primary', 'primaryAction', 'quietAction', 'disclosure', 'importToggle', 'segment')   # amber or text-only
+
+
+def attach_glass(widget):
+    """Give a panel or an ordinary button the shared glass painter. It paints nothing while the style is Classic."""
+    if widget.property('glass') is True:        # Glass() sets this; a Qt property survives a re-wrapped C++ widget
+        return
+    app = QApplication.instance()
+    owner = getattr(app, '_lifetime_glass', None)
+    if owner is None:
+        return
+    if isinstance(widget, QFrame) and widget.objectName() in GLASS_PANELS:
+        painter = Glass(widget, PANEL_RADIUS, glass_only=True, owner=owner)
+    elif (isinstance(widget, QtWidgets.QPushButton) and type(widget).__name__ in ('QPushButton', 'ConnectButton')
+            and widget.objectName() not in FLAT_BUTTONS and type(widget.parentWidget()).__name__ != 'RangeSegments'):
+        painter = Glass(widget, CONTROL_RADIUS, pill=True, glass_only=True, owner=owner)
+        style = widget.style()
+        style.unpolish(widget)      # the stylesheet's [glass="true"] rule needs the property seen by a fresh polish
+        style.polish(widget)
+    else:
+        return
+    widget.destroyed.connect(painter.deleteLater)
+
+
+def attach_glass_all():
+    for widget in QApplication.allWidgets():
+        attach_glass(widget)
+
+
+def install_glass_surfaces():
+    """Once per application: every panel and button polished while the style is Glass gets the glass painter."""
+    app = QApplication.instance()
+    if app is None or hasattr(app, '_lifetime_glass'):
+        return
+
+    class Surfaces(QObject):
+        def eventFilter(self, widget, event):
+            if event.type() == QEvent.Type.Polish and active_style() == 'glass' and isinstance(widget, QtWidgets.QWidget):
+                attach_glass(widget)
+            return False
+    app._lifetime_glass = Surfaces(app)
+    app.installEventFilter(app._lifetime_glass)
 
 
 class ThemeReveal(QWidget):
@@ -559,9 +609,11 @@ class SwitchSegment(QPushButton):
 class ModeSwitch(QWidget):
     """A recessed track with one raised tile that slides to the choice. Theme segments open up to name the current mode."""
     HEIGHT, PAD, COMPACT = 42, 3, 40
+    TIGHT = 32      # a segment's height in the narrow column of a short window
 
     def __init__(self, items, callback, icons=None, globe=False):
         super().__init__()
+        self.segment_height = self.COMPACT
         self.group = QButtonGroup(self)
         self.vertical, self.globe, self.expanding = False, globe, bool(icons)
         self.position = 0.0
@@ -581,8 +633,12 @@ class ModeSwitch(QWidget):
 
     def set_vertical(self, vertical):
         self.vertical = vertical
-        self.setFixedHeight(len(self.segments) * self.COMPACT + 2 * self.PAD if vertical else self.HEIGHT)
+        self.setFixedHeight(len(self.segments) * self.segment_height + 2 * self.PAD if vertical else self.HEIGHT)
         self.place(self.position)
+
+    def set_tight(self, tight):
+        self.segment_height = self.TIGHT if tight else self.COMPACT
+        self.set_vertical(self.vertical)
 
     def move_to(self, index):
         self.animation.stop()
@@ -639,8 +695,12 @@ class ModeSwitch(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(c['track']))
-        p.drawRoundedRect(QRectF(self.rect()), CONTROL_RADIUS, CONTROL_RADIUS)
+        lit = active_style() == 'glass'
+        if lit:
+            paint_track(p, QRectF(self.rect()), CONTROL_RADIUS)
+        else:
+            p.setBrush(QColor(c['track']))
+            p.drawRoundedRect(QRectF(self.rect()), CONTROL_RADIUS, CONTROL_RADIUS)
         if self.globe and not self.vertical:
             p.save()
             p.translate(18, self.height() / 2)
@@ -651,6 +711,9 @@ class ModeSwitch(QWidget):
             p.drawLine(QPointF(-6.5, 0), QPointF(6.5, 0))
             p.restore()
         thumb = self.thumb()
+        if lit:
+            paint_glass(p, thumb, thumb.height() / 2, pill=True)
+            return
         shadow = QColor(0, 0, 0, 46)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(shadow)
@@ -661,13 +724,17 @@ class ModeSwitch(QWidget):
 
 
 class Sidebar(QWidget):
-    def __init__(self, select, settings, motion_reduced, language_control, status, dot, theme_control=None):
+    def __init__(self, select, motion_reduced, language_control, status, dot, theme_control=None):
         super().__init__()
         self.setObjectName('sidebar')
         self.collapsed = False
         self.motion_reduced = motion_reduced
         self.indicator_y = 0.0
         self.indicator_animation = None
+        # The marker stretches as it moves: the edge it moves towards goes first, the other edge catches up.
+        self.trail_animation = None
+        self.trail_side, self.trail_from, self.trail_to, self.trail_value = 't', 0.0, 0.0, 1.0
+        self.tight = False
         self.setFixedWidth(232)
         box = QVBoxLayout(self)
         box.setContentsMargins(16, 24, 16, 16)
@@ -704,10 +771,11 @@ class Sidebar(QWidget):
             self.rows.append(row)
             box.addWidget(row)
         self.group.button(0).setChecked(True)
-        self.group.idClicked.connect(select)
         box.addStretch(1)
-        self.settings_button = NavRow('Settings', 'settings', self)
-        self.settings_button.clicked.connect(settings)
+        self.settings_button = NavRow('Settings', 'settings', self)      # a page like the others, id 6
+        self.settings_button.setCheckable(True)
+        self.group.addButton(self.settings_button, 6)
+        self.group.idClicked.connect(select)
         self.rows.append(self.settings_button)
         box.addWidget(self.settings_button)
         box.addSpacing(16)
@@ -736,25 +804,48 @@ class Sidebar(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(tokens()['sidebar']))
+        lit = active_style() == 'glass'
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if lit:
+            # One pane of glass down the edge of the window: its other three sides lie outside the widget.
+            paint_glass(p, QRectF(-40, -40, self.width() + 40, self.height() + 80), 24)
+        else:
+            p.fillRect(self.rect(), QColor(tokens()['sidebar']))
         row = self.group.checkedButton()
-        if row and not row.isHidden():
-            r = QRectF(row.x(), self.indicator_y, row.width(), row.height())
+        if row and not row.isHidden() and lit:
+            r = self.marker_rect(row)
+            paint_glass(p, r, r.height() / 2, pill=True)      # the lens stretches as it moves, exactly as the plain marker does
+        elif row and not row.isHidden():
+            r = self.marker_rect(row)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(tokens()['track']))
             p.drawRoundedRect(r, CONTROL_RADIUS, CONTROL_RADIUS)
             p.setBrush(QColor(tokens()['accent']))
             p.drawRoundedRect(QRectF(r.left()+2, r.center().y()-8, 2, 16), 1, 1)
 
+    def marker_rect(self, row):
+        """The marker as drawn: `indicator_y` is its leading edge's travel, the trailing edge lags behind it."""
+        r = QRectF(row.x(), self.indicator_y, row.width(), row.height())
+        if self.trail_value < 1.0:
+            edge = self.trail_from + (self.trail_to - self.trail_from) * self.trail_value
+            if self.trail_side == 't':
+                r.setTop(min(edge, r.bottom() - 1))
+            else:
+                r.setBottom(max(edge, r.top() + 1))
+        return r
+
     def move_indicator(self, animated=True):
         row = self.group.checkedButton()
         if row is None:
             return
-        if self.indicator_animation:
-            self.indicator_animation.stop()
-            self.indicator_animation.deleteLater()
-            self.indicator_animation = None
+        drawn = self.marker_rect(row)
+        for name in ('indicator_animation', 'trail_animation'):
+            old = getattr(self, name)
+            if old:
+                old.stop()
+                old.deleteLater()
+                setattr(self, name, None)
+        self.trail_value = 1.0
         target = float(row.y())
         if not animated or self.motion_reduced():
             self.indicator_y = target
@@ -768,6 +859,24 @@ class Sidebar(QWidget):
         animation.valueChanged.connect(self._indicator_frame)
         self.indicator_animation = animation
         animation.start()
+        down = target >= self.indicator_y
+        self.trail_side = 't' if down else 'b'
+        self.trail_from = drawn.top() if down else drawn.bottom()
+        self.trail_to = target if down else target + row.height()
+        self.trail_value = 0.0
+        trail = QVariantAnimation(self)
+        trail.setDuration(460)
+        trail.setEasingCurve(QEasingCurve.Type.OutCubic)
+        trail.setStartValue(0.0)
+        trail.setEndValue(1.0)
+        trail.valueChanged.connect(self._trail_frame)
+        trail.finished.connect(lambda: self._trail_frame(1.0))
+        self.trail_animation = trail
+        trail.start()
+
+    def _trail_frame(self, value):
+        self.trail_value = float(value)
+        self.update()
 
     def _indicator_frame(self, value):
         self.indicator_y = value
@@ -792,7 +901,7 @@ class Sidebar(QWidget):
         self.layout().setContentsMargins(10 if collapsed else 16, 24, 10 if collapsed else 16, 16)
         self.brand.setVisible(not collapsed)
         self.status.setVisible(not collapsed)
-        self.credit.setVisible(not collapsed)
+        self.credit.setVisible(not collapsed and not self.tight)
         self.credit_logo.setPixmap(crisp(self.credit_pixmap, 44 if collapsed else 200, CREDIT_HEIGHT, self))
         self.credit_logo.setToolTip(tr('Made by JPL Innovation'))
         for control in (self.language_control, self.theme_control):
@@ -801,6 +910,28 @@ class Sidebar(QWidget):
         self.move_indicator(False)
         for row in self.rows:
             row.update()
+
+    def set_tight(self, tight):
+        """A short window: drop the decorative credit and shrink rows so the language and theme switches stay reachable."""
+        if self.tight == tight:
+            return
+        self.tight = tight
+        self.layout().setSpacing(4 if tight else 8)
+        for row in self.rows:
+            row.setFixedHeight(36 if tight else 44)
+        self.credit_logo.setVisible(not tight)
+        self.credit.setVisible(not tight and not self.collapsed)
+        for control in (self.language_control, self.theme_control):
+            if control is not None:
+                control.set_tight(tight)
+        self.layout().invalidate()
+        self.move_indicator(False)
+
+    def fit_height(self, height):
+        """Use the roomy layout whenever it fits, the tight one only when the window is too short for it."""
+        self.set_tight(False)
+        if self.layout().minimumSize().height() > height:
+            self.set_tight(True)
 
 
 class PageStack(QWidget):

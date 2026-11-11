@@ -11,7 +11,7 @@ import statistics
 import time
 import platform
 
-from PyQt6.QtCore import QEvent, Qt, QTimer, QRectF, QVariantAnimation, QEasingCurve, QPointF, QProcess
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, QRectF, QVariantAnimation, QEasingCurve, QPointF, QProcess
 from PyQt6.QtGui import QColor, QIcon, QPalette, QPainter, QPen, QFont, QShortcut, QKeySequence, QFontMetrics
 from PyQt6.QtWidgets import (QApplication, QAbstractSpinBox, QDoubleSpinBox,
                             QGraphicsOpacityEffect, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
@@ -23,21 +23,28 @@ from lifetime_i18n import duration
 from lifetime_dashboard import ProbeWorker, SystemDashboard, RefreshGlyph
 from lifetime_charts import Insights, Plot, clean_daily, date_series
 from lifetime_health_gui import HealthPage
-from lifetime_shell import ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
+from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
+from lifetime_shell import install_glass_surfaces, attach_glass_all, ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
 from lifetime_settings import load_settings, save_settings, update_settings
-from lifetime_setup import SetupDialog, configure_login
+from lifetime_setup import SetupDialog, SettingsPage, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
-from lifetime_reveal import reveal, NUMBER_DELAY
+from lifetime_reveal import Intro, paint_roll, phase, progress
 from lifetime_tasks import Tasks
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all
+ENTRANCE_MS = 1700
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
 def motion_reduced():
     return REDUCE_MOTION or os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
+
+
+def clock_problem(detail):
+    """The importer refuses logs whose times go backwards (a changed clock). Say that in words, not the internal check."""
+    return any(text in detail for text in ('Boot ends before it starts', 'Overlapping boot timestamps', 'SleepTime is later than WakeTime'))
 
 
 VERIFY_TOLERANCE = 60   # seconds; a larger gap between the log and the awake clock is shown, not hidden as "verified"
@@ -108,6 +115,11 @@ class ValueLabel(QLabel):
         painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
         shown = QFontMetrics(font).elidedText(self.text(), Qt.TextElideMode.ElideRight, self.contentsRect().width())
         self.setToolTip(self.text() if shown != self.text() else '')
+        roll = progress(getattr(self.parentWidget(), 'entrance', None), eased=False)    # the card's slice of the entrance
+        if roll < 1.0:
+            paint_roll(painter, QRectF(self.contentsRect()), shown, roll,
+                       self.alignment() & (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignRight) or Qt.AlignmentFlag.AlignLeft)
+            return
         painter.drawText(self.contentsRect(), self.alignment() | Qt.AlignmentFlag.AlignVCenter, shown)
 
 
@@ -142,6 +154,8 @@ class HoursInput(QDoubleSpinBox):
 
 class Backdrop(QWidget):
     def paintEvent(self, event):
+        if active_style() == 'glass':
+            return      # the window's own depth shows through
         p = QPainter(self)
         t = THEMES[self.window().theme or 'dark']
         p.fillRect(self.rect(), QColor(t['bg']))
@@ -192,10 +206,36 @@ class Hero(QWidget):
         self.seconds = 0
         self.target = 0
         self.fraction = 0
+        self.entrance = None        # (intro, start, end): the total rolls inside the first Overview entrance
+        self.replay = 1.0           # later rolls: the total is the number that matters, so it rolls again each time Overview opens
+        self._replay_animation = None
         self.setFixedHeight(144)     # content ends at 140 px; the old 156 left dead space and made Overview scroll by 4 px
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setAccessibleName(tr('Total time awake'))
+
+    def roll_again(self):
+        if self._replay_animation is not None:
+            self._replay_animation.stop()
+            self._replay_animation.deleteLater()
+            self._replay_animation = None
+        if motion_reduced():
+            self.replay = 1.0
+            self.update()
+            return
+        self.replay = 0.0
+        animation = QVariantAnimation(self)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setDuration(1000)
+        animation.valueChanged.connect(self._replay_step)
+        animation.finished.connect(lambda: self._replay_step(1.0))
+        self._replay_animation = animation
+        animation.start()
+
+    def _replay_step(self, value):
+        self.replay = float(value)
+        self.update()
 
     def position_controls(self):
         if not hasattr(self, 'controls'):
@@ -218,21 +258,22 @@ class Hero(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         t = THEMES[self.window().theme]
         w, h = self.width(), self.height()
-        def text(y, height, value, size, color, weight=QFont.Weight.Normal, x=0, width=None):
+        def text(y, height, value, size, color, weight=QFont.Weight.Normal, x=0, width=None, roll=1.0):
             f = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
             f.setPixelSize(size)
             f.setWeight(weight)
             p.setFont(f)
             p.setPen(QColor(color))
-            p.drawText(QRectF(x, y, w if width is None else width, height), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, value)
-        whole_minutes, secs = divmod(int(self.seconds), 60)
+            paint_roll(p, QRectF(x, y, w if width is None else width, height), value, roll, Qt.AlignmentFlag.AlignLeft)
+        shown = self.seconds * progress(self.entrance)
+        whole_minutes, secs = divmod(int(shown), 60)
         days, rest = divmod(whole_minutes, 1440)
         hours, minutes = divmod(rest, 60)
         # The number is the focal point and aligns with the page title; the old 100-hour ring read as a
         # loading spinner and pushed the number out of line with everything else.
         x = 0
         text(3, 25, tr('Total time awake'), 15, t['muted'], x=x, width=w-x)
-        value = f'{self.seconds / 3600:,.1f}'
+        value = f'{self.seconds / 3600:,.1f}'        # the real total: its digits roll into place during the entrance
         size = 64
         f = QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans')
         f.setPixelSize(size)
@@ -242,7 +283,7 @@ class Hero(QWidget):
         while QFontMetrics(f).horizontalAdvance(value) > max(60, available) and size > 18:
             size -= 2
             f.setPixelSize(size)
-        text(28, 80, value, size, t['text'], QFont.Weight.Light, x=x, width=w-x)
+        text(28, 80, value, size, t['text'], QFont.Weight.Light, x=x, width=w-x, roll=min(progress(self.entrance, eased=False), self.replay))
         text(112, 28, tr('hero.duration', days=days, hours=hours, minutes=minutes, seconds=secs),
              13 if w < 400 else 15, t['muted'], x=0 if w < 400 else x, width=w if w < 400 else w-x)
 
@@ -268,6 +309,7 @@ class StatCard(QFrame):
         self.number = 0.0
         self.target = None
         self.formatter = None
+        self.entrance = None        # (intro, start, end): the number counts up inside the Overview entrance
         self.effect = RiseEffect(self)
         self.setGraphicsEffect(self.effect)
         self.setMinimumWidth(0)
@@ -318,23 +360,16 @@ class StatCard(QFrame):
 
     def _show_number(self, value):
         self.number = value
-        self.value.setText(self.formatter(value))
+        shown = value * progress(self.entrance) if value > 0 else value
+        entering = self.entrance is not None and not self.entrance[0].done and self.target is not None
+        self.value.setText(self.formatter(self.target if entering else shown))     # the digits roll; the text is the real one
         if self.progress:
-            self.progress.setValue(min(2400, max(0, round(value * 100))))
+            self.progress.setValue(min(2400, max(0, round(shown * 100))))
 
-    def replay_number(self, delay=NUMBER_DELAY):
-        """Count the number up again, starting just after the card's wipe does."""
-        timer = getattr(self, '_replay', None)
-        if timer is not None:
-            timer.stop()
-        if motion_reduced() or self.target is None or self.target <= 0 or getattr(self, 'formatter', None) is None:
-            return
-        self.number = 0.0
-        self._show_number(0.0)
-        self._replay = QTimer(self)
-        self._replay.setSingleShot(True)
-        self._replay.timeout.connect(lambda: animate(self, 'number_animation', 0, self.target, self._show_number, 700))
-        self._replay.start(int(delay))
+    def refresh_entrance(self):
+        if self.formatter is not None:
+            self._show_number(self.number)
+            self.value.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -399,7 +434,7 @@ class BarChart(QWidget):
             def frame(value):
                 self.progress = value
                 self.update()
-            animate(self, 'entrance', 0, 1, frame, 350)
+            animate(self, 'entrance', 0, 1, frame, 750)
 
     def set_data(self, keys, values):
         self.keys, self.values = keys, values
@@ -430,7 +465,8 @@ class BarChart(QWidget):
         width = min(12, step*.55)
         for i, (key, value) in enumerate(zip(self.keys, self.values)):
             x = rect.left() + (i+.5)*step
-            height = rect.height() * value/3600/maximum * self.progress
+            begin = 0.5 * i / max(1, len(self.values) - 1)      # bars rise left to right
+            height = rect.height() * value/3600/maximum * phase(self.progress, begin, begin + 0.5)
             color = QColor(t['accent'])
             if not self.hourly and key != dt.date.today().isoformat():
                 color.setAlphaF(.58)
@@ -513,6 +549,8 @@ class Window(QWidget):
     def __init__(self, settings=None):
         super().__init__()
         self.settings = settings if settings is not None else load_settings(data_dir())
+        set_style(self.settings.get('style') if self.settings.get('style') in STYLES else 'classic')
+        install_glass_surfaces()
         self.last_verification = None
         self.daily_repair_complete = True
         set_language(self.settings.get('language', language()))
@@ -536,7 +574,7 @@ class Window(QWidget):
         saved_theme = self.settings.get('theme', 'auto')
         self.theme_control.group.button(('auto', 'light', 'dark').index(saved_theme if saved_theme in ('auto', 'light', 'dark') else 'auto')).setChecked(True)
         self.theme_control.setAccessibleName(tr('Theme'))
-        self.sidebar = Sidebar(self.select_page, self.open_settings, motion_reduced,
+        self.sidebar = Sidebar(self.select_page, motion_reduced,
                                self.language_control, self.status, self.status_dot, self.theme_control)
         self.navigation = self.sidebar
         outer.addWidget(self.sidebar)
@@ -622,6 +660,13 @@ class Window(QWidget):
         self.trend = OverviewTrend(lambda: self.select_page(2))
         trend_box.addWidget(self.trend)
         layout.addWidget(self.trend_panel)
+        # One entrance for the page, the first time real data is on screen: the total rolls into place, then the
+        # 14-day bars rise oldest to newest. Only the number that matters moves; the other figures just appear.
+        self.intro = Intro(self.overview, ENTRANCE_MS, 0, motion_reduced)
+        self.hero.entrance = (self.intro, 0.0, 0.38)
+        self.trend.entrance = (self.intro, 0.36, 1.0)
+        self.intro.changed.connect(self.hero.update)
+        self.intro.changed.connect(self.trend.update)
         self.counting_toggle = DisclosureButton(tr('How this is counted'))
         self.counting_toggle.setObjectName('disclosure')
         self.counting_toggle.setCheckable(True)
@@ -679,7 +724,7 @@ class Window(QWidget):
         layout.addWidget(self.counting_panel)
         self.counting_panel.setMaximumHeight(0)
         self.counting_panel.hide()
-        self.system = SystemDashboard()
+        self.system = SystemDashboard(self.open_settings)
         self.history = History()
         self.system.layout().setContentsMargins(0, 0, 0, 0)
         self.history.layout().setContentsMargins(0, 0, 0, 0)
@@ -740,7 +785,8 @@ class Window(QWidget):
         reports_layout.addWidget(self.repair_notice)
         self.health = HealthPage(self.settings, self.open_settings)
         self.connect_page = ConnectPage(directory=data_dir())
-        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page):
+        self.settings_page = SettingsPage(self, data_dir())
+        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page, self.settings_page):
             page.setMinimumWidth(0)
             page.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
             self.pages.addWidget(page)
@@ -779,8 +825,8 @@ class Window(QWidget):
         body_layout.insertWidget(1, self.history_banner)
         self.history_banner.hide()
         self.shortcuts = []
-        for number, page in enumerate((0, 2, 1, 4, 5, 3), 1):
-            shortcut = QShortcut(QKeySequence(f'Ctrl+{number}'), self)
+        for key, page in (*((f'Ctrl+{number}', page) for number, page in enumerate((0, 2, 1, 4, 5, 3), 1)), ('Ctrl+,', 6)):
+            shortcut = QShortcut(QKeySequence(key), self)
             shortcut.activated.connect(lambda index=page: self.select_page(index))
             self.shortcuts.append(shortcut)
         self.page_animation = None
@@ -870,6 +916,30 @@ class Window(QWidget):
         self.system.update_values(self.worker.values, THEMES[self.theme])
         self.refresh()
 
+    def switch_style(self, value, origin=None):
+        """Glass or Classic. Saved with the theme and applied in place, spreading out like a theme change does."""
+        previous = self.settings.get('style', 'classic')
+        if value not in STYLES or value == previous:
+            return False
+        try:
+            update_settings({'style': value}, data_dir())
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
+            return False
+        self.settings['style'] = value
+        theme_reveal(self, origin or self.rect().center(), lambda: self.apply_live_style(value))
+        return True
+
+    def apply_live_style(self, name):
+        set_style(name)
+        attach_glass_all()
+        for widget in self.findChildren(QObject):
+            if hasattr(widget, 'restyle_glass'):
+                widget.restyle_glass()
+        self.apply_theme()
+        self.sidebar.update()
+        self.refresh()
+
     def system_theme_changed(self, *_):
         if self.settings.get('theme', 'auto') == 'auto':
             self.reveal_theme(resolve_theme('auto'), self.rect().center())
@@ -879,6 +949,7 @@ class Window(QWidget):
         self.verify_button.setAccessibleName(tr('verify.accessible', log=self.log_name))
         self.verification.setText(tr('verify.intro', log=self.log_name))
         self.language_control.group.button(('en', 'vi').index(language())).setChecked(True)
+        self.settings_page.load(self.settings)
         for card in self.cards.values():
             card.target = None
         self.toggle_import(self.import_toggle.isChecked())
@@ -904,10 +975,7 @@ class Window(QWidget):
             self.navigation.group.button(0).click()
 
     def open_settings(self):
-        dialog = SetupDialog(THEMES[self.theme], self.settings, data_dir(), self)
-        if dialog.exec() == dialog.DialogCode.Accepted:
-            self.apply_preferences(dialog.result_settings, self.settings)
-            self.refresh()
+        self.select_page(6)
 
     def open_technician(self, cls):
         try:
@@ -990,19 +1058,25 @@ class Window(QWidget):
             self.refresh()
         else:
             detail = bytes(self.import_process.readAllStandardError()).decode('utf-8', errors='replace').strip()
-            self.verification.setText(tr('rebuild.error', error=detail[-1000:]))
+            self.verification.setText(tr('rebuild.clock') if clock_problem(detail) else tr('rebuild.error', error=detail[-1000:]))
 
     def cancel_rebuild(self):
         if hasattr(self, 'import_process') and self.import_process.state() != QProcess.ProcessState.NotRunning:
             self.import_process.kill()
             self.import_process.waitForFinished(1000)
 
+    def _show_history_banner(self):
+        """Not on Connect: that form needs the height, and the banner is about a different task."""
+        self.history_banner.setVisible(getattr(self, '_history_due', False) and getattr(self, 'active_page', 0) != 5)
+
     def select_page(self, index):
-        if index not in (0, 1, 2, 3, 4, 5):
+        if index not in (0, 1, 2, 3, 4, 5, 6):
             return
         if index == 2 and not (self.settings.get('completed') and self.settings.get('history')):
             return
         self.navigation.group.button(index).setChecked(True)
+        if index == 6:
+            self.settings_page.load(self.settings)
         if getattr(self, 'active_page', None) == index:
             return
         if self.page_animation:
@@ -1013,12 +1087,15 @@ class Window(QWidget):
         if previous.graphicsEffect():
             previous.setGraphicsEffect(None)
         self.active_page = index
+        self._show_history_banner()
         self.pages.setCurrentIndex(index)
         self.pages.updateGeometry()
         self.body.layout().activate()
         self.scroll.verticalScrollBar().setValue(0)
         self.sidebar.move_indicator()
         page = self.pages.currentWidget()
+        if index == 0 and self.intro.done:
+            self.hero.roll_again()
         if not motion_reduced():
             effect = RiseEffect(page)
             page.setGraphicsEffect(effect)
@@ -1030,17 +1107,6 @@ class Window(QWidget):
             frame(0)
             self.page_animation.finished.connect(lambda: page.setGraphicsEffect(None))
         self.reflow()
-        self.reveal_page()
-
-    def reveal_page(self):
-        """Wipe the cards of the page now showing; their numbers count up just behind the wipe."""
-        page = self.pages.currentWidget()
-        if page is None or not self.isVisible():
-            return
-        cards = [f for f in page.findChildren(QFrame) if f.objectName() in ('signalCard', 'insetPanel')]
-        reveal(cards, motion_reduced())
-        for card in page.findChildren(StatCard):
-            card.replay_number()
 
     @property
     def palette_tokens(self):
@@ -1100,6 +1166,9 @@ class Window(QWidget):
         super().showEvent(event)
         if hasattr(self, 'timer'):
             self.timer.start(1000)
+        if getattr(self, '_shown_once', False) and getattr(self, 'active_page', None) == 0 and self.intro.done:
+            self.hero.roll_again()      # brought back from the tray or restored: the total rolls in again
+        self._shown_once = True
         self.reflow()
         QTimer.singleShot(0, lambda: self.sidebar.move_indicator(False))
 
@@ -1151,7 +1220,7 @@ class Window(QWidget):
             QPushButton:pressed {{ background: {t['track']}; }}
             QPushButton#importToggle {{ background: transparent; border: none; padding: 6px 0; text-align: left; }}
             QPushButton#importToggle:focus {{ text-decoration: underline; }}
-        """)
+        """ + desktop_sheet(t))
         self.update()
         self.hero.update()
         QTimer.singleShot(0, self.baseline.update_editor_geometry)
@@ -1174,6 +1243,7 @@ class Window(QWidget):
 
     def reflow(self):
         self.sidebar.set_collapsed(self.width() < 900)
+        self.sidebar.fit_height(self.height())
         available = self.width() - self.sidebar.width()
         margin = 16 if available < 850 else 32
         self.centering.setContentsMargins(margin, margin, margin, margin)
@@ -1309,6 +1379,7 @@ class Window(QWidget):
             if not self.initialized:
                 self.baseline.setValue(ledger['baseline_seconds'] / 3600)
                 self.initialized = True
+            self.intro.ready()
             self.status_dot.tick(running)
             self.cards['current'].live.tick(running)
             self.status.setText(tr('Tracking active') if running else tr('Tracker offline'))
@@ -1319,7 +1390,8 @@ class Window(QWidget):
             self.tracker_banner.setVisible(not running)
             self.hint.setVisible(not running)
             importing = hasattr(self, 'import_process') and self.import_process.state() != QProcess.ProcessState.NotRunning
-            self.history_banner.setVisible(bool(self.settings.get('completed')) and not ledger.get('imported') and not importing)
+            self._history_due = bool(self.settings.get('completed')) and not ledger.get('imported') and not importing
+            self._show_history_banner()
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)
@@ -1372,6 +1444,8 @@ if __name__ == '__main__':
     settings = load_settings()
     set_language(settings['language'])
     set_theme(resolve_theme(settings.get('theme', 'auto')))
+    set_style(settings.get('style', 'classic'))
+    install_glass_surfaces()
     previous = dict(settings)
     if not settings['completed']:
         setup = SetupDialog(THEMES[active_theme()], settings)
@@ -1387,7 +1461,6 @@ if __name__ == '__main__':
             pass
     if not (window.tray and '--tray' in sys.argv and previous['completed']):
         window.show()
-        QTimer.singleShot(0, window.reveal_page)      # the first page is uncovered as the window opens
     window.status.setText(tr('Updating history'))
     window._set_export_ready(False)
     window.start_daily_repair()

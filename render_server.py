@@ -41,7 +41,7 @@ def populate(store, fingerprint, count=20, detailed=False):
                        code=issued['code'], poll_token=secrets.token_urlsafe(32),
                        identity=dict(display_name=f'Demo-PC-{index+1:02}', asset_tag=f'DEMO-{index+1:03}',
                                      department=('Engineering', 'Office', 'Operations')[index % 3]),
-                       policy=dict(history=True, resources=detailed, **({'control': True} if detailed else {})))
+                       policy=dict(history=True, resources=detailed, **({'control': True, 'health': True} if detailed else {})))
         identifiers.append(request['device_id'])
         with patch.object(storage, '_now', return_value=now - dt.timedelta(hours=4, minutes=index)):
             store.enroll(request)
@@ -56,6 +56,19 @@ def populate(store, fingerprint, count=20, detailed=False):
                      os_name='Windows', os_version='11', mac_addresses=['02:00:00:00:00:01'],
                      disks=[dict(name='C:', total_bytes=512 * 1024**3, free_bytes=(24 if index == 1 else 180) * 1024**3)],
                      battery_design_wh=60)
+        specs['hardware'] = dict(cpu=dict(temperature_c=52+index, current_mhz=2400, max_mhz=4800),
+            fans=[dict(name='CPU fan', rpm=1200), dict(name='Case fan', rpm=800)],
+            adapters=[dict(name='Ethernet', model='Demo Gigabit adapter', kind='Ethernet', connected=True,
+                           speed_mbps=1000, driver='1.2.3', vendor='Demo vendor', mac='02:00:00:00:00:01'),
+                      dict(name='Wi-Fi', model='Demo wireless adapter', kind='Wi-Fi', connected=False,
+                           wifi_standard='802.11ax', band='5 GHz')],
+            memory=dict(modules=[dict(kind='DDR5', speed_mhz=5600, capacity_bytes=8*2**30)]*2, slots_used=2, slots_total=4),
+            disks=[dict(model='Demo SSD', kind='NVMe', size_bytes=512*2**30, health='Healthy')],
+            board=dict(manufacturer='Demo manufacturer', model='Demo board', bios_vendor='Demo BIOS', bios_version='1.23', bios_date='2025-06-01'),
+            gpus=[dict(name='Demo graphics', driver='123.45', vram_bytes=8*2**30)],
+            displays=[dict(width=2560, height=1440, hz=144)],
+            os=dict(name='Windows 11', build='26100', architecture='64-bit', installed='2025-06-01',
+                    last_boot=(observed-dt.timedelta(hours=6)).isoformat(), uptime_seconds=21600))
         def readings(stamp, sample):
             return dict(observed_at=stamp.isoformat(), specs=specs,
                         performance=dict(cpu_percent=12 + (sample * 13 + index) % 65,
@@ -68,14 +81,32 @@ def populate(store, fingerprint, count=20, detailed=False):
                 with patch.object(storage, '_now', return_value=stamp):
                     store.ingest(request['device_id'], credential, dict(version=1, device_id=request['device_id'],
                                  policy_version=1, policy=request['policy'], records=[], readings=readings(stamp, sample)))
+        history = dict(daily=daily, recording_started=(now-dt.timedelta(days=60)).isoformat())
+        health = None
+        if detailed:
+            weekdays_hours = [0.0]*24
+            for hour in range(24):
+                weekdays_hours[hour] = 3600*[0, 0, 0, 0, 0, 0, .1, .4, .8, 1, 1, .9, .7, .9, 1, 1, .9, .6, .4, .5, .6, .4, .2, .05][hour]*len(daily)/2
+            history.update(hourly=weekdays_hours, boots=120+index, current_session_seconds=5400+index*60,
+                           longest_session_seconds=86400*2+index*600,
+                           sessions=[dict(start=(now-dt.timedelta(hours=7*i+3)).astimezone().isoformat(), seconds=300+(i*i*337+index*91) % 40000) for i in range(60)])
+            usage = {(day-dt.timedelta(days=i)).isoformat(): dict(ac=3600*(2+i % 5), battery=3600*(1+(i+index) % 4)) for i in range(60)}
+            nights = [dict(date=(day-dt.timedelta(days=i)).isoformat(), seconds=3600*(5+(i+index) % 4)) for i in range(1, 45)]
+            health = dict(version=1, observed_at=observed.isoformat(), shutdowns_30d=index % 3, crashes_30d=1 if index % 4 == 0 else 0,
+                          battery_health=88.5-index, cycle_count=240+index*7,
+                          last_crash=(observed-dt.timedelta(days=5)).isoformat() if index % 4 == 0 else None,
+                          detail=dict(stability=[dict(date=(observed-dt.timedelta(days=9*i+2)).isoformat(), kind='Crash' if i % 3 == 0 else 'Unexpected shutdown') for i in range(index % 6+3)],
+                                      battery=dict(packs=[dict(full=50.0-index*.4, design=60.0, cycles=240+index*7, chemistry='LION', unit='Wh', health=88.5-index)],
+                                                   history=[dict(date=(day-dt.timedelta(days=7*i)).isoformat(), full=55.0-i*.15-index*.3) for i in range(51, -1, -1)], usage=usage),
+                                      sleep=dict(daily={n['date']: dict(cycles=1+int(n['seconds']) % 3, seconds=n['seconds']) for n in nights}, nights=nights)))
         with patch.object(storage, '_now', return_value=observed):
             store.ingest(request['device_id'], credential, dict(version=1, device_id=request['device_id'],
-                         policy_version=1, policy=request['policy'], client_version='1.1.0',
+                         policy_version=1, policy=request['policy'], client_version='1.2.0',
                          records=[dict(seq=1, observed_at=observed.isoformat(), awake_seconds=3600,
                                        measured_seconds=3600, imported_seconds=0,
                                        totals=dict(measured_seconds=(200+index*37)*3600, imported_seconds=0, baseline_seconds=0))],
-                         history=dict(daily=daily, recording_started=(now-dt.timedelta(days=60)).isoformat()),
-                         **({'readings': readings(observed, 6)} if detailed else {})))
+                         history=history,
+                         **({'readings': dict(readings(observed, 6), health=health), 'health': {k: v for k, v in health.items() if k != 'detail'}} if detailed else {})))
     return identifiers
 
 
@@ -114,7 +145,7 @@ def main():
             window.show()
             settle(app, window)
             for language in ('en', 'vi'):
-                window.language_choice.setCurrentIndex(0 if language == 'en' else 1)
+                window.language_button.set_index(0 if language == 'en' else 1, True)
                 settle(app, window)
                 name = f'empty-{language}-1600x1000.png'
                 window.grab().save(str(destination/name))
@@ -145,7 +176,7 @@ def main():
             window.device_order.setCurrentIndex(window.device_order.findData('problem'))
             settle(app, window)
             for language in ('en', 'vi'):
-                window.language_choice.setCurrentIndex(0 if language == 'en' else 1)
+                window.language_button.set_index(0 if language == 'en' else 1, True)
                 window.resize(1600, 1000)
                 window.tabs.setCurrentIndex(0)
                 settle(app, window)

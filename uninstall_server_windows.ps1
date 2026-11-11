@@ -17,12 +17,25 @@ if ($service -and $PSCmdlet.ShouldProcess('LifetimeServer', 'Stop and remove thi
 }
 $task = Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -ErrorAction SilentlyContinue
 if ($task -and $PSCmdlet.ShouldProcess('\Lifetime\Server', 'Stop and remove this server task registration')) {
+    $executable = [Environment]::ExpandEnvironmentVariables([string]$task.Actions[0].Execute)
     if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server }
+    # The packaged runtime is a one-file executable: it starts a second process that does the work, and stopping
+    # the task ends only the first. Left alone, that process keeps the port and the program file busy, so a later
+    # install or upgrade could not replace the file or start. End only processes running this task's own program.
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable } | ForEach-Object {
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        $_.WaitForExit(10000) | Out-Null
+    }
     Unregister-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -Confirm:$false
 }
-if ($RemoveFirewallRule -and (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue) -and
-    $PSCmdlet.ShouldProcess('LifetimeServer-HTTPS', 'Remove this explicit inbound firewall rule')) {
-    Remove-NetFirewallRule -Name 'LifetimeServer-HTTPS'
+# The installer always adds LifetimeServer-Connect and adds LifetimeServer-HTTPS only on request; remove both here.
+foreach ($ruleName in @('LifetimeServer-Connect', 'LifetimeServer-HTTPS')) {
+    if ($RemoveFirewallRule -and (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue) -and
+        $PSCmdlet.ShouldProcess($ruleName, 'Remove this installer-created inbound firewall rule')) {
+        Remove-NetFirewallRule -Name $ruleName
+    }
 }
+$shortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Lifetime Server.lnk'
+if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) { Remove-Item -LiteralPath $shortcutPath -Force }
 Write-Host 'Server registrations removed. Program files, data, TLS keys/certificates, administrator token and backups are preserved.'
 Write-Host 'The standalone desktop and machine-agent task were not changed.'

@@ -1,4 +1,5 @@
 """One-code connection page. Certificate search never sends application data."""
+import datetime as dt
 import os
 from pathlib import Path
 import socket
@@ -14,11 +15,12 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QLineEdit, QPushButton,
                             QGraphicsOpacityEffect)
 from lifetime_tasks import Tasks
 from lifetime_shell import PageStack, PulseDot
-from lifetime_i18n import tr, TABLES
+from lifetime_i18n import tr, TABLES, datetime_text
 from lifetime_i18n_qt import QLabel, QPushButton
 from lifetime_company import read_status
 from lifetime_settings import read_settings
 from lifetime_theme import tokens
+from lifetime_glass import solid
 
 NO_SERVER = 'No server found with this code. Check that the server is on and that this computer is on the same network.'
 PERMISSION = 'Windows permission is needed to finish.'
@@ -243,13 +245,16 @@ class PacketFlight(QWidget):
 
 
 class ConnectPage(QWidget):
+    def restyle_glass(self):
+        self.setStyleSheet('QWidget#connectPage {background: ' + solid(tokens()['bg']) + ';}')
+
     def __init__(self, parent=None, directory=None, language=None, machine_root=None):
         super().__init__(parent)
         from lifetime_theme import install
         install()
         self.setObjectName('connectPage')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet('QWidget#connectPage {background: ' + tokens()['bg'] + ';}')
+        self.restyle_glass()
         self.directory, self.machine_root, self.language = directory, machine_root, language
         self._busy = False
         self._operation = None
@@ -292,14 +297,17 @@ class ConnectPage(QWidget):
         f.addWidget(PacketFlight(self.reduce_motion))
         # The tutorial is captioned onto the drawing: each end says what to do at that computer.
         ends = QHBoxLayout()
-        for heading, detail, side in (('On this computer', 'Type that code below.', Qt.AlignmentFlag.AlignLeft),
-                                      ('On the server', 'Press Add device to get a code.', Qt.AlignmentFlag.AlignRight)):
+        # The drawing puts this computer on the left, but the order of work is server first, so the words say so.
+        for heading, detail, side in (('Then, on this computer', 'Type the code below.', Qt.AlignmentFlag.AlignLeft),
+                                      ('First, on the server', 'Press Add device to get a code.', Qt.AlignmentFlag.AlignRight)):
             end = QVBoxLayout()
             end.setSpacing(0)
             self.note(end, heading).setAlignment(side)
             self.note(end, detail, 'caption').setAlignment(side)
             ends.addLayout(end, 1)
         f.addLayout(ends)
+        self.code_error = self.note(f, '')      # above the field, where it is seen without scrolling
+        self.code_error.hide()
         self.code = QLineEdit()
         self.code.setMaxLength(2300)
         self.code.setPlaceholderText('LTS-XXXX-XXXX-XXXX-XXXX-XXXX')
@@ -310,8 +318,6 @@ class ConnectPage(QWidget):
         self.connect_button.setEnabled(False)
         self.code.textChanged.connect(self.format_input)
         self.code.returnPressed.connect(self.connect_server)
-        self.code_error = self.note(f, '')
-        self.code_error.hide()
         self.note(f, 'Next you choose what to share. You can change it or disconnect any time.', 'caption')
         self.pulse(self.forms[1], 'Looking for your server...', True)
         self.forms[1].addWidget(PacketFlight(self.reduce_motion))
@@ -349,7 +355,7 @@ class ConnectPage(QWidget):
         self.stage = 1
         self._report_started = None
         f = self.forms[4]
-        self.pulse(f, 'Connected', True)
+        self.connected_title = self.pulse(f, 'Connected', True)
         self.summary = self.note(f, '')
         self.summary.setTextFormat(Qt.TextFormat.PlainText)
         self.unreachable = self.note(f, "Can't reach the server right now. Lifetime will keep trying.")
@@ -402,6 +408,7 @@ class ConnectPage(QWidget):
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setObjectName('pageTitle')
         label.setWordWrap(True)
+        label.dot = dot
         row.addWidget(label, 1)
         layout.addLayout(row)
         return label
@@ -589,7 +596,7 @@ class ConnectPage(QWidget):
             trust = decode_bundle(result)
             self.server_address = trust['address']
             self.server_name = urlsplit(self.server_address).hostname
-            self.review_title.setText(self.t('Connected to {server}', server=self.server_name))
+            self.review_title.setText(self.t('Found {server}', server=self.server_name))      # found, not connected yet
             self.review_address.setText(self.server_address)
             self.show_step(3)
         elif operation == 'disconnect':
@@ -599,18 +606,14 @@ class ConnectPage(QWidget):
         elif operation in ('status', 'finish', 'policy'):
             self.status = result or {}
             if self.status.get('status') in ('denied', 'revoked', 'invitation-used', 'invalid-code'):
-                self.show_step(1)
-                self.code_error.setText(self.t('This code cannot be used. Ask for a new code on the server.'))
-                self.code_error.show()
+                self._code_rejected(self.status.get('status'))
             elif self.status.get('enabled'):
                 self.server_address = self.status.get('server') or self.server_address
                 from urllib.parse import urlsplit
                 self.server_name = self.status.get('server_name') or urlsplit(self.server_address).hostname or ''
                 state = self.status.get('status')
                 if state in ('denied', 'revoked', 'invitation-used', 'invalid-code'):
-                    self.show_step(1)
-                    self.code_error.setText(self.t('This code cannot be used. Ask for a new code on the server.'))
-                    self.code_error.show()
+                    self._code_rejected(state)
                 elif self.status.get('phase') in ('pending', 'enrolling') or state in ('pending', 'enrolling'):
                     self.waiting_text.setText(self.t('{server} needs to approve this computer.', server=self.server_name))
                     self.set_stage(2)
@@ -639,9 +642,35 @@ class ConnectPage(QWidget):
             if (self.status.get('policy') or {}).get(key):
                 names.append(title)
         self.summary.setText(self.server_name + '\n' + self.server_address + '\n' +
-                             self.t('Last report: {time}', time=self.status.get('last_sync') or self.t('Not available')) +
+                             self.t('Last report: {time}', time=self._local_time(self.status.get('last_sync')) or self.t('Not available')) +
                              '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)))
-        self.unreachable.setVisible(self.status.get('status') in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
+        self._set_reachable(self.status.get('status') not in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
+
+    def _code_rejected(self, state):
+        """Back to code entry, saying why. The old code is of no use, so it is cleared once (never while a new one is typed)."""
+        if self.step != 1:
+            self.code.clear()
+        self.show_step(1)
+        self.code_error.setText(self.t('The server removed this computer. Ask for a new code on the server to connect again.'
+                                       if state == 'revoked' else 'This code cannot be used. Ask for a new code on the server.'))
+        self.code_error.show()
+
+    @staticmethod
+    def _local_time(stamp):
+        """'2026-11-10T17:03:17Z' means little to a person: show their own local date and time."""
+        if not stamp:
+            return ''
+        try:
+            moment = dt.datetime.fromisoformat(str(stamp).replace('Z', '+00:00')).astimezone()
+        except ValueError:
+            return str(stamp)
+        return str(datetime_text(moment))
+
+    def _set_reachable(self, reachable):
+        """The title and dot must agree with the line below them: never 'Connected' beside 'Can't reach the server'."""
+        self.unreachable.setVisible(not reachable)
+        self.connected_title.setText(self.t('Connected' if reachable else 'Not connected right now'))
+        self.connected_title.dot.set_active(reachable)
 
     def failed(self, number, error):
         operation = self._operation
@@ -661,4 +690,4 @@ class ConnectPage(QWidget):
             self.review_error.setText(self.t(message))
             self.review_error.show()
         elif self.step == 5:
-            self.unreachable.show()
+            self._set_reachable(False)

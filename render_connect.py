@@ -36,7 +36,7 @@ def main():
             outer.setContentsMargins(0, 0, 0, 0)
             language_control = segments(['EN', 'VI'], lambda index: None)
             language_control.group.button(('en', 'vi').index(language)).setChecked(True)
-            sidebar = Sidebar(lambda index: None, lambda: None, lambda: True,
+            sidebar = Sidebar(lambda index: None, lambda: True,
                               language_control, QLabel('Lifetime'), PulseDot(reduce_motion=True))
             sidebar.group.button(5).setChecked(True)
             sidebar.group.button(5).setFocus()

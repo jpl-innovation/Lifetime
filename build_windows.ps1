@@ -1,12 +1,13 @@
+# Shared hardware modules: lifetime_system.py, lifetime_system_gui.py (included by lifetime_*.py).
 # Run on a Windows PC with Python 3.11+: builds Lifetime.exe, LifetimeTracker.exe, LifetimeImport.exe and a ready-to-install "package" folder.
 # Native tools (pip, PyInstaller) print progress on stderr; Windows PowerShell 5.1 would treat that as an error, so check exit codes instead.
 $ErrorActionPreference = 'Continue'
 python -m pip install --upgrade --disable-pip-version-check PyQt6 pyinstaller
 if ($LASTEXITCODE) { throw 'pip install failed' }
-$common = @('--noconfirm', '--onefile', '--icon', 'assets\lifetime.ico')
+$common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--onefile', '--icon', 'assets\lifetime.ico')
 python -m PyInstaller @common --noconsole --name LifetimeTracker lifetime_tracker.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (LifetimeTracker)' }
-python -m PyInstaller @common --noconsole --add-data 'assets\lifetime.png;assets' --add-data 'assets\jpl_innovation.png;assets' --name Lifetime --collect-submodules PyQt6 lifetime_gui.py
+python -m PyInstaller @common --noconsole --add-data 'assets\lifetime.png;assets' --add-data 'assets\jpl_innovation.png;assets' --add-data 'assets\jpl_innovation_light.png;assets' --name Lifetime --collect-submodules PyQt6 lifetime_gui.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (Lifetime)' }
 python -m PyInstaller @common --console --name LifetimeImport --hidden-import lifetime_tracker lifetime_import_windows.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (LifetimeImport)' }
@@ -22,5 +23,5 @@ Copy-Item dist\Lifetime.exe, dist\LifetimeTracker.exe, dist\LifetimeImport.exe, 
 Copy-Item lifetime_*.py package\ -Force
 Copy-Item README.md, TECHNICIAN_VERIFICATION.md package\ -Force
 New-Item -ItemType Directory -Force -Path package\assets | Out-Null
-Copy-Item assets\lifetime.png, assets\lifetime.ico, assets\jpl_innovation.png package\assets\ -Force
+Copy-Item assets\lifetime.png, assets\lifetime.ico, assets\jpl_innovation.png, assets\jpl_innovation_light.png package\assets\ -Force
 Write-Host 'Done. Open the "package" folder and double-click "Install Lifetime.cmd".'

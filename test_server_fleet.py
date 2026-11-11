@@ -70,6 +70,83 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         return ids
 
+    def test_the_numbers_are_dimmed_while_the_server_cannot_be_reached_and_restored_after(self):
+        self.seed()
+        self.assertIsNone(self.window.tabs.graphicsEffect())
+        self.window._overview_finished(None, False)
+        self.assertIsNotNone(self.window.tabs.graphicsEffect())
+        self.assertLess(self.window.tabs.graphicsEffect().opacity(), 1.0)
+        self.window._overview_finished(self.window._overview_result, True)
+        self.assertIsNone(self.window.tabs.graphicsEffect())
+
+    def test_the_details_pane_says_to_select_a_computer_until_one_is_selected(self):
+        self.seed()
+        self.window.tabs.setCurrentIndex(1)
+        self.app.processEvents()
+        self.assertFalse(self.window.detail_hint.isHidden())
+        self.assertIn('Select a computer', self.window.detail_hint.text())
+        self.window.table.selectRow(0)
+        self.wait()
+        self.assertTrue(self.window.detail_hint.isHidden())
+        self.window.table.clearSelection()
+        self.wait()
+        self.assertFalse(self.window.detail_hint.isHidden())
+
+    def test_a_computer_without_a_group_says_no_group_not_not_available(self):
+        self.seed()
+        result = dict(self.window._fleet_result)
+        result['rows'] = [dict(row, group='') for row in result['rows']]
+        self.window._render_fleet(result)
+        self.assertEqual(self.window.fleet_table.item(0, 1).text(), 'No group')
+
+    def test_a_code_that_outlives_today_says_which_day_it_expires(self):
+        from lifetime_connection import issue
+        from lifetime_server_widgets import AddDeviceSheet
+        now = dt.datetime.now(dt.timezone.utc)
+        for hours, has_date in ((0.01, False), (30, True)):
+            issued = dict(code=issue('0' * 64), uses=1,
+                          expires_at=(now + dt.timedelta(hours=hours)).isoformat().replace('+00:00', 'Z'))
+            sheet = AddDeviceSheet(issued, 'https://127.0.0.1:8443', self.window.t, self.window, client=None)
+            self.addCleanup(sheet.close)
+            local = (now + dt.timedelta(hours=hours)).astimezone()
+            if has_date:
+                self.assertIn(local.strftime('%Y-%m-%d'), sheet.expiry.text())
+            else:
+                self.assertNotIn(local.strftime('%Y-%m-%d'), sheet.expiry.text())
+                self.assertTrue(sheet.expiry.text().endswith(local.strftime('%H:%M')))
+
+    def test_the_confirmation_button_says_continue_not_a_question(self):
+        from PyQt6.QtWidgets import QMessageBox
+        seen = []
+        for language, words in (('en', ['Continue', 'Cancel']), ('vi', ['Tiếp tục', 'Hủy'])):
+            self.window.language = language
+            with patch.object(QMessageBox, 'exec', lambda dialog: seen.append([b.text() for b in dialog.buttons()]) or 0):
+                self.window._confirm('Confirm Refresh for X?')
+            self.assertEqual(seen[-1][0], words[0])
+
+    def test_a_dashboard_left_open_past_midnight_moves_on_to_the_new_day(self):
+        from PyQt6.QtCore import QDate, QLocale
+        today = QDate.currentDate()
+        yesterday = today.addDays(-1)
+        self.window._today = yesterday                  # as if it had been opened yesterday and left running
+        self.window.fleet_date.setDate(yesterday)
+        self.wait()
+        self.window._load_fleet()
+        self.wait()
+        self.assertEqual(self.window.fleet_date.date(), today)
+        self.assertEqual(self.window._fleet_result['date'], today.toString('yyyy-MM-dd'))
+        self.assertIn(QLocale('en_GB').toString(today, 'd MMM yyyy'), self.window.today_label.text())
+
+    def test_a_date_picked_on_purpose_is_not_pulled_back_to_today(self):
+        from PyQt6.QtCore import QDate
+        picked = QDate.currentDate().addDays(-3)
+        self.window.fleet_date.setDate(picked)
+        self.wait()
+        self.window._today = QDate.currentDate().addDays(-1)    # the day rolled over meanwhile
+        self.window._load_fleet()
+        self.wait()
+        self.assertEqual(self.window.fleet_date.date(), picked)
+
     def test_empty_fleet_is_truthful_with_live_add_device_action(self):
         self.assertEqual(self.window.kpis['Connected'].text(), '0')
         self.assertEqual(self.window.kpis['Awake today'].text(), 'Not available')
@@ -162,7 +239,7 @@ class FleetGuiTests(unittest.TestCase):
 
     def test_native_keyboard_indicator_reduced_motion_and_compact_vietnamese(self):
         self.seed()
-        self.window.language_choice.setCurrentIndex(1)
+        self.window.language_button.click()
         self.window.resize(1024, 700)
         self.wait()
         self.assertEqual(self.window.width(), 1024)

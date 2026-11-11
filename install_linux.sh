@@ -38,7 +38,7 @@ if command -v journalctl >/dev/null 2>&1; then
     fi
 fi
 mkdir -p "$install_dir/assets" "$HOME/.config/systemd/user" "$HOME/.local/share/applications"
-for file in lifetime_tracker.py lifetime_gui.py lifetime_health.py lifetime_health_gui.py lifetime_shell.py lifetime_signals.py lifetime_dashboard.py lifetime_charts.py lifetime_settings.py lifetime_setup.py lifetime_import.py lifetime_import_windows.py lifetime_daily.py lifetime_i18n.py lifetime_i18n_qt.py lifetime_reports.py lifetime_technician.py lifetime_ledger.py lifetime_identity.py lifetime_theme.py lifetime_tasks.py lifetime_company.py lifetime_connect.py lifetime_agent.py lifetime_live.py lifetime_reveal.py lifetime_ws.py lifetime_ws_client.py lifetime_client.py lifetime_protocol.py lifetime_tls.py lifetime_permissions.py lifetime_connection.py lifetime_discovery.py; do
+for file in lifetime_system.py lifetime_system_gui.py lifetime_tracker.py lifetime_gui.py lifetime_health.py lifetime_health_gui.py lifetime_shell.py lifetime_signals.py lifetime_dashboard.py lifetime_charts.py lifetime_settings.py lifetime_setup.py lifetime_import.py lifetime_import_windows.py lifetime_daily.py lifetime_i18n.py lifetime_i18n_qt.py lifetime_reports.py lifetime_technician.py lifetime_ledger.py lifetime_identity.py lifetime_theme.py lifetime_tasks.py lifetime_company.py lifetime_connect.py lifetime_agent.py lifetime_live.py lifetime_reveal.py lifetime_glass.py lifetime_ws.py lifetime_ws_client.py lifetime_client.py lifetime_protocol.py lifetime_tls.py lifetime_permissions.py lifetime_connection.py lifetime_discovery.py; do
     if [[ "$source_dir/$file" != "$install_dir/$file" ]]; then
         install -m 644 "$source_dir/$file" "$install_dir/$file"
     fi
@@ -98,6 +98,7 @@ desktop_quote() {
 } > "$HOME/.local/share/applications/lifetime.desktop"
 install -m 644 "$source_dir/assets/lifetime.png" "$install_dir/assets/lifetime.png"
 install -m 644 "$source_dir/assets/jpl_innovation.png" "$install_dir/assets/jpl_innovation.png"
+install -m 644 "$source_dir/assets/jpl_innovation_light.png" "$install_dir/assets/jpl_innovation_light.png"
 systemctl --user daemon-reload
 printf 'Open Lifetime to choose what to collect and whether to track at login. No tracking is started by this installer.\n'
 printf 'Installed Lifetime. The GUI requires PyQt6 for %s.\n' "$python_bin"

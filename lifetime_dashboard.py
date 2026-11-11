@@ -15,6 +15,9 @@ from lifetime_i18n import duration, ui_text
 import lifetime_signals as signals
 from lifetime_settings import allowed_probes, defaults
 from lifetime_charts import LiveSparklines
+from lifetime_system_gui import HardwarePanel
+from lifetime_reveal import Intro, progress
+from lifetime_glass import solid
 
 
 class ProbeWorker(QWidget):
@@ -40,7 +43,7 @@ class ProbeWorker(QWidget):
         self.closed = False
         self.probes = {name: (getattr(signals, 'probe_'+name), interval) for name, interval in
                        [('power', 2), ('clocks', 2), ('cpu', 2), ('ram', 2), ('disks', 2), ('counters', 2),
-                        ('battery', 10), ('network', 10), ('wifi', 10), ('gpu', 10), ('identity', 10)]}
+                        ('battery', 10), ('network', 10), ('wifi', 10), ('gpu', 10), ('identity', 10), ('inventory', 21600)]}
         self.catalog = dict(self.probes)
         self.set_settings(settings or defaults())
         self.timer = QTimer(self)
@@ -63,7 +66,7 @@ class ProbeWorker(QWidget):
         now = time.monotonic()
         dirty = False
         for key, (future, started, expired) in list(self.jobs.items()):
-            limit = VERIFY_LIMIT if key == 'verify' else 5     # Verify may read a large system journal
+            limit = 90 if key == 'inventory' else VERIFY_LIMIT if key == 'verify' else 5     # Verify may read a large system journal
             if not future.done() and now-started <= limit:
                 continue
             result = None
@@ -189,6 +192,8 @@ class SignalCard(QFrame):
         self.box.addStretch()
         self.fields = {}
         self.sparks = {}
+        self.entrance = None        # (intro, start, end): the meters fill once, top to bottom
+        self.percent = {}
 
     def set_rows(self, rows, tokens):
         keys = [r[0] for r in rows]
@@ -245,12 +250,21 @@ class SignalCard(QFrame):
             value.setText(text)
             meter.setVisible(percentage is not None)
             if percentage is not None:
-                meter.setValue(round(max(0, min(100, percentage))*10))
+                self.percent[key] = max(0, min(100, percentage))
+                meter.setValue(round(self.percent[key]*10*progress(self.entrance)))
                 meter.setAccessibleName(f'{key}: {percentage:.1f}%')
+
+    def refresh_entrance(self):
+        for key, (value, meter) in self.fields.items():
+            if key in self.percent and meter.isVisibleTo(self):
+                meter.setValue(round(self.percent[key]*10*progress(self.entrance)))
 
 
 class SystemDashboard(QWidget):
-    def __init__(self):
+    def restyle_glass(self):
+        self.data_toggle.setStyleSheet('QPushButton:checked {background:' + solid('#1B2A46') + ';}')
+
+    def __init__(self, open_settings=None):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -266,7 +280,7 @@ class SystemDashboard(QWidget):
         self.data_toggle.setCheckable(True)
         self.data_toggle.setAccessibleName(tr('Show data for all live series'))
         self.data_toggle.setFixedHeight(40)
-        self.data_toggle.setStyleSheet('QPushButton:checked {background:#1B2A46;}')
+        self.restyle_glass()
         header.addWidget(self.data_toggle)
         layout.addLayout(header)
         layout.addWidget(self.freshness)
@@ -275,6 +289,12 @@ class SystemDashboard(QWidget):
         self.empty.setWordWrap(True)
         self.empty.hide()
         layout.addWidget(self.empty)
+        # The Health page offers the same way out; a message that points at Settings should open it.
+        self.open_settings_button = QPushButton(tr('Open Settings'))
+        if open_settings:
+            self.open_settings_button.clicked.connect(open_settings)
+        self.open_settings_button.hide()
+        layout.addWidget(self.open_settings_button, alignment=Qt.AlignmentFlag.AlignLeft)
         self.sparklines = LiveSparklines()
         self.sparklines.hide()
         self.data_toggle.toggled.connect(self.show_data)
@@ -285,7 +305,15 @@ class SystemDashboard(QWidget):
         layout.addLayout(self.grid)
         self.set_columns(1)
         layout.addWidget(self.sparklines)
+        self.hardware = HardwarePanel()
+        layout.addWidget(self.hardware)
         self.settings = dict(battery=True, network=True, wifi_name=True, graphics=True, resources=True)
+        # The meters fill once, the first time the page is open with real readings, then just follow the data.
+        self.intro = Intro(self, 900, 100)
+        for index, card in enumerate(self.cards):
+            start = 0.12 * index
+            card.entrance = (self.intro, start, start + 0.6)
+            self.intro.changed.connect(card.refresh_entrance)
 
     def show_data(self, checked):
         self.sparklines.setVisible(checked and any(self.settings.values()))
@@ -295,6 +323,10 @@ class SystemDashboard(QWidget):
         self.sparklines.set_settings(settings)
         any_enabled = any(settings.get(key) for key in ('battery', 'network', 'wifi_name', 'graphics', 'resources'))
         self.empty.setVisible(not any_enabled)
+        self.hardware.setVisible(bool(settings.get('resources')))
+        if not settings.get('resources'):
+            self.hardware.set_data({})
+        self.open_settings_button.setVisible(not any_enabled)
         self.data_toggle.setVisible(any_enabled)
         self.sparklines.setVisible(any_enabled and self.data_toggle.isChecked())
         self.freshness.setVisible(any_enabled)
@@ -317,6 +349,7 @@ class SystemDashboard(QWidget):
 
     def update_values(self, data, tokens):
         self.sparklines.update_values(data)
+        self.hardware.set_data(data.get('inventory'))
         p, b = data.get('power') or {}, data.get('battery') or {}
         rate = '0 W · battery idle' if p.get('ac') and b.get('watts') == 0 else fmt(b.get('watts'), 'W')
         power = [('Battery', fmt(p.get('percent'), '%', 0), p.get('percent')),
@@ -396,4 +429,6 @@ class SystemDashboard(QWidget):
         for card, rows, mapping in zip(self.cards, (power, network, graphics, computer), mappings):
             card.sparks = mapping
             card.set_rows(rows, tokens)
+        if any(row[2] is not None for rows in (power, network, graphics, computer) for row in rows):
+            self.intro.ready()
         self.freshness.setText(tr('Local readings · 2 s / 10 s'))

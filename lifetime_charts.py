@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget
 from lifetime_i18n import duration, time_text
 from lifetime_shell import DisclosureButton
+from lifetime_glass import active_style, paint_glass, paint_track, solid
+from lifetime_reveal import Intro, phase, progress
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, Tokens
 
 TOKENS = Tokens()   # follows the active (light or dark) palette
@@ -248,6 +250,7 @@ class Plot(QWidget):
         self.scope = ''
         self.details = []
         self.bar_color = None
+        self.entrance = None      # (intro, start, end): axis settles, then bars rise oldest to newest
         self.setMouseTracking(True)
         self.setMinimumWidth(120)
         self.setMinimumHeight(140)
@@ -262,6 +265,16 @@ class Plot(QWidget):
         available = [v for v in values if v is not None]
         self.setAccessibleDescription(tr('chart.values', count=len(available), message=message))
         self.update()
+        if len(available) >= (2 if self.kind == 'spark' else 1) and not message:
+            self.arm_entrance()
+
+    def arm_entrance(self, duration=800):
+        """One entrance per chart, the first time it is on screen with data; live refreshes never replay it.
+        A chart whose entrance belongs to a page (the Overview trend) keeps that one."""
+        if self.entrance is None:
+            self.entrance = (Intro(self, duration, 0, motion_reduced), 0.0, 1.0)
+        if self.entrance[1:] == (0.0, 1.0) and self.entrance[0].parent() is self:
+            self.entrance[0].ready()
 
     def plot(self):
         left = max(58, QFontMetrics(font()).horizontalAdvance(f'{self.scale():,.0f} '+tr('unit.hour'))+10)
@@ -305,6 +318,9 @@ class Plot(QWidget):
                        self.message or tr('No recorded data in this range'))
             return
         maximum = self.scale()
+        u = progress(self.entrance, eased=False)
+        entering = u < 1.0
+        p.setOpacity(phase(u, 0.0, 0.3))        # the axis settles first, so the bars have something to stand on
         for fraction in (0, 1/3, 2/3, 1):
             y = r.bottom()-r.height()*fraction
             p.setPen(QPen(QColor(TOKENS['border']), .6))
@@ -319,10 +335,11 @@ class Plot(QWidget):
             elif self.unit != 'sessions':
                 tick += self.unit if self.unit == '%' else ''
             p.drawText(QRectF(0, y-9, r.left()-8, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, tick)
+        p.setOpacity(1.0)
         xs = self.positions(r)
         ys = [r.bottom()-r.height()*v/maximum if v is not None else None for v in self.values]
         if self.kind in ('line', 'spark'):
-            self.draw_line(p, xs, ys, r, area=self.kind == 'line', color=self.bar_color)
+            self.draw_line(p, xs, ys, r, area=self.kind == 'line', color=self.bar_color, reveal=phase(u, 0.1, 1.0))
         else:
             step = r.width()/len(self.values)
             width = min(18, max(.5, step-2))
@@ -340,7 +357,11 @@ class Plot(QWidget):
                     continue
                 is_today = bool(self.dates and self.dates[j] == self.today)
                 color = QColor(self.bar_color or TOKENS['accent'])   # every bar in brand yellow
-                bar = QRectF(xs[j]-width/2, ys[j], width, max(.6, r.bottom()-ys[j]))
+                grow = 1.0
+                if entering:    # oldest day first, the newest bar last and a little slower
+                    begin = 0.16 + 0.5 * j / max(1, len(xs) - 1)
+                    grow = phase(u, begin, begin + (0.34 if j == len(xs) - 1 else 0.28))
+                bar = QRectF(xs[j]-width/2, r.bottom()-(r.bottom()-ys[j])*grow, width, max(.6*grow, (r.bottom()-ys[j])*grow))
                 p.setBrush(color)
                 # Clip a round rectangle below the baseline: only the data
                 # ends are rounded, the baseline stays square and anchored.
@@ -376,6 +397,7 @@ class Plot(QWidget):
                     indices[-1] = i
         if self.kind == 'bars' and len(xs) <= 24 and r.width()/len(xs) >= 54:
             indices = list(range(len(xs))) if len(xs) <= 7 else list(range(0, len(xs), 4))
+        p.setOpacity(phase(u, 0.0, 0.3))
         p.setPen(QColor(TOKENS['muted']))
         for i in ([] if self.kind == 'spark' else indices):
             label_width = min(100, r.width()/max(1, count)) if self.dates else min(80, r.width()/max(1, len(indices)))
@@ -392,6 +414,7 @@ class Plot(QWidget):
             text = (tr('Latest ') if self.kind in ('line', 'spark') else tr('Max '))+self.display(self.values[idx])
             p.setPen(QColor(TOKENS['muted']))
             p.drawText(QRectF(r.left(), 0, r.width(), 20), Qt.AlignmentFlag.AlignRight, text)
+        p.setOpacity(1.0)
         if self.hover is not None and self.hover < len(xs):
             i = self.hover
             p.setPen(QPen(QColor(TOKENS['muted']), 1, Qt.PenStyle.DashLine))
@@ -400,8 +423,10 @@ class Plot(QWidget):
                 p.setBrush(QColor(TOKENS['text']))
                 p.drawEllipse(QPointF(xs[i], ys[i]), 3, 3)
 
-    def draw_line(self, p, xs, ys, rect, area=False, color=None):
-        p.setClipRect(rect.adjusted(-2, -2, 2, 2))
+    def draw_line(self, p, xs, ys, rect, area=False, color=None, reveal=1.0):
+        clip = rect.adjusted(-2, -2, 2, 2)
+        clip.setWidth(clip.width() * reveal)       # lines draw on left to right during the entrance
+        p.setClipRect(clip)
         segments, segment = [], []
         for x, y in zip(xs, ys):
             if y is None:
@@ -484,6 +509,8 @@ class Calendar(Plot):
         self.weeks = ((end-self.origin).days//7)+1
         self.setMinimumWidth(max(240, 58+self.weeks*14))
         self.update()
+        if daily:
+            self.arm_entrance(700)
 
     def geometry_for_cells(self):
         step = min(22, (self.width()-58)/max(1, self.weeks))
@@ -494,6 +521,7 @@ class Calendar(Plot):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setFont(font())
         left, top, step, size = self.geometry_for_cells()
+        u = progress(self.entrance, eased=False)
         p.setPen(QColor(TOKENS['muted']))
         for row in (0, 2, 4):
             p.drawText(QRectF(0, top+row*20, 40, 20), Qt.AlignmentFlag.AlignRight, weekdays()[row])
@@ -519,6 +547,8 @@ class Calendar(Plot):
                 if not self.start <= date <= self.end:
                     continue
                 rect = QRectF(x, top+row*20, size, 17)
+                begin = 0.6 * week / max(1, self.weeks - 1)      # cells fade up week by week, left to right
+                p.setOpacity(phase(u, begin, begin + 0.4))
                 value = self.daily.get(date)
                 if value is None:
                     p.setBrush(Qt.BrushStyle.NoBrush)
@@ -549,6 +579,8 @@ class HeatScale(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedHeight(25)
+        self.intro = Intro(self, 600, 0, motion_reduced)
+        self.intro.ready()      # starts the first time the scale is shown
         self.setAccessibleName(tr('Awake hours scale: 0 to 24 hours, five increasing steps. Outline means no recorded data.'))
 
     def paintEvent(self, event):
@@ -557,7 +589,9 @@ class HeatScale(QWidget):
         p.setPen(QColor(TOKENS['muted']))
         p.drawText(QRectF(0, 1, 28, 22), Qt.AlignmentFlag.AlignVCenter, tr('0 h'))
         for i, color in enumerate(heat_ramp()):
+            p.setOpacity(1.0 if self.intro.done else phase(self.intro.value, i * 0.12, i * 0.12 + 0.52))
             p.fillRect(QRectF(33+i*21, 6, 19, 12), QColor(color))
+        p.setOpacity(1.0)
         p.drawText(QRectF(145, 1, 38, 22), Qt.AlignmentFlag.AlignVCenter, tr('24 h'))
         if self.width() >= 360:
             p.drawText(QRectF(195, 1, self.width()-195, 22), Qt.AlignmentFlag.AlignVCenter, tr('Outline = no record'))
@@ -663,6 +697,10 @@ class RangeSegments(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        if active_style() == 'glass':
+            paint_track(painter, QRectF(self.rect()), PANEL_RADIUS)
+            paint_glass(painter, self.indicator, CONTROL_RADIUS, pill=True)
+            return
         painter.setBrush(QColor(TOKENS['card']))
         painter.drawRoundedRect(QRectF(self.rect()), PANEL_RADIUS, PANEL_RADIUS)
         painter.setBrush(QColor(TOKENS['track']))
@@ -693,7 +731,6 @@ class ChartCard(QFrame):
         if isinstance(chart, Calendar):
             self.viewport = QScrollArea()
             self.viewport.setFrameShape(QFrame.Shape.NoFrame)
-            self.viewport.setStyleSheet(f'QScrollArea, QScrollArea > QWidget > QWidget {{background:{TOKENS["card"]};}}')
             self.viewport.setWidgetResizable(True)
             self.viewport.setWidget(chart)
             self.viewport.setMinimumHeight(181)
@@ -710,11 +747,18 @@ class ChartCard(QFrame):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setStyleSheet(f'QTableWidget {{background:{TOKENS["card"]}; gridline-color:{TOKENS["border"]}; font-size:13px;}} QHeaderView::section {{background:{TOKENS["track"]}; color:{TOKENS["muted"]}; border:0; padding:5px;}}')
         self.box.addWidget(self.table, 1)
         self.table.hide()
         self.data_visible = False
         self.headers, self.rows = [], []
+        self.restyle_glass()
+
+    def restyle_glass(self):
+        """The calendar's scroll area and the data table sit on the card: solid in Classic, see-through on Glass."""
+        if isinstance(self.chart, Calendar):
+            self.viewport.setStyleSheet(f'QScrollArea, QScrollArea > QWidget > QWidget {{background:{solid(TOKENS["card"])};}}')
+        edge = 'border:none; ' if active_style() == 'glass' else ''        # the glass card is the frame
+        self.table.setStyleSheet(f'QTableWidget {{{edge}background:{solid(TOKENS["card"])}; gridline-color:{TOKENS["border"]}; font-size:13px;}} QHeaderView::section {{background:{solid(TOKENS["track"])}; color:{TOKENS["muted"]}; border:0; padding:5px;}}')
 
     def set_table(self, headers, rows):
         self.headers, self.rows = headers, rows
@@ -746,6 +790,9 @@ class ChartCard(QFrame):
 
 
 class Insights(QWidget):
+    def restyle_glass(self):
+        self.data_toggle.setStyleSheet('QPushButton:checked {background:' + solid(TOKENS['track']) + ';}')
+
     def __init__(self):
         super().__init__()
         self.ledger = {}
@@ -765,7 +812,7 @@ class Insights(QWidget):
         self.data_toggle.setCheckable(True)
         self.data_toggle.setAccessibleName(tr('Show data for all charts'))
         self.data_toggle.setFixedHeight(40)
-        self.data_toggle.setStyleSheet('QPushButton:checked {background:' + TOKENS['track'] + ';}')
+        self.restyle_glass()
         row.addWidget(self.data_toggle)
         self.ranges.currentIndexChanged.connect(lambda index: self.set_range(RANGES[index]))
         box.addLayout(row)
@@ -985,7 +1032,8 @@ class Sparkline(Plot):
             return
         maximum = self.scale()
         ys = [rect.bottom()-rect.height()*v/maximum if v is not None else None for v in self.values]
-        self.draw_line(painter, self.positions(rect), ys, rect, color=TOKENS['muted'])
+        self.draw_line(painter, self.positions(rect), ys, rect, color=TOKENS['muted'],
+                       reveal=progress(self.entrance))
 
     def positions(self, rect):
         now = time.monotonic()

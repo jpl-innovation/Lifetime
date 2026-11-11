@@ -51,6 +51,46 @@ class AgentFixture(unittest.TestCase):
 
 
 class MachineTests(AgentFixture):
+    def test_inventory_read_is_cached_without_waiting(self):
+        import lifetime_signals as signals
+        started, release = threading.Event(), threading.Event()
+        def read():
+            started.set()
+            release.wait(3)
+            return dict(fans=[], cpu={'current_mhz': 2400})
+        with patch.object(signals, 'probe_inventory', side_effect=read) as probe:
+            try:
+                self.assertIsNone(self.machine._remote_inventory())
+                self.assertTrue(started.wait(1))
+                self.assertIsNone(self.machine._remote_inventory())
+            finally:
+                release.set()
+            self.machine._inventory_job.result(timeout=2)
+            self.assertEqual(self.machine._remote_inventory()['fans'], [])
+            self.assertEqual(probe.call_count, 1)
+            self.machine.set_policy(dict(history=False, resources=False))
+            self.assertIsNone(self.machine._inventory_value)
+
+    def test_extended_health_read_does_not_wait_for_logs(self):
+        import lifetime_health as health
+        started, release = threading.Event(), threading.Event()
+        def read(*args):
+            started.set()
+            release.wait(3)
+            return dict(observed_at=STAMP, stability=[], battery=None, sleep=None)
+        with patch.object(health, 'collect', side_effect=read) as collect:
+            try:
+                self.assertIsNone(self.machine._remote_health())
+                self.assertTrue(started.wait(1))
+                self.assertIsNone(self.machine._remote_health())
+                self.assertEqual(collect.call_count, 1)
+            finally:
+                release.set()
+            self.machine._health_job.result(timeout=2)
+            self.assertEqual(self.machine._remote_health()['detail']['stability'], [])
+            self.machine.set_policy(dict(history=False, resources=False))
+            self.assertIsNone(self.machine._health_value)
+
     def test_initialization_is_explicit_and_separate_from_user_data(self):
         with patch.object(agent.tracker, 'data_dir', side_effect=AssertionError('per-user data read')):
             missing = Path(self.temporary.name) / 'missing'
@@ -444,6 +484,23 @@ class PowerAndResourcesTests(AgentFixture):
 
 
 
+class HardwareNameTests(unittest.TestCase):
+    def test_windows_server_is_named_as_people_say_it(self):
+        self.assertEqual(agent.os_names('Windows', '2025Server'), ('Windows Server', '2025'))
+        self.assertEqual(agent.os_names('Windows', '2012ServerR2'), ('Windows Server', '2012 R2'))
+        self.assertEqual(agent.os_names('Windows', '11'), ('Windows', '11'))
+        self.assertEqual(agent.os_names('Linux', '6.8.0'), ('Linux', '6.8.0'))
+        self.assertEqual(agent.os_names(None, None), (None, None))
+
+    def test_identical_processors_are_named_once(self):
+        import lifetime_signals as signals
+        name = 'Intel(R) Core(TM) Ultra 9 275HX'
+        self.assertEqual(signals.unique_names(name + ', ' + name), name)
+        self.assertEqual(signals.unique_names(name), name)
+        self.assertEqual(signals.unique_names('Xeon A, Xeon B, Xeon A'), 'Xeon A, Xeon B')   # different ones stay, in order
+        self.assertEqual(signals.unique_names(''), '')
+
+
 class ConnectionCliTests(unittest.TestCase):
     def test_policy_display_name_and_detached_background_reach_agent(self):
         with tempfile.TemporaryDirectory() as root:
@@ -459,6 +516,17 @@ class ConnectionCliTests(unittest.TestCase):
             self.assertEqual(spawn.call_args.args[0][-3:], ['--directory', root, '--run'])
             self.assertNotIn('--enroll-bundle-file', spawn.call_args.args[0])
             machine.close.assert_called_once()
+
+    def test_packaged_background_agent_gets_its_own_extraction_folder(self):
+        # The one-file program starts a copy of itself for --background. Without this variable the copy shares the
+        # first one's temporary folder, which the first deletes on exit; the copy then fails on every file it loads
+        # later and the computer sits at "unreachable" after it has been approved.
+        with tempfile.TemporaryDirectory() as root:
+            machine = Mock()
+            with patch.object(agent, 'MachineAgent', return_value=machine), patch.object(agent.subprocess, 'Popen') as spawn, \
+                    patch.object(agent.sys, 'frozen', True, create=True):
+                agent.main(['--directory', root, '--background'])
+            self.assertEqual(spawn.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'], '1')
 
     def test_policy_changes_and_disconnect_use_agent_api(self):
         machine = Mock()

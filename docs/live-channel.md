@@ -62,3 +62,46 @@ it while commands, acks and presence stay on the socket. Not built.
   left running from an earlier connect must be stopped once; new connects replace it automatically.
 - The source (non-packaged) agent install uses a clean virtual environment with no packages, so it uses the HTTPS
   fallback unless `websockets` is installed there.
+
+## Activity and Health detail (client 1.2)
+
+Durable HTTPS sync adds optional history fields: `hourly` (24 buckets),
+`dated_hourly` (120 days), `sessions` (100 rows), `boots`, and current/longest
+session seconds. Existing daily/imported history remains capped at 3,660 days.
+These fields require the existing history consent.
+
+Under existing resources consent, `readings.health` carries the version-1 health
+summary plus optional `detail`: stability events (400), battery packs (4), capacity
+history/usage (400 days each), sleep days/nights (400 each). OS log reads run in a
+background worker and refresh every six hours. Failed readings are omitted.
+No new consent flags are introduced; the older independent health summary is
+unchanged. Revoking resources clears the extended readings locally and remotely.
+
+The server validates nested field names, types, finite ranges, dates and list caps;
+the complete sync remains limited to 1 MiB. Optional JSON is stored in existing
+snapshot columns, so existing databases need no DDL migration. The loopback,
+token-protected device detail API returns the same snapshots. Old clients work
+unchanged. Since older servers strictly reject unknown fields, a 400 response to
+an extended batch makes the client retry the old format for 24 hours.
+
+### Optional hardware inventory
+
+`readings.specs.hardware` uses the shared `lifetime_system` schema. It requires
+resources consent and is collected off the sampler/UI thread, cached for six hours.
+There are at most 16 hardware network interfaces and 8 rows per other list
+(fans, RAM modules, physical disks, GPUs, active displays). Strings are capped at
+160 characters; numbers have per-field finite bounds, and counts/byte sizes are
+integers. Unknown keys, control characters, bools-as-numbers and oversized lists
+are rejected. Old-server fallback strips this field too. Existing JSON snapshot
+storage/API and consent revocation apply without schema migration.
+
+Windows probes use CIM and standard OS APIs. No sensor
+drivers/libraries are installed. Unidentified ACPI thermal zones are never presented
+as CPU temperatures; Windows CPU temperature stays unavailable without an identified sensor.
+Optional bounded `unavailable` fields explain domain failures, including access denied.
+Network inventory includes virtual adapters; missing driver/link speed is explicit.
+Win32_Fan DesiredSpeed is a requested speed and is
+never labeled as measured RPM. Win32_VideoController's 32-bit AdapterRAM is not
+trusted for VRAM; a driver registry QWORD or existing NVIDIA reading is preferred.
+Access-denied or unexposed readings remain unavailable. Linux CPU sensors/fans
+use thermal/coretemp/k10temp/hwmon; other inventory is best-effort sysfs data.

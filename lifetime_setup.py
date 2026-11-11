@@ -5,14 +5,14 @@ import subprocess
 import sys
 from lifetime_i18n import tr, language, set_language, on_language_change
 
-from PyQt6.QtCore import Qt, QPointF
-from PyQt6.QtGui import QColor, QPainter, QPen
-from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QHBoxLayout, QLabel,
-                            QMessageBox, QPushButton, QRadioButton, QScrollArea,
-                            QStackedWidget, QVBoxLayout, QWidget, QStyle, QStyleOptionButton)
-from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, QRadioButton
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel,
+                            QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+                            QStackedWidget, QVBoxLayout, QWidget, QFrame)
+from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, QFrame
 
 from lifetime_theme import stylesheet, install
+from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
 from lifetime_settings import defaults, delete_history, normalize, save_settings, load_settings, update_settings
 
 CHOICES = (
@@ -35,45 +35,38 @@ def setup_style(tokens):
         QWidget {{ color: {t['text']}; font-family: '{family}'; font-size: 15px; }}
         QLabel {{ background: transparent; }}
         QLabel#title {{ font-size: 26px; font-weight: 600; }}
+        QLabel#sectionTitle {{ font-size: 18px; font-weight: 600; }}
         QLabel#description, QLabel#progress {{ color: {t['muted']}; font-size: 13px; }}
         QLabel#summary {{ background: {t['card']}; padding: 20px; }}
-        QCheckBox, QRadioButton {{ spacing: 12px; min-height: 28px; }}
-        QCheckBox::indicator {{ width: 20px; height: 20px;
-            background: {t['card']}; border: 1px solid {t['muted']}; }}
-        QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
-            background: {t['accent']}; border: 1px solid {t['accent']}; }}
-        QCheckBox:focus, QRadioButton:focus {{ color: {t['accent']}; }}
         QScrollArea {{ border: none; }}
-    """
+    """ + desktop_sheet(t)
 
 
 class ConsentCheckBox(QCheckBox):
-    """Keep the familiar check mark at every DPI without a bitmap dependency."""
-    def __init__(self, text, ink):
+    """A consent choice. Every QCheckBox is drawn as a sliding switch by lifetime_theme; `ink` is kept for callers."""
+    def __init__(self, text, ink=None):
         super().__init__(text)
         self.ink = ink
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if not self.isChecked():
-            return
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        rect = self.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, self)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor(self.ink), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        def point(x, y):
-            return QPointF(rect.x()+rect.width()*x, rect.y()+rect.height()*y)
-        painter.drawLine(point(.24, .5), point(.43, .7))
-        painter.drawLine(point(.43, .7), point(.77, .3))
+
+def segmented(labels, current, handler, width=None):
+    """The sidebar's sliding pill for choose-one settings. `handler(index)` runs when a segment becomes the chosen one."""
+    from lifetime_shell import ModeSwitch
+    control = ModeSwitch([tr(label) for label in labels], lambda index: None)
+    control.setFixedWidth(width or 130 * len(labels) + 6)
+    control.group.button(current).setChecked(True)
+    for index in range(len(labels)):
+        control.group.button(index).toggled.connect(lambda checked, index=index: handler(index) if checked else None)
+    return control
 
 
 class SetupDialog(QDialog):
     def __init__(self, tokens, settings=None, directory=None, parent=None):
         super().__init__(parent)
         self.directory = directory
+        self.tokens = tokens
         self.initial = normalize(settings or defaults())
+        set_style(self.initial['style'])
         set_language(self.initial['language'])
         self.result_settings = None
         self.setWindowTitle(tr('Lifetime settings') if self.initial['completed'] else tr('Set up Lifetime'))
@@ -94,16 +87,16 @@ class SetupDialog(QDialog):
         self.checks = {}
         language_page = self.page(tr('Language / Ngôn ngữ'),
                                   tr('Choose your language. You can change it at any time.'))
-        language_group = QButtonGroup(self)
-        self.language_buttons = {}
-        for code, title in (('en', 'English'), ('vi', 'Tiếng Việt')):
-            button = QRadioButton(tr(title))
-            button.setMinimumHeight(44)
-            button.setChecked(language() == code)
-            button.toggled.connect(lambda checked, value=code: self.change_language(value) if checked else None)
-            language_group.addButton(button)
-            language_page.addWidget(button)
-            self.language_buttons[code] = button
+        codes = ('en', 'vi')
+        language_control = segmented(('English', 'Tiếng Việt'), codes.index(language()), lambda index: self.change_language(codes[index]))
+        language_page.addWidget(language_control, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.language_buttons = {code: language_control.group.button(index) for index, code in enumerate(codes)}
+        language_page.addSpacing(16)
+        language_page.addWidget(self.text(tr('Style'), 'sectionTitle'))
+        kinds = ('glass', 'classic')
+        style_control = segmented(('Glass', 'Classic'), kinds.index(active_style()), lambda index: self.change_style(kinds[index]))
+        language_page.addWidget(style_control, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.style_buttons = {key: style_control.group.button(index) for index, key in enumerate(kinds)}
         language_page.addStretch()
         first = self.page(tr('What would you like to track?'),
             tr('Lifetime records how long this computer is awake. Everything stays on this computer. Nothing is uploaded.'))
@@ -117,7 +110,7 @@ class SetupDialog(QDialog):
             box.setAccessibleDescription(tr(explanation))
             first.addWidget(box)
             description = self.text(tr(explanation), 'description')
-            description.setContentsMargins(33, 0, 0, 8)
+            description.setContentsMargins(60, 0, 0, 8)
             first.addWidget(description)
             self.checks[key] = box
             box.toggled.connect(self.sync_select_all)
@@ -131,19 +124,13 @@ class SetupDialog(QDialog):
             ('autostart', tr('Start tracking at login?'),
              tr('Starts the awake-time tracker when you sign in. You can also start it yourself from Lifetime.'))):
             page = self.page(tr(title), tr(explanation))
-            group = QButtonGroup(self)
-            yes = QRadioButton(tr('Yes, add my earlier usage') if key == 'rebuild' else tr('Yes, start tracking at login'))
-            no = QRadioButton(tr('No, count from now on') if key == 'rebuild' else tr('No, I will start it myself'))
-            group.addButton(yes)
-            group.addButton(no)
             # First run: pre-select "include earlier use" so a new user gets their real total without asking anyone.
             # The explanation above says exactly what is read; picking No is one click.
             wanted = self.initial[key] or (key == 'rebuild' and not self.initial['completed'])
-            yes.setChecked(wanted)
-            no.setChecked(not wanted)
-            page.addWidget(yes)
-            page.addWidget(no)
+            control = segmented(('Yes', 'No'), 0 if wanted else 1, lambda index: None, 236)
+            page.addWidget(control, alignment=Qt.AlignmentFlag.AlignLeft)
             page.addStretch()
+            yes = control.group.button(0)
             self.answers[key] = yes
         last = self.page(tr('Ready to start'), tr('You can change these choices at any time in Settings.'))
         self.summary = self.text('', 'summary')
@@ -151,6 +138,9 @@ class SetupDialog(QDialog):
         last.addStretch()
         self.notice = self.text(tr('Only the readings you choose will be collected.'), 'description')
         last.addWidget(self.notice)
+        # Setup never said this computer can report to a company server; the page for it is easy to miss.
+        self.connect_hint = self.text(tr('To report to a Lifetime Server on your network, open Connect after setup.'), 'description')
+        last.addWidget(self.connect_hint)
         if self.initial['completed']:
             self.delete_button = QPushButton(tr('Delete collected history'))
             self.delete_button.clicked.connect(self.confirm_delete)
@@ -191,6 +181,29 @@ class SetupDialog(QDialog):
             QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
         if self.parent() and hasattr(self.parent(), 'switch_language'):
             self.parent().switch_language(value)
+
+    def change_style(self, value):
+        """Glass or Classic is a look, not consent: saved at once, like the language. The window changes with it."""
+        if value == active_style():
+            return
+        if self.parent() and hasattr(self.parent(), 'switch_style'):
+            saved = self.parent().switch_style(value)          # the window saves it and changes in place
+        else:                                                  # first run: there is no window behind the dialog yet
+            from lifetime_shell import attach_glass_all, install_glass_surfaces
+            try:
+                update_settings({'style': value}, self.directory)
+                saved = True
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
+                saved = False
+            if saved:
+                set_style(value)
+                install_glass_surfaces()
+                attach_glass_all()
+        if saved:
+            self.setStyleSheet(setup_style(self.tokens))
+        else:
+            self.style_buttons[active_style()].setChecked(True)
 
     def retranslate_content(self):
         if hasattr(self, 'next'):
@@ -268,6 +281,197 @@ class SetupDialog(QDialog):
             QMessageBox.information(self, tr('History deleted'), tr('backup.saved', path=backup))
         except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr('History could not be deleted'), str(error))
+
+
+class SwitchRow(QWidget):
+    """A title and caption on the left and a sliding switch on the right; a click anywhere on the row flips it."""
+    def __init__(self, title, caption='', checked=False, enabled=True):
+        super().__init__()
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 12, 0, 12)
+        row.setSpacing(16)
+        copy = QVBoxLayout()
+        copy.setSpacing(2)
+        self.title = self._label(title, 'rowTitle')
+        copy.addWidget(self.title)
+        if caption:
+            copy.addWidget(self._label(caption, 'caption'))
+        row.addLayout(copy, 1)
+        self.switch = QCheckBox()
+        self.switch.setAccessibleName(title)
+        self.switch.setAccessibleDescription(caption)
+        self.switch.setChecked(checked)
+        self.switch.setEnabled(enabled)
+        row.addWidget(self.switch, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.setCursor(Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ArrowCursor)
+
+    @staticmethod
+    def _label(value, name):
+        label = QLabel(value)
+        label.setObjectName(name)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        label.setMinimumWidth(0)
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        return label
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.switch.isEnabled() and self.rect().contains(event.position().toPoint()):
+            self.switch.setFocus(Qt.FocusReason.MouseFocusReason)
+            self.switch.click()
+        super().mouseReleaseEvent(event)
+
+
+class SettingsPage(QWidget):
+    """Settings as a page of the window: every option of the old dialog, applied and saved as soon as it changes."""
+    def __init__(self, window, directory=None):
+        super().__init__()
+        self.window_, self.directory = window, directory
+        box = QVBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(16)
+        box.addWidget(self.heading(tr('Settings'), 'pageTitle'))
+        box.addWidget(self.heading(tr('Choose what Lifetime tracks and how it looks. Changes apply and save straight away.'), 'caption'))
+        codes, kinds = ('en', 'vi'), ('glass', 'classic')
+        self.language_control = segmented(('English', 'Tiếng Việt'), 0, lambda index: self.change_language(codes[index]))
+        self.language_buttons = {code: self.language_control.group.button(index) for index, code in enumerate(codes)}
+        self.style_control = segmented(('Glass', 'Classic'), 1, lambda index: self.change_style(kinds[index]))
+        self.style_buttons = {key: self.style_control.group.button(index) for index, key in enumerate(kinds)}
+        for title, control, name in ((tr('Language / Ngôn ngữ'), self.language_control, 'Language'), (tr('Style'), self.style_control, 'Style')):
+            panel, inner = self.panel()
+            inner.addWidget(self.heading(title, 'groupTitle'))
+            control.setAccessibleName(tr(name))
+            inner.addWidget(control, alignment=Qt.AlignmentFlag.AlignLeft)
+            box.addWidget(panel)
+        panel, inner = self.panel()
+        inner.addWidget(self.heading(tr('What would you like to track?'), 'groupTitle'))
+        inner.addWidget(self.heading(tr('Lifetime records how long this computer is awake. Everything stays on this computer. Nothing is uploaded.'), 'caption'))
+        self.select_all = SwitchRow(tr('Select all'))
+        inner.addWidget(self.select_all)
+        self.checks, self.rows = {}, {}
+        for key, title, explanation in CHOICES:
+            inner.addWidget(self.divider())
+            row = SwitchRow(tr(title), tr(explanation), False, key != 'awake')
+            inner.addWidget(row)
+            self.checks[key], self.rows[key] = row.switch, row
+            row.switch.toggled.connect(self.changed)
+        self.select_all.switch.toggled.connect(self.toggle_all)
+        box.addWidget(panel)
+        self.answers = {}
+        for key, title, explanation in (
+            ('rebuild', 'Include earlier use of this computer?',
+             "Lifetime has only just been installed, so it can only count from now on. Say Yes and it reads your computer's own activity log to work out how long this computer has already been used. Nothing leaves this computer. Older records may be missing, so the earlier total can be approximate."),
+            ('autostart', 'Start tracking at login?',
+             'Starts the awake-time tracker when you sign in. You can also start it yourself from Lifetime.')):
+            panel, inner = self.panel()
+            row = SwitchRow(tr(title), tr(explanation))
+            inner.addWidget(row)
+            row.switch.toggled.connect(self.changed)
+            self.answers[key] = row.switch
+            box.addWidget(panel)
+        self.delete_button = QPushButton(tr('Delete collected history'))
+        self.delete_button.clicked.connect(self.confirm_delete)
+        box.addWidget(self.delete_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        box.addStretch(1)
+        self.load(window.settings)
+
+    @staticmethod
+    def heading(value, name):
+        return SwitchRow._label(value, name)
+
+    @staticmethod
+    def divider():
+        line = QFrame()
+        line.setObjectName('divider')
+        line.setFixedHeight(1)
+        return line
+
+    @staticmethod
+    def panel():
+        frame = QFrame()
+        frame.setObjectName('insetPanel')
+        inner = QVBoxLayout(frame)
+        inner.setContentsMargins(20, 14, 20, 14)
+        inner.setSpacing(4)
+        return frame, inner
+
+    def load(self, settings):
+        """Show what is saved, without treating it as a change."""
+        controls = (*self.checks.values(), *self.answers.values(), self.select_all.switch)
+        for control in controls:
+            control.blockSignals(True)
+        for key, check in self.checks.items():
+            check.setChecked(bool(settings.get(key)) or key == 'awake')
+        for key, check in self.answers.items():
+            check.setChecked(bool(settings.get(key)))
+        self.sync_select_all()
+        for control in controls:
+            control.blockSignals(False)
+            control.update()
+        for buttons, current in ((self.language_buttons, language()), (self.style_buttons, active_style())):
+            if current in buttons and not buttons[current].isChecked():
+                buttons[current].blockSignals(True)
+                buttons[current].setChecked(True)
+                buttons[current].blockSignals(False)
+                buttons[current].parentWidget().move_to(list(buttons).index(current))
+
+    def optional_choices(self):
+        return [check for check in self.checks.values() if check.isEnabled()]      # 'Awake time' is required and always on
+
+    def sync_select_all(self, *_):
+        boxes = self.optional_choices()
+        self.select_all.switch.setChecked(bool(boxes) and all(check.isChecked() for check in boxes))
+
+    def toggle_all(self, checked):
+        for check in self.optional_choices():
+            check.blockSignals(True)
+            check.setChecked(checked)
+            check.blockSignals(False)
+            check.update()
+        self.changed()
+
+    def changed(self, *_):
+        """Save and apply the choices, exactly as the old dialog's Save did."""
+        window = self.window_
+        if self.sender() is not self.select_all.switch:
+            self.select_all.switch.blockSignals(True)
+            self.sync_select_all()
+            self.select_all.switch.blockSignals(False)
+        values = {key: check.isChecked() for key, check in self.checks.items()}
+        values.update({key: check.isChecked() for key, check in self.answers.items()})
+        previous = dict(window.settings)
+        try:
+            value = normalize(dict(load_settings(self.directory), **values, completed=True, language=language()))
+            save_settings(value, self.directory)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr('Settings could not be saved'), str(error))
+            self.load(previous)
+            return
+        window.apply_preferences(value, previous)
+        window.refresh()
+
+    def change_language(self, value):
+        self.window_.switch_language(value)
+        self.load(self.window_.settings)
+
+    def change_style(self, value):
+        window, control = self.window_, self.style_control
+        if not window.switch_style(value, control.mapTo(window, control.rect().center())):
+            self.load(window.settings)
+
+    def confirm_delete(self):
+        answer = QMessageBox.question(self, tr('Delete collected history?'),
+            tr('This resets recorded totals, starting hours and history. A backup will be kept on this computer. Tracking will continue from now.'),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.window_.cancel_rebuild()
+            backup = delete_history(self.directory)
+            QMessageBox.information(self, tr('History deleted'), tr('backup.saved', path=backup))
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr('History could not be deleted'), str(error))
+        self.window_.refresh()
 
 
 def configure_login(enabled):

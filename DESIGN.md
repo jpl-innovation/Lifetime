@@ -185,7 +185,7 @@ scrolling.
 
 ## Elevation & Depth
 
-System cards and controls use flat tonal separation and thin borders. Depth comes from the navy canvas, lighter surfaces, and clear grouping rather than drop shadows. Grouped statistics and charts retain native Qt rendering; there are no decorative shadows, gradients, glow or glass.
+System cards and controls use flat tonal separation and thin borders. Depth comes from the navy canvas, lighter surfaces, and clear grouping rather than drop shadows. Grouped statistics and charts retain native Qt rendering; there are no decorative shadows, gradients, glow or glass in the default Classic style. Settings offers a second style, Glass, shared with Lifetime Server through `lifetime_glass.py`: translucent panels, a glass sidebar with a lens for the current page, and the blue-to-gold depth behind the window. Classic is the default, and Glass changes only surfaces, never layout.
 
 ## Shapes
 

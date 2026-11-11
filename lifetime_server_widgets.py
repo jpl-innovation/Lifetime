@@ -3,12 +3,13 @@ import math
 import os
 import sys
 
-from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt
+from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit,
                             QPushButton, QTabBar, QVBoxLayout, QWidget)
 
 from lifetime_theme import THEMES, install, T
+from lifetime_reveal import Intro, phase
 
 from lifetime_theme import Tokens
 C = Tokens()   # follows the active palette
@@ -112,16 +113,21 @@ class DailyChart(QLabel):
         self.day_label = lambda day: day[8:10] + '/' + day[5:7]   # replaced by the window with a localized '2 Nov'
         self.setMinimumHeight(200)
         self.setMouseTracking(True)
+        self.intro = Intro(self, 1000, 120, reduced_motion)
 
     def set_samples(self, samples, missing, unit='h'):
         self.samples, self.missing, self.unit = samples, missing, unit
         self.setAccessibleName(missing if not any(s['seconds'] is not None for s in samples) else
                                '; '.join(s['day'] + ': ' + ('?' if s['seconds'] is None else f"{s['seconds']/3600:.2f} {unit}") for s in samples))
         self.update()
+        if any(sample['seconds'] is not None for sample in samples):
+            self.intro.ready()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        entering = not self.intro.done
+        v = self.intro.value if entering else 1.0
         bounds = QRectF(48, 12, max(1, self.width()-64), max(1, self.height()-45))
         available = [s['seconds']/3600 for s in self.samples if s['seconds'] is not None]
         if not available:
@@ -131,12 +137,14 @@ class DailyChart(QLabel):
         maximum = max(1, max(available))
         magnitude = 10**math.floor(math.log10(maximum))
         ceiling = math.ceil(maximum / magnitude) * magnitude
+        p.setOpacity(phase(v, 0.0, 0.3))        # the axis settles first, so the bars have something to stand on
         for tick in range(5):
             y = bounds.bottom() - tick / 4 * bounds.height()
             p.setPen(QPen(QColor(C['border']), 1))
             p.drawLine(QPointF(bounds.left(), y), QPointF(bounds.right(), y))
             p.setPen(QColor(C['muted']))
             p.drawText(QRectF(0, y-9, 40, 18), Qt.AlignmentFlag.AlignRight, f'{ceiling*tick/4:g} {self.unit}')
+        p.setOpacity(1.0)
         pitch = bounds.width() / max(1, len(self.samples))
         step = max(1, math.ceil(len(self.samples) / 7))
         for index, sample in enumerate(self.samples):
@@ -146,6 +154,9 @@ class DailyChart(QLabel):
                 p.drawLine(QPointF(x-3, bounds.bottom()-4), QPointF(x+3, bounds.bottom()-4))
             else:
                 height = sample['seconds']/3600/ceiling*bounds.height()
+                if entering:    # oldest day first, the newest (accent) bar last and a little slower
+                    begin = 0.16 + 0.5 * index / max(1, len(self.samples) - 1)
+                    height *= phase(v, begin, begin + (0.34 if index == len(self.samples) - 1 else 0.28))
                 # The newest day carries the accent; earlier days stay quiet behind it.
                 p.save()
                 p.setClipRect(bounds.adjusted(0, -2, 0, 0))
@@ -205,7 +216,11 @@ class AddDeviceSheet(QDialog):
         code_row.addWidget(self.copy_code)
         layout.addLayout(code_row)
         expiry = dt.datetime.fromisoformat(issued['expires_at'].replace('Z', '+00:00')).astimezone()
-        self.expiry = QLabel(translate('Valid until {time}', time=expiry.strftime('%H:%M')))
+        # A code lasts 24 hours by default, so a bare "23:58" reads as a minute from now. Say the day unless it is today.
+        if expiry.date() == dt.datetime.now().astimezone().date():
+            self.expiry = QLabel(translate('Valid until {time}', time=expiry.strftime('%H:%M')))
+        else:
+            self.expiry = QLabel(translate('Valid until {date}, {time}', date=expiry.strftime('%Y-%m-%d'), time=expiry.strftime('%H:%M')))
         self.expiry.setStyleSheet('color: #9FB0CC;')
         layout.addWidget(self.expiry)
         self.other_network = QPushButton(translate('Other network?'))
@@ -307,3 +322,84 @@ def table_action(button):
     layout.addWidget(button)
     wrapper.setMinimumWidth(max(112, button.sizeHint().width() + 24))
     return wrapper
+
+
+class CycleButton(QPushButton):
+    """One compact header button that shows the current choice; each click moves to the next (wrapping round).
+
+    The old label slides up and fades while the new one rises in (skipped under reduced motion). The surface under it is
+    the shared glass/classic painter, attached by the window; this paints only the content and the keyboard focus ring.
+    `draw(painter, rect, index)` paints choice `index` centred in `rect`.
+    """
+    cycled = pyqtSignal(int)
+
+    def __init__(self, count, draw, index=0, size=(48, 40), radius=8):
+        super().__init__()
+        self.radius = radius
+        self.count, self.draw, self.index, self.previous, self.phase = count, draw, index, index, 1.0
+        self.keyboard = False
+        self.setFixedSize(*size)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.animation = QVariantAnimation(self)
+        self.animation.setStartValue(0.0)
+        self.animation.setEndValue(1.0)
+        self.animation.setDuration(180)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.valueChanged.connect(self._frame)
+        self.clicked.connect(lambda: self.set_index((self.index + 1) % self.count, True))
+
+    def _frame(self, value):
+        self.phase = float(value)
+        self.update()
+
+    def set_index(self, index, notify=False):
+        if index != self.index:
+            self.previous, self.index = self.index, index
+            self.animation.stop()
+            if reduced_motion() or not self.isVisible():
+                self.phase = 1.0
+            else:
+                self.phase = 0.0
+                self.animation.start()
+            self.update()
+        if notify:
+            self.cycled.emit(self.index)
+
+    def focusInEvent(self, event):
+        self.keyboard = event.reason() not in (Qt.FocusReason.MouseFocusReason, Qt.FocusReason.PopupFocusReason)
+        super().focusInEvent(event)
+
+    def mousePressEvent(self, event):
+        self.keyboard = False
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.keyboard = True
+            self.click()
+            event.accept()
+        else:
+            self.keyboard = True
+            super().keyPressEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect())
+        base = 1.0 if self.isEnabled() else 0.45
+        if self.phase < 1.0:
+            steps = ((self.previous, 1 - self.phase, -7 * self.phase), (self.index, self.phase, 7 * (1 - self.phase)))
+        else:
+            steps = ((self.index, 1.0, 0.0),)
+        for index, alpha, shift in steps:
+            p.setOpacity(base * alpha)
+            p.save()
+            p.translate(0, shift)
+            self.draw(p, rect, index)
+            p.restore()
+        if self.hasFocus() and self.keyboard:
+            p.setOpacity(1.0)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(C['accent']), 2))
+            p.drawRoundedRect(rect.adjusted(1, 1, -1, -1), self.radius - 1, self.radius - 1)
