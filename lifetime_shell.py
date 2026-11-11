@@ -663,6 +663,9 @@ class Sidebar(QWidget):
         self.motion_reduced = motion_reduced
         self.indicator_y = 0.0
         self.indicator_animation = None
+        # The marker stretches as it moves: the edge it moves towards goes first, the other edge catches up.
+        self.trail_animation = None
+        self.trail_side, self.trail_from, self.trail_to, self.trail_value = 't', 0.0, 0.0, 1.0
         self.setFixedWidth(232)
         box = QVBoxLayout(self)
         box.setContentsMargins(16, 24, 16, 16)
@@ -735,21 +738,36 @@ class Sidebar(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         row = self.group.checkedButton()
         if row and not row.isHidden():
-            r = QRectF(row.x(), self.indicator_y, row.width(), row.height())
+            r = self.marker_rect(row)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(tokens()['track']))
             p.drawRoundedRect(r, CONTROL_RADIUS, CONTROL_RADIUS)
             p.setBrush(QColor(tokens()['accent']))
             p.drawRoundedRect(QRectF(r.left()+2, r.center().y()-8, 2, 16), 1, 1)
 
+    def marker_rect(self, row):
+        """The marker as drawn: `indicator_y` is its leading edge's travel, the trailing edge lags behind it."""
+        r = QRectF(row.x(), self.indicator_y, row.width(), row.height())
+        if self.trail_value < 1.0:
+            edge = self.trail_from + (self.trail_to - self.trail_from) * self.trail_value
+            if self.trail_side == 't':
+                r.setTop(min(edge, r.bottom() - 1))
+            else:
+                r.setBottom(max(edge, r.top() + 1))
+        return r
+
     def move_indicator(self, animated=True):
         row = self.group.checkedButton()
         if row is None:
             return
-        if self.indicator_animation:
-            self.indicator_animation.stop()
-            self.indicator_animation.deleteLater()
-            self.indicator_animation = None
+        drawn = self.marker_rect(row)
+        for name in ('indicator_animation', 'trail_animation'):
+            old = getattr(self, name)
+            if old:
+                old.stop()
+                old.deleteLater()
+                setattr(self, name, None)
+        self.trail_value = 1.0
         target = float(row.y())
         if not animated or self.motion_reduced():
             self.indicator_y = target
@@ -763,6 +781,24 @@ class Sidebar(QWidget):
         animation.valueChanged.connect(self._indicator_frame)
         self.indicator_animation = animation
         animation.start()
+        down = target >= self.indicator_y
+        self.trail_side = 't' if down else 'b'
+        self.trail_from = drawn.top() if down else drawn.bottom()
+        self.trail_to = target if down else target + row.height()
+        self.trail_value = 0.0
+        trail = QVariantAnimation(self)
+        trail.setDuration(460)
+        trail.setEasingCurve(QEasingCurve.Type.OutCubic)
+        trail.setStartValue(0.0)
+        trail.setEndValue(1.0)
+        trail.valueChanged.connect(self._trail_frame)
+        trail.finished.connect(lambda: self._trail_frame(1.0))
+        self.trail_animation = trail
+        trail.start()
+
+    def _trail_frame(self, value):
+        self.trail_value = float(value)
+        self.update()
 
     def _indicator_frame(self, value):
         self.indicator_y = value

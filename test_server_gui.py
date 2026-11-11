@@ -692,6 +692,23 @@ class ServerGuiTests(unittest.TestCase):
         self.window.status_label.setText(self.window.t('Ready'))
         self.assertTrue(self.window.notice.isHidden())
 
+    def test_pages_slide_in_from_the_side_the_menu_pill_moved_towards(self):
+        pages = self.window.tabs
+        pages.setCurrentIndex(0)
+        QTest.qWait(400)
+        with patch('lifetime_server_devices.reduced_motion', return_value=False):
+            pages.setCurrentIndex(2)
+            QTest.qWait(30)
+            self.assertGreater(pages.widget(2).x(), pages.contentsRect().x())     # arriving from the right
+            QTest.qWait(500)
+            self.assertEqual(pages.widget(2).pos(), pages.contentsRect().topLeft())
+            pages.setCurrentIndex(1)
+            QTest.qWait(30)
+            self.assertLess(pages.widget(1).x(), pages.contentsRect().x())        # arriving from the left
+            QTest.qWait(500)
+        self.assertIsNone(pages.widget(1).graphicsEffect())
+        self.assertEqual(pages.widget(1).pos(), pages.contentsRect().topLeft())
+
     def test_menu_pill_stretches_leading_edge_first_and_settles_exactly(self):
         from PyQt6.QtCore import QRectF
         bar = self.window.tabs.tabBar()
