@@ -17,7 +17,15 @@ if ($service -and $PSCmdlet.ShouldProcess('LifetimeServer', 'Stop and remove thi
 }
 $task = Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -ErrorAction SilentlyContinue
 if ($task -and $PSCmdlet.ShouldProcess('\Lifetime\Server', 'Stop and remove this server task registration')) {
+    $executable = [Environment]::ExpandEnvironmentVariables([string]$task.Actions[0].Execute)
     if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server }
+    # The packaged runtime is a one-file executable: it starts a second process that does the work, and stopping
+    # the task ends only the first. Left alone, that process keeps the port and the program file busy, so a later
+    # install or upgrade could not replace the file or start. End only processes running this task's own program.
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable } | ForEach-Object {
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        $_.WaitForExit(10000) | Out-Null
+    }
     Unregister-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -Confirm:$false
 }
 if ($RemoveFirewallRule -and (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue) -and
