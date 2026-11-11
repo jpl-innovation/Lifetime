@@ -477,6 +477,17 @@ class ConnectionCliTests(unittest.TestCase):
             self.assertNotIn('--enroll-bundle-file', spawn.call_args.args[0])
             machine.close.assert_called_once()
 
+    def test_packaged_background_agent_gets_its_own_extraction_folder(self):
+        # The one-file program starts a copy of itself for --background. Without this variable the copy shares the
+        # first one's temporary folder, which the first deletes on exit; the copy then fails on every file it loads
+        # later and the computer sits at "unreachable" after it has been approved.
+        with tempfile.TemporaryDirectory() as root:
+            machine = Mock()
+            with patch.object(agent, 'MachineAgent', return_value=machine), patch.object(agent.subprocess, 'Popen') as spawn, \
+                    patch.object(agent.sys, 'frozen', True, create=True):
+                agent.main(['--directory', root, '--background'])
+            self.assertEqual(spawn.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'], '1')
+
     def test_policy_changes_and_disconnect_use_agent_api(self):
         machine = Mock()
         with patch.object(agent, 'MachineAgent', return_value=machine):
