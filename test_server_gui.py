@@ -649,6 +649,18 @@ class ServerGuiTests(unittest.TestCase):
         self.assertEqual(self.window.table.rowCount(), 0)
         self.assertIsNone(self.window._detail)
 
+    def test_all_chip_also_clears_the_pending_filter_that_review_sets(self):
+        # Review (on the overview) narrows the list through the status box. Choosing "All" afterwards used to
+        # leave that box on "Pending approval", so the page listed nothing while four computers existed.
+        self.load([device(i) for i in range(4)])
+        self.window.review_pending()
+        self.wait_idle()
+        self.assertEqual(self.window.table.rowCount(), 0)
+        self.window.device_chips['all'].click()
+        self.wait_idle()
+        self.assertEqual(self.window.status_filter.currentData(), '')
+        self.assertEqual(self.window.table.rowCount(), 4)
+
     def test_visible_readings_are_bounded_cached_and_scrubbed_on_revocation(self):
         rows = [device(i) for i in range(200)]
         for row in rows:
