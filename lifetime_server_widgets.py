@@ -3,7 +3,7 @@ import math
 import os
 import sys
 
-from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt
+from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit,
                             QPushButton, QTabBar, QVBoxLayout, QWidget)
@@ -318,3 +318,84 @@ def table_action(button):
     layout.addWidget(button)
     wrapper.setMinimumWidth(max(112, button.sizeHint().width() + 24))
     return wrapper
+
+
+class CycleButton(QPushButton):
+    """One compact header button that shows the current choice; each click moves to the next (wrapping round).
+
+    The old label slides up and fades while the new one rises in (skipped under reduced motion). The surface under it is
+    the shared glass/classic painter, attached by the window; this paints only the content and the keyboard focus ring.
+    `draw(painter, rect, index)` paints choice `index` centred in `rect`.
+    """
+    cycled = pyqtSignal(int)
+
+    def __init__(self, count, draw, index=0, size=(48, 40), radius=8):
+        super().__init__()
+        self.radius = radius
+        self.count, self.draw, self.index, self.previous, self.phase = count, draw, index, index, 1.0
+        self.keyboard = False
+        self.setFixedSize(*size)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.animation = QVariantAnimation(self)
+        self.animation.setStartValue(0.0)
+        self.animation.setEndValue(1.0)
+        self.animation.setDuration(180)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.valueChanged.connect(self._frame)
+        self.clicked.connect(lambda: self.set_index((self.index + 1) % self.count, True))
+
+    def _frame(self, value):
+        self.phase = float(value)
+        self.update()
+
+    def set_index(self, index, notify=False):
+        if index != self.index:
+            self.previous, self.index = self.index, index
+            self.animation.stop()
+            if reduced_motion() or not self.isVisible():
+                self.phase = 1.0
+            else:
+                self.phase = 0.0
+                self.animation.start()
+            self.update()
+        if notify:
+            self.cycled.emit(self.index)
+
+    def focusInEvent(self, event):
+        self.keyboard = event.reason() not in (Qt.FocusReason.MouseFocusReason, Qt.FocusReason.PopupFocusReason)
+        super().focusInEvent(event)
+
+    def mousePressEvent(self, event):
+        self.keyboard = False
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.keyboard = True
+            self.click()
+            event.accept()
+        else:
+            self.keyboard = True
+            super().keyPressEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect())
+        base = 1.0 if self.isEnabled() else 0.45
+        if self.phase < 1.0:
+            steps = ((self.previous, 1 - self.phase, -7 * self.phase), (self.index, self.phase, 7 * (1 - self.phase)))
+        else:
+            steps = ((self.index, 1.0, 0.0),)
+        for index, alpha, shift in steps:
+            p.setOpacity(base * alpha)
+            p.save()
+            p.translate(0, shift)
+            self.draw(p, rect, index)
+            p.restore()
+        if self.hasFocus() and self.keyboard:
+            p.setOpacity(1.0)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(C['accent']), 2))
+            p.drawRoundedRect(rect.adjusted(1, 1, -1, -1), self.radius - 1, self.radius - 1)

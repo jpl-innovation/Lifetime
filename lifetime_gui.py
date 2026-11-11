@@ -26,7 +26,7 @@ from lifetime_health_gui import HealthPage
 from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
 from lifetime_shell import install_glass_surfaces, attach_glass_all, ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
 from lifetime_settings import load_settings, save_settings, update_settings
-from lifetime_setup import SetupDialog, configure_login
+from lifetime_setup import SetupDialog, SettingsPage, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
@@ -569,7 +569,7 @@ class Window(QWidget):
         saved_theme = self.settings.get('theme', 'auto')
         self.theme_control.group.button(('auto', 'light', 'dark').index(saved_theme if saved_theme in ('auto', 'light', 'dark') else 'auto')).setChecked(True)
         self.theme_control.setAccessibleName(tr('Theme'))
-        self.sidebar = Sidebar(self.select_page, self.open_settings, motion_reduced,
+        self.sidebar = Sidebar(self.select_page, motion_reduced,
                                self.language_control, self.status, self.status_dot, self.theme_control)
         self.navigation = self.sidebar
         outer.addWidget(self.sidebar)
@@ -780,7 +780,8 @@ class Window(QWidget):
         reports_layout.addWidget(self.repair_notice)
         self.health = HealthPage(self.settings, self.open_settings)
         self.connect_page = ConnectPage(directory=data_dir())
-        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page):
+        self.settings_page = SettingsPage(self, data_dir())
+        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page, self.settings_page):
             page.setMinimumWidth(0)
             page.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
             self.pages.addWidget(page)
@@ -819,8 +820,8 @@ class Window(QWidget):
         body_layout.insertWidget(1, self.history_banner)
         self.history_banner.hide()
         self.shortcuts = []
-        for number, page in enumerate((0, 2, 1, 4, 5, 3), 1):
-            shortcut = QShortcut(QKeySequence(f'Ctrl+{number}'), self)
+        for key, page in (*((f'Ctrl+{number}', page) for number, page in enumerate((0, 2, 1, 4, 5, 3), 1)), ('Ctrl+,', 6)):
+            shortcut = QShortcut(QKeySequence(key), self)
             shortcut.activated.connect(lambda index=page: self.select_page(index))
             self.shortcuts.append(shortcut)
         self.page_animation = None
@@ -943,6 +944,7 @@ class Window(QWidget):
         self.verify_button.setAccessibleName(tr('verify.accessible', log=self.log_name))
         self.verification.setText(tr('verify.intro', log=self.log_name))
         self.language_control.group.button(('en', 'vi').index(language())).setChecked(True)
+        self.settings_page.load(self.settings)
         for card in self.cards.values():
             card.target = None
         self.toggle_import(self.import_toggle.isChecked())
@@ -968,10 +970,7 @@ class Window(QWidget):
             self.navigation.group.button(0).click()
 
     def open_settings(self):
-        dialog = SetupDialog(THEMES[self.theme], self.settings, data_dir(), self)
-        if dialog.exec() == dialog.DialogCode.Accepted:
-            self.apply_preferences(dialog.result_settings, self.settings)
-            self.refresh()
+        self.select_page(6)
 
     def open_technician(self, cls):
         try:
@@ -1062,11 +1061,13 @@ class Window(QWidget):
             self.import_process.waitForFinished(1000)
 
     def select_page(self, index):
-        if index not in (0, 1, 2, 3, 4, 5):
+        if index not in (0, 1, 2, 3, 4, 5, 6):
             return
         if index == 2 and not (self.settings.get('completed') and self.settings.get('history')):
             return
         self.navigation.group.button(index).setChecked(True)
+        if index == 6:
+            self.settings_page.load(self.settings)
         if getattr(self, 'active_page', None) == index:
             return
         if self.page_animation:
