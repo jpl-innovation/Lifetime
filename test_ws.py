@@ -17,6 +17,7 @@ except ModuleNotFoundError:  # optional dependency (requirements-server.txt); th
 
 import lifetime_agent as la
 import lifetime_permissions as permissions
+import lifetime_server_store as storage
 import lifetime_ws as ws
 from lifetime_admin import AdminClient
 from lifetime_client import SyncClient
@@ -135,6 +136,34 @@ class SocketTests(SocketFixture):
         self.assertEqual(seen[0], 'report-overdue')                             # offline at the instant the link closed
         self.assertTrue(until(lambda: self.runtime.hub.connected(self.device), 8))
         self.assertTrue(until(lambda: self.status() == 'reporting', 8))
+
+    def test_went_offline_event_is_stamped_when_the_link_closed_not_in_the_future(self):
+        self.start_agent()
+        self.assertTrue(until(lambda: self.runtime.hub.connected(self.device) and self.samples() >= 1))
+        seen = []
+
+        def capture(event):
+            if event.get('online') is False:
+                seen.append(self.store.fleet()['recent_events'])
+        self.runtime.hub.listeners.append(capture)
+        before = storage._stamp(storage._now())
+        self.runtime.hub.links[self.device].kill()
+        self.assertTrue(until(lambda: seen, 3))
+        offline = [e for e in seen[0] if e['kind'] == 'report-overdue' and e['device_id'] == self.device]
+        self.assertEqual(len(offline), 1)
+        self.assertGreaterEqual(offline[0]['time'], before)                     # not the stale last-report time
+        self.assertLessEqual(offline[0]['time'], storage._stamp(storage._now()))    # and never in the future
+
+    def test_a_new_credential_starts_with_no_backoff(self):
+        from lifetime_ws_client import LiveLink
+        link = LiveLink(None, threading.Event(), None, threading.Event())
+        link.note_credential('old')
+        link.failures, link.retry_at = 4, time.monotonic() + 100          # the old credential was refused again and again
+        link.note_credential('old')
+        self.assertFalse(link.due())                                       # the same credential keeps its backoff
+        link.note_credential('new')                                        # the computer was paired again
+        self.assertTrue(link.due())
+        self.assertEqual(link.failures, 0)
 
     def test_revoking_closes_the_socket(self):
         self.start_agent()

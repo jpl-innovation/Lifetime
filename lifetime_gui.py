@@ -42,6 +42,11 @@ def motion_reduced():
     return REDUCE_MOTION or os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
 
+def clock_problem(detail):
+    """The importer refuses logs whose times go backwards (a changed clock). Say that in words, not the internal check."""
+    return any(text in detail for text in ('Boot ends before it starts', 'Overlapping boot timestamps', 'SleepTime is later than WakeTime'))
+
+
 VERIFY_TOLERANCE = 60   # seconds; a larger gap between the log and the awake clock is shown, not hidden as "verified"
 
 
@@ -719,7 +724,7 @@ class Window(QWidget):
         layout.addWidget(self.counting_panel)
         self.counting_panel.setMaximumHeight(0)
         self.counting_panel.hide()
-        self.system = SystemDashboard()
+        self.system = SystemDashboard(self.open_settings)
         self.history = History()
         self.system.layout().setContentsMargins(0, 0, 0, 0)
         self.history.layout().setContentsMargins(0, 0, 0, 0)
@@ -1053,12 +1058,16 @@ class Window(QWidget):
             self.refresh()
         else:
             detail = bytes(self.import_process.readAllStandardError()).decode('utf-8', errors='replace').strip()
-            self.verification.setText(tr('rebuild.error', error=detail[-1000:]))
+            self.verification.setText(tr('rebuild.clock') if clock_problem(detail) else tr('rebuild.error', error=detail[-1000:]))
 
     def cancel_rebuild(self):
         if hasattr(self, 'import_process') and self.import_process.state() != QProcess.ProcessState.NotRunning:
             self.import_process.kill()
             self.import_process.waitForFinished(1000)
+
+    def _show_history_banner(self):
+        """Not on Connect: that form needs the height, and the banner is about a different task."""
+        self.history_banner.setVisible(getattr(self, '_history_due', False) and getattr(self, 'active_page', 0) != 5)
 
     def select_page(self, index):
         if index not in (0, 1, 2, 3, 4, 5, 6):
@@ -1078,6 +1087,7 @@ class Window(QWidget):
         if previous.graphicsEffect():
             previous.setGraphicsEffect(None)
         self.active_page = index
+        self._show_history_banner()
         self.pages.setCurrentIndex(index)
         self.pages.updateGeometry()
         self.body.layout().activate()
@@ -1233,6 +1243,7 @@ class Window(QWidget):
 
     def reflow(self):
         self.sidebar.set_collapsed(self.width() < 900)
+        self.sidebar.fit_height(self.height())
         available = self.width() - self.sidebar.width()
         margin = 16 if available < 850 else 32
         self.centering.setContentsMargins(margin, margin, margin, margin)
@@ -1379,7 +1390,8 @@ class Window(QWidget):
             self.tracker_banner.setVisible(not running)
             self.hint.setVisible(not running)
             importing = hasattr(self, 'import_process') and self.import_process.state() != QProcess.ProcessState.NotRunning
-            self.history_banner.setVisible(bool(self.settings.get('completed')) and not ledger.get('imported') and not importing)
+            self._history_due = bool(self.settings.get('completed')) and not ledger.get('imported') and not importing
+            self._show_history_banner()
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)

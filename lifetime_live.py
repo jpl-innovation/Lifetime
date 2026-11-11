@@ -218,6 +218,8 @@ class Reporter:
                         with tracker.file_lock(self.agent.directory, 'reporting.lock'):
                             return json.loads(db.execute('SELECT value FROM state WHERE singleton=1').fetchone()[0])
                     state = read_state()
+                    if self.link and self.eligible(state):
+                        self.link.note_credential(state['credential'])
                     if self.link and self.link.due() and self.eligible(state):
                         # The socket holds no lock while open, so Disconnect is never kept waiting.
                         if self.link.session(state, read_state, self.eligible):

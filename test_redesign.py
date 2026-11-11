@@ -117,6 +117,45 @@ class DashboardShellTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.history_banner.isVisible())
 
+    def test_an_event_log_with_a_changed_clock_is_explained_in_words(self):
+        from unittest.mock import Mock
+        for detail, friendly in (('Lifetime import: Boot ends before it starts', True),
+                                 ('Lifetime import: Overlapping boot timestamps; refusing ambiguous history', True),
+                                 ('Lifetime import: the importer crashed', False)):
+            self.w.import_process = Mock()
+            self.w.import_process.readAllStandardError.return_value = detail.encode()
+            self.w.import_finished(1, None)
+            shown = self.w.verification.text()
+            self.assertEqual('clock was probably changed' in shown, friendly)
+            self.assertNotIn('Boot ends before it starts', shown)
+
+    def test_a_short_window_keeps_the_language_and_theme_switches_reachable(self):
+        side = self.w.sidebar
+        self.w.resize(900, 600)
+        self.app.processEvents()
+        self.assertTrue(side.tight)
+        for control in (side.language_control, side.theme_control):
+            self.assertTrue(control.isVisible())
+            self.assertLessEqual(control.geometry().bottom(), side.height())
+        self.w.resize(1280, 900)
+        self.app.processEvents()
+        self.assertFalse(side.tight)                          # the roomy layout returns when there is room
+        self.assertTrue(side.credit_logo.isVisible())
+
+    def test_the_rebuild_banner_stays_off_the_connect_page_and_returns_after(self):
+        self.w.display_ledger(dict(self.ledger, imported=None))
+        self.app.processEvents()
+        self.assertTrue(self.w.history_banner.isVisible())
+        self.w.select_page(5)                                   # Connect needs the height for its form
+        self.app.processEvents()
+        self.assertFalse(self.w.history_banner.isVisible())
+        self.w.display_ledger(dict(self.ledger, imported=None))   # a refresh while on Connect must not bring it back
+        self.app.processEvents()
+        self.assertFalse(self.w.history_banner.isVisible())
+        self.w.select_page(0)
+        self.app.processEvents()
+        self.assertTrue(self.w.history_banner.isVisible())
+
     def test_overview_entrance_plays_once_continues_through_refreshes_and_lands_exactly(self):
         w = self.w
         self.ledger.update(boots=40, total_seconds=36000, current_session_seconds=7200, longest_session_seconds=9000)

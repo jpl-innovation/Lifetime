@@ -39,8 +39,15 @@ class LiveLink:
         self.failures = 0
         self.retry_at = 0.0
         self.connected = False
+        self._credential = None
 
     # ---- scheduling
+    def note_credential(self, credential):
+        """A new credential (the computer was paired again) starts fresh, not with the backoff its old one earned."""
+        if credential != self._credential:
+            self._credential = credential
+            self.failures, self.retry_at = 0, 0.0
+
     def due(self):
         return time.monotonic() >= self.retry_at
 

@@ -344,7 +344,8 @@ class ServerWindow(QMainWindow):
         self.today_label = QLabel()
         self.today_label.setObjectName('muted')
         title_row.addWidget(self.today_label, 1)
-        self.fleet_date = QDateEdit(QDate.currentDate())
+        self._today = QDate.currentDate()
+        self.fleet_date = QDateEdit(self._today)
         self.fleet_date.setCalendarPopup(True)
         self.fleet_date.setDisplayFormat('d MMM yyyy')
         self.fleet_date.setMinimumWidth(180)
@@ -477,7 +478,10 @@ class ServerWindow(QMainWindow):
         self.events.setAccessibleName(self.t('Recent events'))
         self.events.horizontalHeader().hide()
         self.events.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.events.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        # The event ("Went offline") is what people read, so it gets the width it needs; the long computer name yields.
+        self.events.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.events.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.events.horizontalHeader().setMinimumSectionSize(40)     # the default 100 px pushed the time out of the panel
         self.events.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.events.verticalHeader().setDefaultSectionSize(40)
         self.events.setMinimumHeight(204)
@@ -672,6 +676,23 @@ class ServerWindow(QMainWindow):
         status_row.addWidget(self.detail_status)
         status_row.addStretch()
         detail_layout.addLayout(status_row)
+        # Before anything is selected the rows below all read "Not available"; say why, at the top where it is seen.
+        self.detail_hint = QLabel()
+        self.detail_hint.setWordWrap(True)
+        self.detail_hint.setObjectName('muted')
+        detail_layout.addWidget(self.detail_hint)
+        # The actions and the reason a button is disabled sit at the top: below the specifications they scrolled out of sight.
+        self.control_reason = QLabel()
+        self.control_reason.setWordWrap(True)
+        self.control_reason.setObjectName('muted')
+        self.power_buttons = {}
+        self.power_grid = power_grid = QGridLayout()
+        for i, (action, key) in enumerate((('sleep', 'Sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
+            button = self.button(key, lambda checked=False, a=action: self._device_command(self._detail, a))
+            self.power_buttons[action] = button
+            power_grid.addWidget(button, i // 3, i % 3)
+        detail_layout.addLayout(power_grid)
+        detail_layout.addWidget(self.control_reason)
         self.spec_title = self.label('Computer specifications')
         self.spec_title.setStyleSheet('font-size:18px; font-weight:600;')
         detail_layout.addWidget(self.spec_title)
@@ -689,17 +710,6 @@ class ServerWindow(QMainWindow):
             self.spec_values[key] = value
             spec_form.addRow(self._field(key), value)
         detail_layout.addLayout(spec_form)
-        self.control_reason = QLabel()
-        self.control_reason.setWordWrap(True)
-        self.control_reason.setObjectName('muted')
-        self.power_buttons = {}
-        self.power_grid = power_grid = QGridLayout()
-        for i, (action, key) in enumerate((('sleep', 'Sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
-            button = self.button(key, lambda checked=False, a=action: self._device_command(self._detail, a))
-            self.power_buttons[action] = button
-            power_grid.addWidget(button, i // 3, i % 3)
-        detail_layout.addLayout(power_grid)
-        detail_layout.addWidget(self.control_reason)
         live_header = QHBoxLayout()
         self.live_marker = QLabel()
         live_header.addWidget(self.live_marker, 1)
@@ -904,6 +914,9 @@ class ServerWindow(QMainWindow):
 
     def _set_chip(self, code):
         self._chip = code
+        if code == 'all' and self.status_filter.currentIndex() > 0:
+            # Review sets the status box; "All" has to mean every computer, not "all that are still pending".
+            self.status_filter.setCurrentIndex(0)
         for key, button in self.device_chips.items():
             button.setChecked(key == code)
         self._filters_changed()
@@ -1567,7 +1580,7 @@ class ServerWindow(QMainWindow):
         self.setLocale(locale)
         self.fleet_date.setLocale(locale)
         self.retention_date.setLocale(locale)
-        self.today_label.setText(self.t('Today · {date}', date=locale.toString(QDate.currentDate(), 'd MMM yyyy')))
+        self._show_today()
         self.server_status.setText(self.t('Server running' if self._overview_result else 'Server unavailable'))
         if self._server_info:
             self.network_label.setText((self._server_info.get('organisation') or self._server_info['name']) + ' · ' + self.t('Local network'))
@@ -1601,6 +1614,8 @@ class ServerWindow(QMainWindow):
             self._render_fleet_detail(None)
         if self._admin_result:
             self._render_server_info(self._admin_result)
+        self.detail_hint.setText(self.t('Select a computer to see its details.'))
+        self.detail_hint.setVisible(not self._detail)
         if self._detail:
             self._render_detail(self._detail, preserve_edits=self._identity_dirty)
         else:
@@ -1661,9 +1676,20 @@ class ServerWindow(QMainWindow):
         if not self._submit(lambda: client.call('overview'), self._overview_finished):
             self._overview_busy = False
 
+    def _set_stale(self, stale):
+        """While the server cannot be reached the numbers are only the last ones received. Dim them so they do not look live."""
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        if stale and self.tabs.graphicsEffect() is None:
+            effect = QGraphicsOpacityEffect(self.tabs)
+            effect.setOpacity(0.45)
+            self.tabs.setGraphicsEffect(effect)
+        elif not stale and self.tabs.graphicsEffect() is not None:
+            self.tabs.setGraphicsEffect(None)
+
     def _overview_finished(self, result, success):
         self._overview_busy = False
         self.overview_health.setVisible(not success)
+        self._set_stale(not success)
         if success:
             self._overview_result = result
             self._render_overview(result)
@@ -1934,6 +1960,7 @@ class ServerWindow(QMainWindow):
             if box:
                 box.set_selected(box.device_id in selected_ids)
         selected = self.selected_device_ids()
+        self.detail_hint.setVisible(len(selected) != 1)
         self.export_button.setEnabled(bool(selected))
         self.export_button.setObjectName('primary' if selected else '')
         self.devices_add_button.setObjectName('' if selected else 'primary')     # one amber action at a time
@@ -2214,7 +2241,7 @@ class ServerWindow(QMainWindow):
 
     def _confirm(self, message):
         dialog = QMessageBox(QMessageBox.Icon.Warning, self.t('Continue?'), self.t(message), parent=self)
-        yes = dialog.addButton(self.t('Continue?'), QMessageBox.ButtonRole.AcceptRole)
+        yes = dialog.addButton(self.t('Continue'), QMessageBox.ButtonRole.AcceptRole)
         no = dialog.addButton(self.t('Cancel'), QMessageBox.ButtonRole.RejectRole)
         dialog.setDefaultButton(no)
         dialog.setEscapeButton(no)
@@ -2396,12 +2423,30 @@ class ServerWindow(QMainWindow):
         self._fleet_revision += 1
         self._load_fleet()
 
+    def _show_today(self):
+        locale = QLocale('vi_VN' if self.language == 'vi' else 'en_GB')
+        self.today_label.setText(self.t('Today · {date}', date=locale.toString(QDate.currentDate(), 'd MMM yyyy')))
+
+    def _roll_to_today(self):
+        """Left open past midnight, "today" moves on. Follow it, unless someone picked another date."""
+        today = QDate.currentDate()
+        if today == self._today:
+            return
+        follows = self.fleet_date.date() == self._today
+        self._today = today
+        self._show_today()
+        if follows:
+            self.fleet_date.blockSignals(True)      # the load below already uses the new date
+            self.fleet_date.setDate(today)
+            self.fleet_date.blockSignals(False)
+
     def _load_fleet(self):
         if self._closed:
             return
         if self._fleet_busy:
             self._fleet_again = True
             return
+        self._roll_to_today()
         header = self.fleet_table.horizontalHeader()
         arguments = dict(day=self.fleet_date.date().toString('yyyy-MM-dd'), days=self.chart_range.currentData(),
                          limit=6, offset=self._fleet_offset, search=self.fleet_search.text(),
@@ -2482,7 +2527,7 @@ class ServerWindow(QMainWindow):
         table.setFixedHeight(table.horizontalHeader().height() +
                              max(1, len(result['rows'])) * table.verticalHeader().defaultSectionSize() + 16)
         for row_index, row in enumerate(result['rows']):
-            values = (row['name'], row['group'] or self.t('Not available'),
+            values = (row['name'], row['group'] or self.t('No group'),
                       self._fleet_status(row['status']) + (' / ' + self.t('Unstable') if row.get('unstable') else ''), self._duration(row['today']), self._relative(row['last']))
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -2569,7 +2614,7 @@ class ServerWindow(QMainWindow):
                  'wake': 'Turn on sent'}
         colors = {'report-received': T(T('#65D782')), 'report-overdue': T('#FFC93C'), 'enrollment-pending': T('#FFC93C')}
         for index, event in enumerate(events):
-            values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time']))
+            values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time'])[:5])   # HH:MM; the tooltip has the full stamp
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(event['time'] if column == 2 else value)

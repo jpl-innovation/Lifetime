@@ -323,7 +323,7 @@ class Store:
             if up:
                 self._ws_down.pop(device_id, None)
             else:
-                self._ws_down[device_id] = True
+                self._ws_down[device_id] = _stamp(_now())     # when the link closed: the "went offline" time
 
     def live_rate_ms(self, device_id):
         """How often this computer should send: fast for the one being watched, quiet when nobody looks."""
@@ -1303,8 +1303,13 @@ class Store:
                         current = 'report-overdue' if overdue else 'reporting'
                         counts['overdue' if overdue else 'connected'] += 1
                         if overdue:
+                            # The moment it actually went offline: when its live link closed, else when it
+                            # crossed the silence rule that applied. Never later than now.
+                            closed = self._ws_down.get(row['device_id'])
+                            silence = LIVE_SILENCE_SECONDS if self._live_samples.get(row['device_id']) else threshold
+                            went_offline = _time(closed) if closed else _time(received) + dt.timedelta(seconds=silence)
                             events.append(dict(device_id=row['device_id'], kind='report-overdue',
-                                               time=_stamp(_time(row['last_received_at']) + dt.timedelta(seconds=threshold))))
+                                               time=_stamp(min(_now(), went_offline))))
                     else:
                         current = 'unavailable'
                 history = json.loads(row['history']) if row['history'] and policy['history'] else {}
