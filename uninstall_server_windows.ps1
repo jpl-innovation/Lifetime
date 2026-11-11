@@ -28,9 +28,12 @@ if ($task -and $PSCmdlet.ShouldProcess('\Lifetime\Server', 'Stop and remove this
     }
     Unregister-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -Confirm:$false
 }
-if ($RemoveFirewallRule -and (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue) -and
-    $PSCmdlet.ShouldProcess('LifetimeServer-HTTPS', 'Remove this explicit inbound firewall rule')) {
-    Remove-NetFirewallRule -Name 'LifetimeServer-HTTPS'
+# The installer always adds LifetimeServer-Connect and adds LifetimeServer-HTTPS only on request; remove both here.
+foreach ($ruleName in @('LifetimeServer-Connect', 'LifetimeServer-HTTPS')) {
+    if ($RemoveFirewallRule -and (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue) -and
+        $PSCmdlet.ShouldProcess($ruleName, 'Remove this installer-created inbound firewall rule')) {
+        Remove-NetFirewallRule -Name $ruleName
+    }
 }
 Write-Host 'Server registrations removed. Program files, data, TLS keys/certificates, administrator token and backups are preserved.'
 Write-Host 'The standalone desktop and machine-agent task were not changed.'

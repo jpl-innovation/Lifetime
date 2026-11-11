@@ -71,7 +71,7 @@ For rollback, stop and unregister the current version, restore the previous pack
 
 ```powershell
 .\uninstall_server_windows.ps1
-# Optional: remove only the explicitly named installer-created firewall rule.
+# Optional: also remove the installer-created inbound rules (LifetimeServer-Connect and, if you added it, LifetimeServer-HTTPS).
 .\uninstall_server_windows.ps1 -RemoveFirewallRule
 ```
 
