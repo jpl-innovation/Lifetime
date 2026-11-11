@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget
 from lifetime_i18n import duration, time_text
 from lifetime_shell import DisclosureButton
-from lifetime_reveal import phase, progress
+from lifetime_reveal import Intro, phase, progress
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, Tokens
 
 TOKENS = Tokens()   # follows the active (light or dark) palette
@@ -264,6 +264,16 @@ class Plot(QWidget):
         available = [v for v in values if v is not None]
         self.setAccessibleDescription(tr('chart.values', count=len(available), message=message))
         self.update()
+        if len(available) >= (2 if self.kind == 'spark' else 1) and not message:
+            self.arm_entrance()
+
+    def arm_entrance(self, duration=800):
+        """One entrance per chart, the first time it is on screen with data; live refreshes never replay it.
+        A chart whose entrance belongs to a page (the Overview trend) keeps that one."""
+        if self.entrance is None:
+            self.entrance = (Intro(self, duration, 0, motion_reduced), 0.0, 1.0)
+        if self.entrance[1:] == (0.0, 1.0) and self.entrance[0].parent() is self:
+            self.entrance[0].ready()
 
     def plot(self):
         left = max(58, QFontMetrics(font()).horizontalAdvance(f'{self.scale():,.0f} '+tr('unit.hour'))+10)
@@ -328,7 +338,7 @@ class Plot(QWidget):
         xs = self.positions(r)
         ys = [r.bottom()-r.height()*v/maximum if v is not None else None for v in self.values]
         if self.kind in ('line', 'spark'):
-            self.draw_line(p, xs, ys, r, area=self.kind == 'line', color=self.bar_color)
+            self.draw_line(p, xs, ys, r, area=self.kind == 'line', color=self.bar_color, reveal=phase(u, 0.1, 1.0))
         else:
             step = r.width()/len(self.values)
             width = min(18, max(.5, step-2))
@@ -412,8 +422,10 @@ class Plot(QWidget):
                 p.setBrush(QColor(TOKENS['text']))
                 p.drawEllipse(QPointF(xs[i], ys[i]), 3, 3)
 
-    def draw_line(self, p, xs, ys, rect, area=False, color=None):
-        p.setClipRect(rect.adjusted(-2, -2, 2, 2))
+    def draw_line(self, p, xs, ys, rect, area=False, color=None, reveal=1.0):
+        clip = rect.adjusted(-2, -2, 2, 2)
+        clip.setWidth(clip.width() * reveal)       # lines draw on left to right during the entrance
+        p.setClipRect(clip)
         segments, segment = [], []
         for x, y in zip(xs, ys):
             if y is None:
@@ -496,6 +508,8 @@ class Calendar(Plot):
         self.weeks = ((end-self.origin).days//7)+1
         self.setMinimumWidth(max(240, 58+self.weeks*14))
         self.update()
+        if daily:
+            self.arm_entrance(700)
 
     def geometry_for_cells(self):
         step = min(22, (self.width()-58)/max(1, self.weeks))
@@ -506,6 +520,7 @@ class Calendar(Plot):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setFont(font())
         left, top, step, size = self.geometry_for_cells()
+        u = progress(self.entrance, eased=False)
         p.setPen(QColor(TOKENS['muted']))
         for row in (0, 2, 4):
             p.drawText(QRectF(0, top+row*20, 40, 20), Qt.AlignmentFlag.AlignRight, weekdays()[row])
@@ -531,6 +546,8 @@ class Calendar(Plot):
                 if not self.start <= date <= self.end:
                     continue
                 rect = QRectF(x, top+row*20, size, 17)
+                begin = 0.6 * week / max(1, self.weeks - 1)      # cells fade up week by week, left to right
+                p.setOpacity(phase(u, begin, begin + 0.4))
                 value = self.daily.get(date)
                 if value is None:
                     p.setBrush(Qt.BrushStyle.NoBrush)
@@ -561,6 +578,8 @@ class HeatScale(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedHeight(25)
+        self.intro = Intro(self, 600, 0, motion_reduced)
+        self.intro.ready()      # starts the first time the scale is shown
         self.setAccessibleName(tr('Awake hours scale: 0 to 24 hours, five increasing steps. Outline means no recorded data.'))
 
     def paintEvent(self, event):
@@ -569,7 +588,9 @@ class HeatScale(QWidget):
         p.setPen(QColor(TOKENS['muted']))
         p.drawText(QRectF(0, 1, 28, 22), Qt.AlignmentFlag.AlignVCenter, tr('0 h'))
         for i, color in enumerate(heat_ramp()):
+            p.setOpacity(1.0 if self.intro.done else phase(self.intro.value, i * 0.12, i * 0.12 + 0.52))
             p.fillRect(QRectF(33+i*21, 6, 19, 12), QColor(color))
+        p.setOpacity(1.0)
         p.drawText(QRectF(145, 1, 38, 22), Qt.AlignmentFlag.AlignVCenter, tr('24 h'))
         if self.width() >= 360:
             p.drawText(QRectF(195, 1, self.width()-195, 22), Qt.AlignmentFlag.AlignVCenter, tr('Outline = no record'))
@@ -997,7 +1018,8 @@ class Sparkline(Plot):
             return
         maximum = self.scale()
         ys = [rect.bottom()-rect.height()*v/maximum if v is not None else None for v in self.values]
-        self.draw_line(painter, self.positions(rect), ys, rect, color=TOKENS['muted'])
+        self.draw_line(painter, self.positions(rect), ys, rect, color=TOKENS['muted'],
+                       reveal=progress(self.entrance))
 
     def positions(self, rect):
         now = time.monotonic()

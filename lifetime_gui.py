@@ -29,7 +29,7 @@ from lifetime_setup import SetupDialog, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
-from lifetime_reveal import Intro, paint_roll, progress
+from lifetime_reveal import Intro, paint_roll, phase, progress
 from lifetime_tasks import Tasks
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all
@@ -426,7 +426,7 @@ class BarChart(QWidget):
             def frame(value):
                 self.progress = value
                 self.update()
-            animate(self, 'entrance', 0, 1, frame, 350)
+            animate(self, 'entrance', 0, 1, frame, 750)
 
     def set_data(self, keys, values):
         self.keys, self.values = keys, values
@@ -457,7 +457,8 @@ class BarChart(QWidget):
         width = min(12, step*.55)
         for i, (key, value) in enumerate(zip(self.keys, self.values)):
             x = rect.left() + (i+.5)*step
-            height = rect.height() * value/3600/maximum * self.progress
+            begin = 0.5 * i / max(1, len(self.values) - 1)      # bars rise left to right
+            height = rect.height() * value/3600/maximum * phase(self.progress, begin, begin + 0.5)
             color = QColor(t['accent'])
             if not self.hourly and key != dt.date.today().isoformat():
                 color.setAlphaF(.58)
