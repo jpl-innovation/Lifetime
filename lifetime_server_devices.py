@@ -12,10 +12,12 @@ from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_
 from lifetime_reveal import Intro, paint_roll, phase
 
 
-def paint_glass(painter, rect, radius, pill=False, base=None, lift=0):
+def paint_glass(painter, rect, radius, pill=False, base=None, lift=0, strong=False):
     """The server's one material: translucent body, lit upper cap, faint amber along the lower edge, a hairline
     plus diagonal specular rim ending in amber, and a soft shadow under a raised (pill) piece. `base` tints a
-    panel body; `lift` (0..1) brightens it a touch for hover."""
+    panel body; `lift` (0..1) brightens it a touch for hover. Two strengths: ordinary panels stay quiet, `strong`
+    (selected or primary pieces) gets the brighter cap and rim."""
+    quiet = not (pill or strong)
     dark = active_theme() == 'dark'
     body = QPainterPath()
     body.addRoundedRect(rect, radius, radius)
@@ -27,7 +29,7 @@ def paint_glass(painter, rect, radius, pill=False, base=None, lift=0):
             shadow.addRoundedRect(lifted, lifted.height() / 2, lifted.height() / 2)
             painter.fillPath(shadow, QColor(0, 0, 0, alpha) if dark else QColor(20, 33, 61, alpha))
         base = QColor(T('#3A5688')) if dark else QColor(255, 255, 255)
-        base.setAlpha(150 if dark else 238)
+        base.setAlpha(125 if dark else 215)
         painter.fillPath(body, base)
         wash = QLinearGradient(top, bottom)
         wash.setColorAt(0.0, QColor(255, 255, 255, 62) if dark else QColor(255, 255, 255, 255))
@@ -35,26 +37,26 @@ def paint_glass(painter, rect, radius, pill=False, base=None, lift=0):
         painter.fillPath(body, wash)
     else:
         tint = QColor(base or T('#0F1A30'))
-        tint.setAlpha((150 if dark else 120) if base is None else (215 if dark else 235))
+        tint.setAlpha((100 if dark else 80) if base is None else (185 if dark else 210))
         painter.fillPath(body, tint)
         if lift:
             painter.fillPath(body, QColor(255, 255, 255, int((14 if dark else 40) * lift)))
         wash = QLinearGradient(top, bottom)
-        wash.setColorAt(0.0, QColor(255, 255, 255, 34) if dark else QColor(255, 255, 255, 210))
-        wash.setColorAt(0.5, QColor(255, 255, 255, 9) if dark else QColor(255, 255, 255, 80))
-        wash.setColorAt(1.0, QColor(255, 255, 255, 20) if dark else QColor(255, 255, 255, 150))
+        wash.setColorAt(0.0, QColor(255, 255, 255, 30) if dark else QColor(255, 255, 255, 170))
+        wash.setColorAt(0.5, QColor(255, 255, 255, 7) if dark else QColor(255, 255, 255, 55))
+        wash.setColorAt(1.0, QColor(255, 255, 255, 16) if dark else QColor(255, 255, 255, 115))
         painter.fillPath(body, wash)
     # The lit upper half: a curved highlight that fades out before the middle.
     cap = QPainterPath()
     cap_rect = QRectF(rect.left() + 2, rect.top() + 1.5, rect.width() - 4, min(rect.height() * 0.48, 34))
     cap.addRoundedRect(cap_rect, min(radius, cap_rect.height() / 2), min(radius, cap_rect.height() / 2))
     lit = QLinearGradient(cap_rect.topLeft(), cap_rect.bottomLeft())
-    lit.setColorAt(0.0, QColor(255, 255, 255, (86 if pill else 40) if dark else (255 if pill else 170)))
+    lit.setColorAt(0.0, QColor(255, 255, 255, (86 if pill else 22 if quiet else 40) if dark else (255 if pill else 110 if quiet else 170)))
     lit.setColorAt(1.0, QColor(255, 255, 255, 0))
     painter.fillPath(cap.intersected(body), lit)
     # The software's amber glows faintly along the lower edge, so the glass is blue with a warm light under it.
     warm = QColor(T('#FFC93C'))
-    warm.setAlpha((56 if pill else 24) if dark else (48 if pill else 18))
+    warm.setAlpha((56 if pill else 14 if quiet else 24) if dark else (48 if pill else 10 if quiet else 18))
     glow_height = min(rect.height() * 0.42, 26)
     glow_rect = QRectF(rect.left() + 2, rect.bottom() - glow_height, rect.width() - 4, glow_height - 1.5)
     glow_area = QPainterPath()
@@ -72,12 +74,12 @@ def paint_glass(painter, rect, radius, pill=False, base=None, lift=0):
     painter.setPen(QPen(QColor(20, 33, 61, 58) if (not dark and pill) else QColor(T('#22345A')), 1))
     painter.drawPath(outer)
     rim = QLinearGradient(rect.topLeft(), rect.bottomRight())
-    strong, weak = (170, 26) if (dark and pill) else (110, 20) if dark else (255, 120)
-    rim.setColorAt(0.0, QColor(255, 255, 255, strong))
+    bright, weak = (170, 26) if (dark and pill) else (60, 14) if (dark and quiet) else (110, 20) if dark else (255, 120)
+    rim.setColorAt(0.0, QColor(255, 255, 255, bright))
     rim.setColorAt(0.4, QColor(255, 255, 255, weak))
     rim.setColorAt(0.6, QColor(255, 255, 255, weak))
     glint = QColor(T('#FFC93C'))                            # amber catches the lower-right edge
-    glint.setAlpha(200 if pill else 95)
+    glint.setAlpha(200 if pill else 50 if quiet else 95)
     rim.setColorAt(0.85, QColor(255, 255, 255, weak))
     rim.setColorAt(1.0, glint)
     inner = QPainterPath()
@@ -89,33 +91,43 @@ def paint_glass(painter, rect, radius, pill=False, base=None, lift=0):
 
 class Glass(QObject):
     """Paints the glass under a widget whose own background is transparent, before the widget paints itself, so
-    panels, header buttons and dialogs share the menu's material without subclassing each one."""
-    def __init__(self, widget, radius=SOFT_RADIUS, pill=False):
+    panels, buttons, notices and dialogs share the menu's material without subclassing each one. `strong` is the
+    second strength for the selected or primary piece; `accent` adds a short coloured edge on the left (notices)."""
+    SKIP = ('primary', 'primaryAction', 'link', 'deviceMenu')
+
+    def __init__(self, widget, radius=SOFT_RADIUS, pill=False, strong=False, accent=None):
         super().__init__(widget)
-        self.radius, self.pill = radius, pill
+        self.radius, self.pill, self.strong, self.accent = radius, pill, strong, accent
         widget.setProperty('glass', True)
         widget.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         widget.installEventFilter(self)
 
     def eventFilter(self, widget, event):
-        if event.type() == QEvent.Type.Paint:
+        if event.type() == QEvent.Type.Paint and widget.objectName() not in self.SKIP:
             painter = QPainter(widget)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             rect = QRectF(widget.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
             radius = min(self.radius, rect.height() / 2)
             if self.pill:
                 lift = 1.0 if widget.underMouse() and widget.isEnabled() else 0.0
-                paint_glass(painter, rect, radius, False, base=T('#22345A'), lift=lift)
+                checked = getattr(widget, 'isChecked', lambda: False)()
+                if not widget.isEnabled():
+                    painter.setOpacity(0.45)
+                paint_glass(painter, rect, radius, False, base=T('#243C63' if checked else '#22345A'), lift=lift, strong=checked)
             else:
-                paint_glass(painter, rect, radius, False, base=T('#12203A'))
+                paint_glass(painter, rect, radius, False, base=T('#12203A'), strong=self.strong)
+            if self.accent:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(T(self.accent)))
+                painter.drawRoundedRect(QRectF(rect.left() + 6, rect.top() + 8, 3, rect.height() - 16), 1.5, 1.5)
             painter.end()
         elif event.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave):
             widget.update()
         return False
 
 
-def glass(widget, radius=SOFT_RADIUS, pill=False):
-    Glass(widget, radius, pill)
+def glass(widget, radius=SOFT_RADIUS, pill=False, strong=False, accent=None):
+    Glass(widget, radius, pill, strong, accent)
     return widget
 
 
@@ -588,7 +600,11 @@ class RowDelegate(QStyledItemDelegate):
             painter.setClipRect(option.rect)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setPen(QPen(QColor(T('#FFC93C')), 1) if focused else Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(T('#243C63') if selected else T(T('#182944'))))
+            # Rows are lit from the glass itself: a faint amber wash when selected, a faint white one on hover.
+            dark = active_theme() == 'dark'
+            wash = QColor(T('#FFC93C'))
+            wash.setAlpha(30 if dark else 34)
+            painter.setBrush(wash if selected else QColor(255, 255, 255, 12) if dark else QColor(20, 33, 61, 12))
             painter.drawRoundedRect(rect, CONTROL_RADIUS, CONTROL_RADIUS)
             painter.restore()
         plain = QStyleOptionViewItem(option)
@@ -835,7 +851,9 @@ class DeviceBox(QWidget):
         under = QPainterPath()
         under.addRoundedRect(box, SOFT_RADIUS, SOFT_RADIUS)
         painter.fillPath(under, QColor(T('#12203A')))      # opaque underneath: the table's own cell text must not show through
-        paint_glass(painter, box, SOFT_RADIUS, base=T('#182944'), lift=1.0 if self.underMouse() else 0.0)
+        chosen = bool(self.property('selected'))
+        paint_glass(painter, box, SOFT_RADIUS, base=T('#182944' if chosen else '#12203A'), strong=chosen,
+                    lift=1.0 if self.underMouse() else 0.0)
         if self.hasFocus() or self.property('selected'):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(T('#FFC93C')), 1))
