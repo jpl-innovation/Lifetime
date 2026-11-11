@@ -749,8 +749,15 @@ def main(argv=None):
             command = ([sys.executable] if getattr(sys, 'frozen', False) else
                        [sys.executable, str(Path(__file__).resolve())])
             options = dict(creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW) if sys.platform == 'win32' else dict(start_new_session=True)
+            environment = None
+            if getattr(sys, 'frozen', False):
+                # A one-file PyInstaller program started again from itself would share this copy's temporary
+                # folder, and this copy deletes it when it exits, leaving the new one without the files it loads
+                # later (every sync then fails and the computer shows "unreachable"). Make it extract its own.
+                environment = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT='1')
             subprocess.Popen(command + ['--directory', str(directory), '--run'],
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             env=environment, **options)
         if args.run:
             agent.run()
         return agent.status()
