@@ -43,7 +43,7 @@ To add an inbound firewall rule deliberately, specify the HTTPS port and an appr
 .\install_server_windows.ps1 -Address https://lifetime-host.example:8443 -Mode SourceTask -OpenFirewall -FirewallRemoteAddress LocalSubnet
 ```
 
-The installer creates a dedicated data directory, default `%ProgramData%\Lifetime\Server`, and protected server files. TLS certificate/key and the administrator token are created at first runtime start. Preserve these files and restrict backups. Launch the native dashboard from the installed package on the server machine; it connects to the loopback administration API. Keep that port loopback-only.
+The installer creates a dedicated data directory, default `%ProgramData%\Lifetime\Server`, and protected server files. TLS certificate/key and the administrator token are created at first runtime start. Preserve these files and restrict backups. Open **Lifetime Server** from the Start menu on the server machine (the installer adds the shortcut with the data directory and loopback port already filled in, and it asks to run as administrator because the administrator token is protected); the dashboard connects to the loopback administration API. To start it by hand, run `LifetimeServerDashboard.exe --directory <data directory> --admin-port <port>` elevated. Keep that port loopback-only.
 
 For a manual source runtime or dashboard, see the root README commands. The runtime CLI is `lifetime_server.py`; `python lifetime_server.py --help` lists its commands. Service configuration is stored under `HKLM\SYSTEM\CurrentControlSet\Services\LifetimeServer\Parameters`; task mode stores its command in `\Lifetime\Server`. The installer records non-secret selections in `server-install.json`.
 

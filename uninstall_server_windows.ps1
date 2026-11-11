@@ -35,5 +35,7 @@ foreach ($ruleName in @('LifetimeServer-Connect', 'LifetimeServer-HTTPS')) {
         Remove-NetFirewallRule -Name $ruleName
     }
 }
+$shortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Lifetime Server.lnk'
+if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) { Remove-Item -LiteralPath $shortcutPath -Force }
 Write-Host 'Server registrations removed. Program files, data, TLS keys/certificates, administrator token and backups are preserved.'
 Write-Host 'The standalone desktop and machine-agent task were not changed.'

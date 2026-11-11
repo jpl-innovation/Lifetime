@@ -154,6 +154,31 @@ if ($Mode -eq 'SourceService') {
 # The configuration file contains no credentials and inherits the private DACL.
 $configuration = @{ Mode = $Mode; Directory = $DataDirectory; Address = $Address; Host = $HostAddress; Port = $Port; AdminPort = $AdminPort }
 $configuration | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDirectory 'server-install.json') -Encoding UTF8
+# The dashboard cannot start without the data folder and the loopback port, so give the administrator a Start menu
+# shortcut that carries them. The administrator token is readable only by Administrators and SYSTEM, so the shortcut
+# asks to run as administrator (the "Run as administrator" bit of a .lnk file is byte 0x15, flag 0x20).
+$dashboardTarget = $null; $dashboardArguments = ''
+if ($Mode -eq 'PackagedTask') {
+    if (Test-Path -LiteralPath (Join-Path $InstallDirectory 'LifetimeServerDashboard.exe') -PathType Leaf) { $dashboardTarget = Join-Path $InstallDirectory 'LifetimeServerDashboard.exe' }
+} else {
+    $dashboardTarget = Join-Path $InstallDirectory '.venv\Scripts\pythonw.exe'
+    $dashboardArguments = '"' + (Join-Path $InstallDirectory 'lifetime_server_gui.py') + '" '
+}
+if ($dashboardTarget) {
+    $dashboardArguments += '--directory "' + $DataDirectory + '" --admin-port ' + $AdminPort
+    $startMenu = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+    $shortcutPath = Join-Path $startMenu 'Lifetime Server.lnk'
+    $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $dashboardTarget
+    $shortcut.Arguments = $dashboardArguments
+    $shortcut.WorkingDirectory = $InstallDirectory
+    $shortcut.IconLocation = (Join-Path $InstallDirectory 'assets\lifetime.ico')
+    $shortcut.Description = 'Lifetime Server dashboard'
+    $shortcut.Save()
+    $bytes = [IO.File]::ReadAllBytes($shortcutPath)
+    $bytes[0x15] = $bytes[0x15] -bor 0x20
+    [IO.File]::WriteAllBytes($shortcutPath, $bytes)
+}
 # One-code connection fallback is limited to the HTTPS port on the local subnet.
 if (-not (Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -Name 'LifetimeServer-Connect' -DisplayName 'Lifetime Server local connection' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress LocalSubnet -Profile Domain, Private | Out-Null
