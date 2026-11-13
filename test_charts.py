@@ -202,6 +202,24 @@ class LiveChartTests(unittest.TestCase):
         self.assertFalse(self.panel.charts['cpu'].buffer.samples)
         self.assertNotIn('cpu', self.panel.pending)
 
+    def test_hidden_tables_keep_sampling_without_rebuilding_and_catch_up_on_show(self):
+        self.panel.hide()
+        card = self.panel.cards['cpu']
+        self.panel.update_values(dict(cpu=25))
+        with patch.object(card, 'populate_table', wraps=card.populate_table) as populate:
+            with patch.object(c.time, 'monotonic', return_value=100):
+                self.panel.sample()
+            self.panel.update_values(dict(cpu=50))
+            with patch.object(c.time, 'monotonic', return_value=102):
+                self.panel.sample()
+            populate.assert_not_called()
+            self.assertEqual(self.panel.charts['cpu'].values, [25, 50])
+            self.panel.show()
+            self.app.processEvents()
+            populate.assert_called_once()
+        self.assertEqual(card.table.rowCount(), 2)
+        self.assertEqual(card.table.item(1, 1).text(), '50.000')
+
 
 class ActivityLayoutTests(unittest.TestCase):
     @classmethod

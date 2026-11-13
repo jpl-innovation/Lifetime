@@ -2,6 +2,7 @@
 from concurrent.futures import Future
 import importlib.util
 from pathlib import Path
+import tempfile
 import time
 import unittest
 from unittest.mock import patch
@@ -81,8 +82,10 @@ class DashboardTests(unittest.TestCase):
 
     def setUp(self):
         self.ledger = tracker.new_ledger()
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.patches = [patch.object(gui, 'read_ledger', return_value=self.ledger),
-                        patch.object(gui, 'data_dir', return_value=Path('shots/nonexistent-fixture'))]
+                        patch.object(gui, 'data_dir', return_value=Path(self.temporary.name))]
         for p in self.patches:
             p.start()
         self.window = gui.Window(dict(completed=True, **{key: True for key in CATEGORIES}))
@@ -190,6 +193,16 @@ class DashboardTests(unittest.TestCase):
         self.window.resize(500, 560)
         self.app.processEvents()
         self.assertEqual(self.window.system.columns, 1)
+
+    def test_system_does_not_rasterize_the_entire_hardware_page_on_entry(self):
+        self.window.system.update_values(dict(inventory=dict(adapters=[
+            dict(name=f'Adapter {i}', model='Example network adapter', kind='Ethernet') for i in range(16)
+        ])), gui.THEMES['dark'])
+        with patch.object(gui, 'motion_reduced', return_value=False), patch.object(gui, 'RiseEffect') as effect:
+            self.window.select_page(1)
+            effect.assert_not_called()
+        self.assertEqual(self.window.pages.currentWidget(), self.window.system)
+        self.assertIsNone(self.window.system.graphicsEffect())
 
     def test_reduced_motion_cards_keep_full_contrast(self):
         with patch.object(gui, 'REDUCE_MOTION', True):

@@ -217,6 +217,20 @@ class ServerGuiTests(unittest.TestCase):
         self.assertTrue(self.window.remote_health.isHidden())
         self.assertEqual(self.window.health_state.text(), self.window.t('System readings are off on this computer'))
 
+    def test_unchanged_remote_health_reuses_charts_and_changes_still_render(self):
+        page = self.window.remote_health
+        data = dict(stability=[], battery={'packs': []}, sleep={'daily': {}, 'nights': []})
+        with patch.object(page, 'render', wraps=page.render) as render:
+            page.set_remote(data)
+            page.set_remote(copy.deepcopy(data))
+            render.assert_called_once()
+            data['stability'].append(dict(date=dt.datetime.now(dt.timezone.utc).isoformat(), kind='Crash'))
+            page.set_remote(data)
+            self.assertEqual(render.call_count, 2)
+            page.set_remote({})
+            self.assertEqual(render.call_count, 3)
+            self.assertEqual(page.data, {})
+
     def cleanup_window(self):
         for event in self.api.block.values():
             event.set()
@@ -799,11 +813,13 @@ class ServerGuiTests(unittest.TestCase):
         with patch('lifetime_server_devices.reduced_motion', return_value=False):
             pages.setCurrentIndex(2)
             QTest.qWait(30)
+            self.assertIsNone(pages.widget(2).graphicsEffect())
             self.assertGreater(pages.widget(2).x(), pages.contentsRect().x())     # arriving from the right
             QTest.qWait(500)
             self.assertEqual(pages.widget(2).pos(), pages.contentsRect().topLeft())
             pages.setCurrentIndex(1)
             QTest.qWait(30)
+            self.assertIsNone(pages.widget(1).graphicsEffect())
             self.assertLess(pages.widget(1).x(), pages.contentsRect().x())        # arriving from the left
             QTest.qWait(500)
         self.assertIsNone(pages.widget(1).graphicsEffect())

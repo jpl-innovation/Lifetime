@@ -1,9 +1,10 @@
 """Native Health page; background reads require explicit Health consent."""
 import datetime as dt
+import copy
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy
 from lifetime_i18n_qt import QWidget, QFrame, QLabel, QPushButton
-from lifetime_i18n import tr, date_text, datetime_text, on_language_change
+from lifetime_i18n import tr, date_text, datetime_text, on_language_change, language
 from lifetime_charts import Plot, RangeSegments, range_bounds, weekly
 from lifetime_tasks import Tasks
 import lifetime_health as health
@@ -184,7 +185,11 @@ class HealthPage(QWidget):
 
     def set_remote(self, data):
         """data uses the shapes the local probes return: stability list, battery and sleep mappings."""
-        self.enabled, self.data = True, dict(data)
+        context = (dt.date.today(), language())
+        if self.enabled and getattr(self, '_remote_context', None) == context and self.data == data:
+            return
+        self._remote_context = context
+        self.enabled, self.data = True, copy.deepcopy(data)
         self.disabled.hide()
         self.content.show()
         self.machine.hide()
