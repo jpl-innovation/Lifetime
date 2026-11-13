@@ -1096,7 +1096,10 @@ class Window(QWidget):
         page = self.pages.currentWidget()
         if index == 0 and self.intro.done:
             self.hero.roll_again()
-        if not motion_reduced():
+        # System can be thousands of pixels tall. A page-wide opacity effect
+        # rasterizes its hardware sheet on every animation frame, including rows
+        # outside the viewport. Its meters and sidebar already animate separately.
+        if index != 1 and not motion_reduced():
             effect = RiseEffect(page)
             page.setGraphicsEffect(effect)
             def frame(value):

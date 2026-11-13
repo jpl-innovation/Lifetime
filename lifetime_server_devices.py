@@ -516,7 +516,7 @@ class ServerPages(QStackedWidget):
         self.shortcuts = []
 
     def _fade_in(self, index):
-        """The new page settles in from the side the menu pill moved towards: a short fade and a small slide."""
+        """Slide the page from the menu's direction without rasterizing its widget tree."""
         self.page_fade.stop()
         self._page_settled()
         previous, self._last_index = self._last_index, index
@@ -525,20 +525,17 @@ class ServerPages(QStackedWidget):
             return
         self._direction = 1 if index >= previous else -1
         self._fading = page
-        page.setGraphicsEffect(QGraphicsOpacityEffect(page))
         self._page_opacity(0.0)
         self.page_fade.start()
 
     def _page_opacity(self, value):
         page = self._fading
-        if page is not None and page.graphicsEffect() is not None:
-            page.graphicsEffect().setOpacity(0.15 + 0.85 * value)
+        if page is not None:
             base = self.contentsRect().topLeft()
             page.move(base.x() + round(14 * self._direction * (1 - value)), base.y())
 
     def _page_settled(self):
         if self._fading is not None:
-            self._fading.setGraphicsEffect(None)
             self._fading.move(self.contentsRect().topLeft())
             self._fading = None
 
