@@ -9,10 +9,20 @@ if (-not (Test-Path -LiteralPath $serverData)) { throw "Server data unavailable:
 $guis = @(Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe'" |
     Where-Object { $_.CommandLine -match '(?i)(?:^|[\\/\s"])lifetime_server_gui\.py(?:["\s]|$)' })
 foreach ($gui in $guis) {
-    Stop-Process -Id $gui.ProcessId
-    Wait-Process -Id $gui.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
-    if (Get-Process -Id $gui.ProcessId -ErrorAction SilentlyContinue) {
-        throw 'The previous server GUI has not exited; no duplicate was started.'
+    $target = Get-Process -Id $gui.ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $target) { continue }
+    try {
+        # Capture the handle before stopping. A PID can remain enumerable after
+        # exit while another process still holds a handle to the GUI.
+        $null = $target.Handle
+        if (-not $target.HasExited) {
+            Stop-Process -InputObject $target -Force -ErrorAction Stop
+            if (-not $target.WaitForExit(15000)) {
+                throw 'The previous server GUI did not exit within 15 seconds; no duplicate was started.'
+            }
+        }
+    } finally {
+        $target.Dispose()
     }
 }
 $previousPlatform = $env:QT_QPA_PLATFORM

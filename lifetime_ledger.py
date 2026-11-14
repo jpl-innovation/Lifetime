@@ -9,12 +9,13 @@ import datetime as dt
 import math
 
 NUMBER_FIELDS = ('total_seconds', 'baseline_seconds', 'current_session_seconds',
-                 'longest_session_seconds', 'boot_accounted_seconds', 'unattributed_seconds')
+                 'longest_session_seconds', 'boot_accounted_seconds', 'unattributed_seconds',
+                 'awake_clock_high_water')
 DATE_FIELDS = ('first_seen', 'tracking_started', 'history_started')
 TEXT_FIELDS = ('boot_id', 'boot_credited_for')
 FIRST_SEEN_SOURCES = frozenset(('os-install-date', 'system-file-date', 'tracking-start',
                                 'imported-log', 'unknown'))
-CORE = frozenset((*NUMBER_FIELDS, *TEXT_FIELDS, 'boots', 'last_clock', 'imported'))
+CORE = frozenset((*NUMBER_FIELDS, *TEXT_FIELDS, 'boots', 'last_clock', 'imported', 'awake_clock_rollbacks'))
 
 
 def is_number(value):
@@ -84,7 +85,7 @@ def problems(ledger):
     for key in NUMBER_FIELDS:
         if (key in ledger or key == 'total_seconds') and not is_number(ledger.get(key)):
             bad(key, 'must be a finite, non-negative number')
-    for key in ('boots', 'clock_note_count', 'daily_repair_version'):
+    for key in ('boots', 'clock_note_count', 'daily_repair_version', 'awake_clock_rollbacks'):
         if key in ledger and not is_count(ledger[key]):
             bad(key, 'must be a non-negative integer')
     if 'tracking_started_estimated' in ledger and not isinstance(ledger['tracking_started_estimated'], bool):

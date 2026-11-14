@@ -52,8 +52,9 @@ def local_expiry(iso, translate):
 
 
 def reduced_motion():
-    if os.environ.get('LIFETIME_REDUCE_MOTION') == '1':
-        return True
+    override = os.environ.get('LIFETIME_REDUCE_MOTION')
+    if override in ('0', '1'):
+        return override == '1'
     if sys.platform == 'win32':
         import ctypes
         enabled = ctypes.c_int(1)

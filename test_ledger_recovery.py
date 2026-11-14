@@ -447,9 +447,11 @@ class BootBoundaryTests(unittest.TestCase):
     def test_zero_300_301_backwards_and_boot_identity_boundaries(self):
         value = tracker.new_ledger()
         tracker.sample(value, 100, 'a', STAMP, history=False)
+        # After rollback, 650..660 is below the prior observed watermark (701).
+        # It is ambiguous overlap, not new evidence of awake time.
         for tick, identity, total, boots in ((100, 'a', 100, 1), (400, 'a', 400, 1),
-                (701, 'a', 400, 1), (650, 'a', 400, 1), (660, 'a', 410, 1),
-                (900, 'b', 1310, 2), (900, 'b', 1310, 2), (5, 'c', 1315, 3)):
+                (701, 'a', 400, 1), (650, 'a', 400, 1), (660, 'a', 400, 1),
+                (900, 'b', 1300, 2), (900, 'b', 1300, 2), (5, 'c', 1305, 3)):
             with self.subTest(tick=tick, identity=identity):
                 tracker.sample(value, tick, identity, STAMP, history=False)
                 self.assertEqual(value['total_seconds'], total)
@@ -457,7 +459,7 @@ class BootBoundaryTests(unittest.TestCase):
         # No identity available: a backwards awake clock is the reboot evidence.
         tracker.sample(value, 1, None, STAMP, history=False)
         self.assertEqual(value['boots'], 4)
-        self.assertEqual(value['total_seconds'], 1316)
+        self.assertEqual(value['total_seconds'], 1306)
 
     def test_credit_cap_and_repeat_credit_with_new_boot(self):
         for tick in (tracker.MAX_BOOT_CREDIT-1, tracker.MAX_BOOT_CREDIT, tracker.MAX_BOOT_CREDIT+1):

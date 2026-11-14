@@ -209,6 +209,98 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(self.page.step, 1)
         self.assertIn('new code', self.page.code_error.text())
 
+    def waiting(self):
+        self.find()
+        self.page.finish()
+        self.page.tasks.resolve(dict(enabled=True, status='pending', phase='pending', server='https://server.test:8443'))
+
+    def test_cancel_waiting_stops_reporting_and_allows_a_new_connection(self):
+        self.waiting()
+        self.assertFalse(self.page.waiting_cancel.isHidden())
+        with patch('lifetime_connect.run_agent', return_value=dict(enabled=False)) as run:
+            QTest.keyClick(self.page.waiting_cancel, Qt.Key.Key_Return)
+            self.assertFalse(self.page.waiting_cancel.isEnabled())
+            self.page.tasks.resolve(execute=True)
+            run.assert_called_once_with('disconnect', {}, directory=self.page.machine_root)
+        self.assertEqual(self.page.step, 1)
+        self.assertEqual(self.page.code.text(), '')
+        self.assertIsNone(self.page.bundle)
+        self.find()
+
+    def test_unreachable_enrollment_is_not_presented_as_server_approval(self):
+        for state in ('enrolling', 'unreachable'):
+            with self.subTest(state=state):
+                self.page._operation = 'status'
+                self.page.completed(0, dict(enabled=True, phase='enrolling', status=state,
+                                           server='https://old-server.test:8443'))
+                self.assertEqual(self.page.stage, 1)
+                self.assertEqual(self.page.loading_title.text(), 'Connecting securely')
+                self.assertIn('https://old-server.test:8443', self.page.waiting_text.text())
+                self.assertNotIn('needs to approve', self.page.waiting_text.text())
+                self.assertFalse(self.page.waiting_cancel.isHidden())
+                if state == 'unreachable':
+                    self.assertIn("Can't reach", self.page.waiting_text.text())
+        self.page.waiting_cancel.click()
+        self.page.tasks.resolve(dict(enabled=False))
+        self.assertEqual(self.page.step, 1)
+
+    def test_acknowledged_pending_request_keeps_approval_stage_and_names_server(self):
+        self.waiting()
+        self.assertEqual(self.page.stage, 2)
+        self.assertIn('https://server.test:8443', self.page.waiting_text.text())
+        self.assertIn('needs to approve', self.page.waiting_text.text())
+
+    def test_cancel_waits_for_status_even_if_approval_arrives_or_status_fails(self):
+        for error in (None, 'OSError'):
+            with self.subTest(error=error):
+                self.waiting()
+                self.page.poll()
+                self.page.waiting_cancel.click()
+                self.assertEqual(self.page._operation, 'status')
+                self.page.tasks.resolve(dict(enabled=True, status='connected', reported=True), error=error)
+                self.assertEqual(self.page._operation, 'cancel-waiting')
+                self.page.tasks.resolve(dict(enabled=False))
+                self.assertEqual(self.page.step, 1)
+
+    def test_failed_cancellation_stays_on_waiting_screen_and_can_retry(self):
+        self.waiting()
+        self.page.waiting_cancel.click()
+        self.page.tasks.resolve(error='PermissionError')
+        self.assertEqual(self.page.step, 4)
+        self.assertTrue(self.page.waiting_cancel.isEnabled())
+        self.assertIn('Windows permission', self.page.waiting_text.text())
+        self.page.waiting_cancel.click()
+        self.page.tasks.resolve(error='OSError')
+        self.assertIn('Could not cancel', self.page.waiting_text.text())
+        self.assertTrue(self.page.waiting_cancel.isEnabled())
+
+    def test_cancel_button_fits_all_palettes_styles_and_languages(self):
+        from lifetime_theme import THEMES, set_theme, stylesheet, active_theme
+        from lifetime_glass import STYLES, set_style, active_style
+        from lifetime_i18n import TABLES
+        original_theme, original_style = active_theme(), active_style()
+        self.addCleanup(set_theme, original_theme)
+        self.addCleanup(set_style, original_style)
+        for theme in THEMES:
+            for style in STYLES:
+                for language in TABLES:
+                    with self.subTest(theme=theme, style=style, language=language):
+                        set_theme(theme)
+                        set_style(style)
+                        page = ConnectPage(directory=self.root.name, machine_root=self.root.name, language=language)
+                        page.timer.stop()
+                        page.tasks.resolve(dict(enabled=True, status='pending', server='https://server.test:8443'))
+                        page.setStyleSheet(stylesheet())
+                        page.resize(420, 800)
+                        page.show()
+                        self.app.processEvents()
+                        button = page.waiting_cancel
+                        self.assertEqual(button.text(), TABLES[language]['Cancel connection'])
+                        self.assertGreaterEqual(button.height(), 40)
+                        self.assertGreaterEqual(button.width(), button.fontMetrics().horizontalAdvance(button.text()) + 16)
+                        self.assertTrue(button.parentWidget().rect().contains(button.geometry()))
+                        page.close()
+
     def test_search_order_and_mismatches(self):
         with patch('lifetime_discovery.discover', return_value=[dict(address='https://wrong:8443'), dict(address='https://right:8443')]), patch('lifetime_connection.bootstrap', side_effect=[ValueError(), 'verified']) as bootstrap, patch('lifetime_connection.find_server') as fallback:
             self.assertEqual(locate_server(self.code), 'verified')

@@ -202,6 +202,35 @@ class ServerGuiTests(unittest.TestCase):
         QTest.keyClick(network, Qt.Key.Key_Space)
         self.assertTrue(network.isChecked())
 
+    def test_memory_meter_requires_consistent_counts_and_narrow_rows_fit(self):
+        from lifetime_system_gui import HardwarePanel
+        from PyQt6.QtWidgets import QProgressBar, QScrollArea
+        panel = HardwarePanel(remote=True)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(panel)
+        self.addCleanup(scroll.close)
+        self.addCleanup(scroll.deleteLater)
+        for memory, expected in ((dict(slots_used=2, slots_total=4), 1),
+                                 (dict(slots_used=2), 0),
+                                 (dict(slots_used=5, slots_total=4), 0)):
+            panel.set_data(dict(memory=memory))
+            self.app.processEvents()
+            meters = panel.findChildren(QProgressBar, 'memorySlotMeter')
+            self.assertEqual(len(meters), expected)
+            if meters:
+                self.assertEqual((meters[0].value(), meters[0].maximum()), (2, 4))
+        panel.set_data(dict(cpu={'temperature_c': 54}))
+        for width in (900, 390, 900):
+            scroll.resize(width, 900)
+            scroll.show()
+            QTest.qWait(60)
+            for label, value in panel.fields:
+                parent = value.parentWidget()
+                corner = value.mapTo(parent, value.rect().bottomRight())
+                self.assertLessEqual(corner.y(), parent.height())
+                self.assertGreaterEqual(value.height(), value.fontMetrics().height())
+
     def test_remote_pages_use_resources_and_history_consent(self):
         row = device(0)
         row['policy'] = dict(history=True, resources=True)
@@ -751,17 +780,31 @@ class ServerGuiTests(unittest.TestCase):
         self.assertEqual(self.window.table.rowCount(), 0)
         self.assertIsNone(self.window._detail)
 
-    def test_all_chip_also_clears_the_pending_filter_that_review_sets(self):
-        # Review (on the overview) narrows the list through the status box. Choosing "All" afterwards used to
-        # leave that box on "Pending approval", so the page listed nothing while four computers existed.
-        self.load([device(i) for i in range(4)])
+    def test_review_opens_approval_queue_for_an_already_approved_computer(self):
+        row = device(0, status='approved')
+        row['pending_requests'] = [dict(request_id='reconnect-request')]
+        self.load([row])
+        self.window.device_chips['offline'].click()
+        self.window.search.setText('unrelated search')
         self.window.review_pending()
         self.wait_idle()
-        self.assertEqual(self.window.table.rowCount(), 0)
-        self.window.device_chips['all'].click()
+        self.assertEqual(self.window.tabs.currentIndex(), 2)
+        self.assertEqual(self.window.admin_pending.rowCount(), 1)
+        self.assertFalse(self.window.admin_pending.isHidden())
+        approve = self.window._admin_row_actions[0]
+        self.assertTrue(approve.isEnabled())
+        approve.click()
         self.wait_idle()
-        self.assertEqual(self.window.status_filter.currentData(), '')
-        self.assertEqual(self.window.table.rowCount(), 4)
+        self.assertTrue(any(op == 'approve' and args['request_id'] == 'reconnect-request'
+                            for op, args, _ in self.api.calls))
+        self.assertEqual(self.window.admin_pending.rowCount(), 0)
+
+    def test_explicit_animation_override_can_enable_motion_without_changing_windows(self):
+        from lifetime_server_widgets import reduced_motion
+        with patch.dict('os.environ', {'LIFETIME_REDUCE_MOTION': '0'}):
+            self.assertFalse(reduced_motion())
+        with patch.dict('os.environ', {'LIFETIME_REDUCE_MOTION': '1'}):
+            self.assertTrue(reduced_motion())
 
     def test_visible_readings_are_bounded_cached_and_scrubbed_on_revocation(self):
         rows = [device(i) for i in range(200)]

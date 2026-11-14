@@ -1482,6 +1482,8 @@ CONNECT_VI = {
     'You get a one minute warning first.': 'Bạn sẽ được báo trước một phút.',
     'Finish': 'Hoàn tất',
     'Cancel': 'Hủy',
+    'Cancel connection': 'Hủy kết nối',
+    'Could not cancel the connection. Try again.': 'Không thể hủy kết nối. Hãy thử lại.',
     'Waiting for approval': 'Đang chờ chấp thuận',
     '{server} needs to approve this computer.': '{server} cần chấp thuận máy tính này.',
     'Connected': 'Đã kết nối',
@@ -1542,6 +1544,7 @@ _SERVER_SWITCH_VI = {
 SERVER_DASHBOARD_VI.update(_SERVER_SWITCH_VI)
 
 _HARDWARE_VI = {
+    '{used} of {total} memory slots occupied': 'Đã dùng {used} / {total} khe RAM',
     'MAC address': 'Địa chỉ MAC',
     'Processor & cooling': 'Bộ xử lý và làm mát',
     'Graphics & displays': 'Đồ họa và màn hình',

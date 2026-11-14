@@ -249,11 +249,15 @@ def probe_inventory():
                 cpu[key] = value
     if 'os' not in result:
         import platform, datetime
-        kernel = C.WinDLL('kernel32')
-        kernel.GetTickCount64.restype = C.c_ulonglong
-        uptime = kernel.GetTickCount64()/1000
-        result['os'] = dict(name=platform.system(), build=platform.version(), architecture=platform.machine(),
-            uptime_seconds=uptime, last_boot=(datetime.datetime.now().astimezone()-datetime.timedelta(seconds=uptime)).isoformat())
+        try:
+            kernel = C.WinDLL('kernel32')
+            kernel.GetTickCount64.restype = C.c_ulonglong
+            uptime = kernel.GetTickCount64()/1000
+            result['os'] = dict(name=platform.system(), build=platform.version(), architecture=platform.machine(),
+                uptime_seconds=uptime, last_boot=(datetime.datetime.now().astimezone()-datetime.timedelta(seconds=uptime)).isoformat())
+        except (AttributeError, OSError):
+            # A failed optional fallback must not discard the other domains.
+            pass
     # Wi-Fi standard comes from the existing WLAN API, without sharing the SSID.
     wifi = safe(windows_wifi)(include_ssid=False) or []
     for adapter in result.get('adapters', []):

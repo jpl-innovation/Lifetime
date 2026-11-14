@@ -3,7 +3,7 @@ import json
 import subprocess
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import lifetime_signals as s
 
@@ -221,6 +221,7 @@ class InventoryTests(unittest.TestCase):
                 return '{"slots_used":2,"slots_total":4,"modules":[{"kind":"DDR5","capacity_bytes":1024}]}'
             return None
         with patch.object(s, 'sys', SimpleNamespace(platform='win32')), patch.object(s, 'powershell', side_effect=ps), \
+             patch.object(s, 'C', SimpleNamespace(WinDLL=Mock(side_effect=OSError('unavailable')))), \
              patch.object(s, 'probe_counters', return_value=[]), patch.object(s, 'windows_cpu_clocks', return_value={}), \
              patch.object(s, 'windows_wifi', return_value=[]), patch.object(s, 'probe_gpu', return_value=[]), \
              patch.object(s, 'windows_displays', return_value=[dict(width=1920,height=1080,hz=60)]):
@@ -239,9 +240,9 @@ class InventoryTests(unittest.TestCase):
             hw.mkdir(parents=True)
             for key, value in [('name','coretemp'),('temp1_input','54000'),('fan1_input','1234')]:
                 (hw/key).write_text(value)
-            real = Path
             def path(value):
-                return root/str(value).lstrip('/')
+                value = Path(value)
+                return value if value.is_relative_to(root) else root/str(value).lstrip('/\\')
             with patch.object(s, 'Path', side_effect=path):
                 result = s.linux_inventory()
             self.assertEqual(result['cpu']['temperature_c'], 54)
