@@ -653,13 +653,16 @@ class MachineAgent:
             protocol.number(current_tick)
             if not isinstance(current_boot, str) or not current_boot or current_boot == 'unknown':
                 raise ValueError('Current boot identity is unavailable')
-            if identity == current_boot and clock > current_tick:
+            if tracker.same_boot_identity(identity, current_boot) and clock > current_tick:
                 raise ValueError('Imported same-boot clock is ahead of this machine')
             ledger = _empty_ledger()
-            allowed = set(ledger) | {'imported', 'dated_hourly', 'daily_allocation', 'first_sample'}
+            allowed = set(ledger) | {'imported', 'dated_hourly', 'daily_allocation', 'first_sample',
+                                     'awake_clock_high_water', 'awake_clock_rollbacks'}
             ledger.update({k: v for k, v in value.items() if k in allowed})
             ledger['boot_accounted_seconds'] = value.get('boot_accounted_seconds', min(clock, ledger['total_seconds']))
-            if ledger['boot_accounted_seconds'] > clock or ledger.get('boot_credited_for') not in (None, identity):
+            if (ledger['boot_accounted_seconds'] > clock or
+                    (ledger.get('boot_credited_for') is not None and
+                     not tracker.same_boot_identity(ledger['boot_credited_for'], identity))):
                 raise ValueError('Imported boot accounting is inconsistent')
             if not ledger.get('last_update'):
                 raise ValueError('Imported boot boundary requires its last sample time')

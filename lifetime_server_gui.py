@@ -123,7 +123,8 @@ class ServerWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
         set_style(read_style_preference(self.directory))
         self._apply_window_style()
-        self.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets/lifetime.png')))
+        icon_name = 'lifetime.ico' if sys.platform == 'win32' else 'lifetime.png'
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / 'assets' / icon_name)))
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -2332,7 +2333,7 @@ class ServerWindow(QMainWindow):
         self.chrome_grid.setColumnStretch(1, 0 if wide or compact else 1)
         self.chrome_grid.setColumnStretch(2, 1 if wide else 0)
         self.credit.setVisible(self.width() >= 1400)
-        self.chrome_states.setVisible(self.width() >= 640)
+        self.chrome_states.setVisible(self.width() >= 720)
 
     def _style_kpis(self):
         for key, value in self.kpis.items():
@@ -2642,8 +2643,12 @@ class ServerWindow(QMainWindow):
         return [self.table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(self.table.rowCount())]
 
     def review_pending(self):
-        self.tabs.setCurrentIndex(1)
-        self.status_filter.setCurrentIndex(self.status_filter.findData('pending'))
+        # Requests can belong to an already approved computer reconnecting.
+        # Device-status filters cannot represent that queue; show the actual decisions.
+        self.tabs.setCurrentIndex(2)
+        self._load_server_info()
+        self._review_approvals = True
+        self.tabs.widget(2).ensureWidgetVisible(self.admin_pending)
 
     def _load_server_info(self):
         if self._info_busy:
@@ -2662,6 +2667,9 @@ class ServerWindow(QMainWindow):
         self._finish_skeletons(*(f'host{i}' for i in range(len(self.host_panels))))
         if success:
             self._render_server_info(result)
+            if getattr(self, "_review_approvals", False) and self.tabs.currentIndex() == 2:
+                self.tabs.widget(2).ensureWidgetVisible(self.admin_pending)
+                self._review_approvals = False
         if self._info_again:
             self._info_again = False
             self._load_server_info()
@@ -2845,10 +2853,19 @@ def create_application(argv=None):
     existing = QApplication.instance()
     if existing is not None:
         return existing
+    if sys.platform == 'win32':
+        # Source launches use pythonw.exe; give the dashboard its own taskbar group.
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Lifetime.Server')
+        except (AttributeError, OSError):
+            pass
     configure_high_dpi()
     application = QApplication(list(argv or sys.argv[:1]))
     application.setFont(QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans', 11))
-    application.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets/lifetime.png')))
+    assets = Path(__file__).resolve().parent / 'assets'
+    icon = assets / ('lifetime.ico' if sys.platform == 'win32' else 'lifetime.png')
+    application.setWindowIcon(QIcon(str(icon)))
     return application
 
 
