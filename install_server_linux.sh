@@ -6,7 +6,8 @@
 #   data      /var/lib/lifetime-server (0700, system account 'lifetime')
 #   settings  /etc/lifetime-server/server.conf
 #   service   systemd unit; without systemd an OpenRC or SysV init script (--init to choose)
-#   admins    root and members of group 'lifetime-admin' are Admin over the Unix socket in /run/lifetime-server
+#   admins    the Unix socket in /run/lifetime-server is 0660, group 'lifetime-console': members may connect, nothing
+#             more. Roles come from set_role (default deny); root and members of 'lifetime-admin' are always Admin
 set -euo pipefail
 
 usage() {
@@ -16,7 +17,7 @@ Usage: sudo ./install_server_linux.sh [--address https://NAME:8443] [--host 0.0.
                                       [--admin USER]
   --address     the address computers use to reach this server (required on first install)
   --init        service manager; auto picks systemd, then OpenRC, then a SysV script
-  --admin USER  also add USER to the lifetime-admin group (Admin in the dashboard)
+  --admin USER  also add USER to the lifetime-admin and lifetime-console groups (Admin in the dashboard)
 EOF
 }
 
@@ -67,16 +68,24 @@ case "$init" in auto|systemd|openrc|sysv|none) ;; *) fail '--init must be auto, 
 command -v groupadd >/dev/null && command -v useradd >/dev/null || fail 'groupadd/useradd are needed (package shadow or passwd).'
 getent group lifetime >/dev/null || groupadd --system lifetime
 getent group lifetime-admin >/dev/null || groupadd --system lifetime-admin
+console_created=false
+getent group lifetime-console >/dev/null || { groupadd --system lifetime-console; console_created=true; }
 if ! getent passwd lifetime >/dev/null; then
     nologin="$(command -v nologin || echo /bin/false)"
     useradd --system --gid lifetime --home-dir "$data" --no-create-home --shell "$nologin" \
         --comment 'Lifetime Server' lifetime
 fi
-# The service account creates the admin socket with group lifetime-admin, so it must belong to that group.
-usermod -a -G lifetime-admin lifetime
+# The service account creates the admin socket with group lifetime-console, so it must belong to that group.
+usermod -a -G lifetime-admin,lifetime-console lifetime
+if [[ "$console_created" == true ]]; then
+    # Upgrade from a version whose socket used group lifetime-admin: its members keep their access.
+    for member in $(getent group lifetime-admin | cut -d: -f4 | tr ',' ' '); do
+        usermod -a -G lifetime-console "$member"
+    done
+fi
 if [[ -n "$extra_admin" ]]; then
     getent passwd "$extra_admin" >/dev/null || fail "no such user: $extra_admin"
-    usermod -a -G lifetime-admin "$extra_admin"
+    usermod -a -G lifetime-admin,lifetime-console "$extra_admin"
 fi
 install -d -m 0700 -o lifetime -g lifetime "$data"
 chmod 0700 "$data"
@@ -184,5 +193,6 @@ if command -v firewall-cmd >/dev/null; then
 fi
 printf 'Never open port %s: administration stays on this server.\n' "$LIFETIME_ADMIN_PORT"
 printf 'Administer: sudo %s/LifetimeServerRuntime admin --directory %s --admin-port %s --operation invitation\n' "$program" "$data" "$LIFETIME_ADMIN_PORT"
-printf 'Dashboard from a desktop (member of lifetime-admin): Lifetime-Linux-%s.AppImage --run-tool LifetimeServerDashboard --directory %s --admin-port %s\n' "$(uname -m)" "$data" "$LIFETIME_ADMIN_PORT"
+printf 'Other accounts: sudo usermod -a -G lifetime-console USER, then give a role (set_role); membership alone grants nothing.\n'
+printf 'Dashboard from a desktop (member of lifetime-console with a role, or of lifetime-admin): Lifetime-Linux-%s.AppImage --run-tool LifetimeServerDashboard --directory %s --admin-port %s\n' "$(uname -m)" "$data" "$LIFETIME_ADMIN_PORT"
 printf 'Group membership takes effect at your next sign-in.\n'

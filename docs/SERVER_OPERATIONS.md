@@ -301,7 +301,7 @@ sudo ./install_server_linux.sh --address https://lifetime.school.lan:8443 --admi
 | Program | `/opt/lifetime-server` (an upgrade keeps the previous version in `/opt/lifetime-server.previous`) |
 | Data, key, certificate, token, databases, `alert-secrets.bin` | `/var/lib/lifetime-server`, mode 0700, owned by the system account `lifetime` |
 | Settings (address, host, ports) | `/etc/lifetime-server/server.conf` (root:lifetime 0640); change it, then `sudo ./restart_server_linux.sh` |
-| Admin socket | `/run/lifetime-server/admin-8444.sock`, mode 0660, group `lifetime-admin` |
+| Admin socket | `/run/lifetime-server/admin-8444.sock`, mode 0660, group `lifetime-console` (may connect; no role by itself) |
 | Log | `journalctl -u lifetime-server` (systemd) or `/var/log/lifetime-server.log` (OpenRC, SysV) |
 
 `--init auto` (the default) uses systemd when it is running (`lifetime-server.service`, `Restart=on-failure`, hardened with `NoNewPrivileges`, `ProtectSystem=full`, `UMask=0077`), otherwise OpenRC (`supervise-daemon` restarts it), otherwise a SysV script (`update-rc.d` or `chkconfig`; SysV does not restart a crashed server). `--init none` installs the files and prints the command line. Running the installer again upgrades in place, stopping and starting the service; the data stays. Rollback: `sudo mv /opt/lifetime-server /opt/lifetime-server.bad && sudo mv /opt/lifetime-server.previous /opt/lifetime-server && sudo ./restart_server_linux.sh` (same schema rules as on Windows). `sudo ./uninstall_server_linux.sh` removes the program and service and keeps data and settings; `--purge` also removes the data, settings, account and groups.
@@ -312,7 +312,14 @@ sudo ./install_server_linux.sh --address https://lifetime.school.lan:8443 --admi
 
 The Windows named pipe is replaced by a Unix domain socket. The kernel tells the server which Unix account connected (`SO_PEERCRED`); a client cannot name itself. `root` and members of the `lifetime-admin` group are always Admin (like SYSTEM and elevated Administrators); every other user or group has no access until given a role (Admin, Operator, Auditor, Viewer: same permissions, default deny, same tamper-evident audit trail, with actors recorded as `unix:uid:N` and their user name). A caller's groups are read from the user database at each request, so adding someone to a group or removing them applies at once. A caller without any role is disconnected before its request is read.
 
-The socket is 0660 with group `lifetime-admin`, so by default only `root` and that group can reach it, and they are Admin. Lower roles therefore matter only once people outside `lifetime-admin` can reach the socket: set `LIFETIME_ADMIN_GROUP` (for example with `sudo systemctl edit lifetime-server`, `[Service]` `Environment=LIFETIME_ADMIN_GROUP=lifetime-console`) to make another group the socket's group. That group is then also the always-Admin group, so for Operators who must not be Admin, give the roles per user. This trade-off is listed as an owner decision. Principals for `set_role`: a user name, `group:NAME`, or `unix:uid:N` / `unix:gid:N`. Remote power still needs a named account (never the token), rate limits and the owner's consent.
+The socket is 0660 with group `lifetime-console`. Membership of `lifetime-console` only lets an account **connect**; it grants no role. The installer creates both groups and puts the `lifetime` service account in them (`--admin USER` puts USER in both). To give someone a lower role:
+
+```sh
+sudo usermod -a -G lifetime-console alice          # may reach the socket (takes effect at alice's next sign-in)
+sudo /opt/lifetime-server/LifetimeServerRuntime admin --directory /var/lib/lifetime-server --admin-port 8444     --operation set_role --arguments '{"principal": "alice", "role": "operator"}'
+```
+
+Until the second step alice is disconnected unread, like anyone without a role. Members of `lifetime-admin` who should use the socket need `lifetime-console` too (the installer adds the existing `lifetime-admin` members when it first creates `lifetime-console`, so an upgrade keeps their access). Other group names: set `LIFETIME_CONSOLE_GROUP` / `LIFETIME_ADMIN_GROUP` in the service's environment (systemd: `sudo systemctl edit lifetime-server`, `[Service]` `Environment=LIFETIME_CONSOLE_GROUP=helpdesk`); without a console group the socket falls back to the admin group, as before. Principals for `set_role`: a user name, `group:NAME`, or `unix:uid:N` / `unix:gid:N`. Remote power still needs a named account (never the token), rate limits and the owner's consent.
 
 Whoever can read `/var/lib/lifetime-server/admin-token` (root and the `lifetime` account) is Admin over the loopback HTTP channel, as on Windows.
 
@@ -320,7 +327,7 @@ Whoever can read `/var/lib/lifetime-server/admin-token` (root and the `lifetime`
 
 On the server: `sudo /opt/lifetime-server/LifetimeServerRuntime admin --directory /var/lib/lifetime-server --admin-port 8444 --operation OPERATION [--arguments JSON] [--field NAME]`, for example `--operation invitation --field code` for a pairing code, `--operation pending_enrollments`, `--operation approve --arguments '{"request_id": "..."}'` or `--operation backup_archive --arguments '{"path": "/var/backups/lifetime.zip"}'`. It goes through the same roles, validation and audit trail as the dashboard (this command line also works on Windows).
 
-**Dashboard on a Linux desktop** (a server on the same computer): `Lifetime-Linux-x86_64.AppImage --run-tool LifetimeServerDashboard --directory /var/lib/lifetime-server --admin-port 8444` (or `~/.local/lib/lifetime/LifetimeServerDashboard ...` after `install_linux.sh`), as a member of `lifetime-admin` (sign in again after being added). It uses the socket. Without access to the data folder it does not remember its theme and cannot create "Other network?" bundles; use invitations.
+**Dashboard on a Linux desktop** (a server on the same computer): `Lifetime-Linux-x86_64.AppImage --run-tool LifetimeServerDashboard --directory /var/lib/lifetime-server --admin-port 8444` (or `~/.local/lib/lifetime/LifetimeServerDashboard ...` after `install_linux.sh`), as a member of `lifetime-console` with a role, or of `lifetime-admin` and `lifetime-console` (sign in again after being added). It uses the socket. Without access to the data folder it does not remember its theme and cannot create "Other network?" bundles; use invitations.
 
 **Headless server, dashboard on an admin's Linux computer**: forward the socket over SSH. The server sees the SSH account and applies its role.
 
@@ -346,7 +353,7 @@ docker run -d --name lifetime-server --restart unless-stopped -p 8443:8443 \
 docker exec lifetime-server lifetime-admin --operation invitation --field code
 ```
 
-The image (Debian slim, Python 3.12, `requirements-server.txt`, no Qt) runs as the non-root `lifetime` account, which is in `lifetime-admin` inside the container, so `docker exec` commands are Admin over the socket. Data lives in the volume (`/var/lib/lifetime-server`, 0700); back it up with `--operation backup_archive` into the volume and copy it out. With a bind mount instead of a volume, create the folder owned by the container's `lifetime` uid first. Only 8443 is published; 8444 stays inside the container. Local network discovery (mDNS) does not cross Docker's bridge network: pair computers with the connection line ("Other network?" / the invitation and the address) or run with `--network host`. Podman works with the same commands. The image is not published to a registry (owner decision).
+The image (Debian slim, Python 3.12, `requirements-server.txt`, no Qt) runs as the non-root `lifetime` account, which is in `lifetime-admin` and `lifetime-console` inside the container, so `docker exec` commands are Admin over the socket. Data lives in the volume (`/var/lib/lifetime-server`, 0700); back it up with `--operation backup_archive` into the volume and copy it out. With a bind mount instead of a volume, create the folder owned by the container's `lifetime` uid first. Only 8443 is published; 8444 stays inside the container. Local network discovery (mDNS) does not cross Docker's bridge network: pair computers with the connection line ("Other network?" / the invitation and the address) or run with `--network host`. Podman works with the same commands. The image is not published to a registry (owner decision).
 
 ## CI
 

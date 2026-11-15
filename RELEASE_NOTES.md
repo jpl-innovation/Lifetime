@@ -14,7 +14,8 @@
   uninstall scripts, and prints the `ufw`/`firewalld` rule (8443 from the local subnet; 8444 never). A `Dockerfile`
   builds a non-root container image with a data volume for any Linux with Docker or Podman. Named administrators
   on Linux: a Unix socket with `SO_PEERCRED` maps Unix users and groups to the same roles and audit trail (root and
-  `lifetime-admin` are Admin), so remote power from a Linux server now works with a named account. Alert secrets on
+  `lifetime-admin` are Admin; the socket's group `lifetime-console` lets an account connect but grants no role until
+  one is assigned with `set_role`), so remote power from a Linux server now works with a named account. Alert secrets on
   Linux are a 0600 file (permissions, not encryption). Computers pair with it exactly as with a Windows server.
 - **Server command line:** `LifetimeServerRuntime admin --operation ... [--arguments JSON] [--field NAME]` (and
   `lifetime_server.py admin`) sends one request with the caller's own role, for headless servers and containers.

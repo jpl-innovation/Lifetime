@@ -125,10 +125,8 @@ done and tested here, and the gate still needs a real-world run.
 
 **Owner decisions (Linux stage)**
 
-- Socket group trade-off: the admin socket is 0660 with group `lifetime-admin`, and that group is also always Admin,
-  so by default only Admins can reach the socket. Operators/Auditors/Viewers who are not Admin need the socket group
-  changed (`LIFETIME_ADMIN_GROUP`), which also makes that group Admin, so lower roles are then given per user. A
-  separate "console" group (may connect, no role by itself) would remove the trade-off; not built without approval.
+- Socket group (approved and built): the admin socket is 0660 with group `lifetime-console`, which may connect but
+  grants no role; roles come only from assignments (default deny); root and `lifetime-admin` stay Admin.
 - Proposal, not built: a network-reachable admin interface for headless servers (for example the dashboard over
   mutual-TLS). Today: the command line on the server, the dashboard on a Linux desktop, or the socket forwarded over SSH.
 - Publishing the container image to a registry (GHCR) and signing the AppImage are not set up.

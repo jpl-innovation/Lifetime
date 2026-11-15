@@ -4,8 +4,9 @@
 #                                            desktop bundle + AppImage --self-check headless, tracker records, server
 #                                            binary on 127.0.0.1, a client enrolls with a pairing code and syncs
 #   smoke_test.sh ARTIFACTS_DIR --installer  the same, with the server installed by install_server_linux.sh through its
-#                                            SysV fallback and administered by root over the Unix socket (SO_PEERCRED),
-#                                            then restarted and uninstalled
+#                                            SysV fallback and administered by root over the Unix socket (SO_PEERCRED); a
+#                                            lifetime-console member is refused until given a role; then restarted and
+#                                            uninstalled
 #   smoke_test.sh ARTIFACTS_DIR --docker     on the CI host: a client enrolls with the container image's server
 #                                            (container 'lifetime-smoke', port 8443 published on 127.0.0.1)
 set -euo pipefail
@@ -88,7 +89,13 @@ if [[ "$mode" != direct ]]; then
     [[ "$(admin --operation whoami --field role)" == admin ]]
 fi
 if [[ "$mode" == --installer ]]; then
-    stat -c '%a %G' /run/lifetime-server/admin-8444.sock | grep -qx '660 lifetime-admin' || { echo "socket permissions"; exit 1; }
+    stat -c '%a %G' /run/lifetime-server/admin-8444.sock | grep -qx '660 lifetime-console' || { echo "socket permissions"; exit 1; }
+    # A lifetime-console member may connect but has no role until one is assigned (default deny).
+    useradd -M --groups lifetime-console smokeconsole
+    as_console() { runuser -u smokeconsole -- "$server" admin --directory "$data" --admin-port 8444 "$@"; }
+    if as_console --operation whoami >/dev/null 2>&1; then echo "console membership alone granted a role"; exit 1; fi
+    admin --operation set_role --arguments '{"principal": "smokeconsole", "role": "viewer"}' >/dev/null
+    [[ "$(as_console --operation whoami --field role)" == viewer ]] || { echo "assigned role not applied"; exit 1; }
 fi
 
 echo '--- enroll and sync a client'

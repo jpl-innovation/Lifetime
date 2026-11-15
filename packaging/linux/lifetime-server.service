@@ -13,7 +13,7 @@ ExecStart=/opt/lifetime-server/LifetimeServerRuntime console --directory /var/li
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
-# /run/lifetime-server holds the admin socket (0660, group lifetime-admin); the directory itself is searchable.
+# /run/lifetime-server holds the admin socket (0660, group lifetime-console: connect only, no role); the directory itself is searchable.
 RuntimeDirectory=lifetime-server
 RuntimeDirectoryMode=0755
 StateDirectory=lifetime-server

@@ -11,7 +11,8 @@ FROM python:3.12-slim-bookworm
 
 RUN groupadd --system lifetime \
     && groupadd --system lifetime-admin \
-    && useradd --system --gid lifetime --groups lifetime-admin --home-dir /var/lib/lifetime-server \
+    && groupadd --system lifetime-console \
+    && useradd --system --gid lifetime --groups lifetime-admin,lifetime-console --home-dir /var/lib/lifetime-server \
         --no-create-home --shell /usr/sbin/nologin lifetime
 
 WORKDIR /opt/lifetime-server

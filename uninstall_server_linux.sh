@@ -33,6 +33,7 @@ if [[ "$purge" == true ]]; then
     getent passwd lifetime >/dev/null && userdel lifetime
     getent group lifetime >/dev/null && groupdel lifetime
     getent group lifetime-admin >/dev/null && groupdel lifetime-admin
+    getent group lifetime-console >/dev/null && groupdel lifetime-console
     printf 'Lifetime Server, its data, settings and account were removed.\n'
 else
     printf 'Lifetime Server was removed. Data kept in /var/lib/lifetime-server, settings in /etc/lifetime-server (--purge removes them).\n'

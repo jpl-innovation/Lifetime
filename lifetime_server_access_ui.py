@@ -77,7 +77,8 @@ class AccessUI:
         self.signed_in.setWordWrap(True)
         self.signed_in.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         content.addWidget(self.signed_in)
-        note = w.label(('root and members of the lifetime-admin group are always Admin. Give other Linux accounts or '
+        note = w.label(('root and members of the lifetime-admin group are always Admin. Other Linux accounts must be in '
+                        'the lifetime-console group to connect, which grants nothing by itself; give them or their '
                         'groups a role: Operator (acknowledge incidents, maintenance windows, refresh, and remote power '
                         'for one computer where its owner allowed it), Auditor (view and audit trail) or Viewer (view '
                         'only). Anyone who can read the administrator token file is also Admin.') if LINUX else

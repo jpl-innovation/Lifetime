@@ -23,9 +23,11 @@ LINUX = sys.platform.startswith('linux')
 
 
 def fake_accounts():
-    """pwd and grp stand-ins: root(0), alice(1000, groups staff 50 and helpdesk 2000), lifetime-admin(990)."""
-    users = {'root': (0, 0), 'alice': (1000, 1000), 'lifetime': (999, 999)}
-    groups = {'root': 0, 'alice': 1000, 'staff': 50, 'helpdesk': 2000, 'lifetime-admin': 990, 'lifetime': 999}
+    """pwd and grp stand-ins: root(0), alice(1000, groups staff 50 and helpdesk 2000), bob(1001, lifetime-console 980),
+    lifetime-admin(990)."""
+    users = {'root': (0, 0), 'alice': (1000, 1000), 'bob': (1001, 1001), 'lifetime': (999, 999)}
+    groups = {'root': 0, 'alice': 1000, 'bob': 1001, 'staff': 50, 'helpdesk': 2000, 'lifetime-admin': 990,
+              'lifetime-console': 980, 'lifetime': 999}
 
     def user(name, uid, gid):
         return types.SimpleNamespace(pw_name=name, pw_uid=uid, pw_gid=gid)
@@ -57,7 +59,7 @@ def fake_accounts():
 
     pwd = types.SimpleNamespace(getpwnam=getpwnam, getpwuid=getpwuid)
     grp = types.SimpleNamespace(getgrnam=getgrnam, getgrgid=getgrgid)
-    memberships = {'alice': [1000, 50, 2000], 'root': [0], 'lifetime': [999, 990]}
+    memberships = {'alice': [1000, 50, 2000], 'bob': [1001, 980], 'root': [0], 'lifetime': [999, 990, 980]}
     return pwd, grp, (lambda name, gid: memberships.get(name, [gid]))
 
 
@@ -97,6 +99,17 @@ class AccountsTests(unittest.TestCase):
         self.assertTrue(access.builtin_admin(dict(sid='S-1-5-18', groups=[])))
         self.assertFalse(access.builtin_admin(dict(sid='S-1-5-21-1-2-3-500', groups=['unix:gid:990'])))
 
+    def test_the_socket_belongs_to_the_console_group_which_grants_no_role(self):
+        os.environ.pop('LIFETIME_CONSOLE_GROUP', None)
+        self.assertEqual(unix.socket_group(), 'lifetime-console')
+        with patch.dict(os.environ, {'LIFETIME_CONSOLE_GROUP': 'helpdesk'}):
+            self.assertEqual(unix.socket_group(), 'helpdesk')
+        with patch.dict(os.environ, {'LIFETIME_CONSOLE_GROUP': 'no-such-group'}):
+            self.assertEqual(unix.socket_group(), 'lifetime-admin')      # older installation: admin group only
+        bob = unix.identity_for(1001, 1001)
+        self.assertIn('unix:gid:980', bob['groups'])
+        self.assertFalse(access.builtin_admin(bob))                     # connecting is not a role
+
 
 class RoleMappingTests(unittest.TestCase):
     _base = test_server_runtime.RuntimeTests
@@ -111,6 +124,10 @@ class RoleMappingTests(unittest.TestCase):
         pwd, grp, grouplist = fake_accounts()
         alice = dict(sid='unix:uid:1000', name='alice', groups=['unix:gid:1000', 'unix:gid:2000'])
         self.assertEqual(self.call(alice, 'whoami')[0], 403)                   # default deny
+        bob = dict(sid='unix:uid:1001', name='bob', groups=['unix:gid:1001', 'unix:gid:980'])   # lifetime-console only
+        with patch.dict(sys.modules, {'pwd': pwd, 'grp': grp}):
+            self.assertEqual(self.runtime.access.roles_for(bob), set())
+            self.assertEqual(self.call(bob, 'whoami')[0], 403)
         with patch.object(server.sys, 'platform', 'linux'), patch.dict(sys.modules, {'pwd': pwd, 'grp': grp}):
             self.runtime.set_role(dict(name='root'), 'group:helpdesk', 'operator')
             with self.assertRaises(access.AccessError):

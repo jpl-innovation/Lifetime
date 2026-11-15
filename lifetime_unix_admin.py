@@ -7,8 +7,10 @@ unchanged. A caller's groups are its primary group plus its supplementary groups
 adding or removing someone from a group takes effect on their next request.
 
 The socket is created under a temporary name (only its owner can connect while the umask decides), then made 0660 with
-group ``lifetime-admin`` (or LIFETIME_ADMIN_GROUP) and renamed into place, so it is never reachable by others. A peer
-without any role is disconnected before anything is read, like a Windows account the pipe's DACL does not admit.
+group ``lifetime-console`` (or LIFETIME_CONSOLE_GROUP; ``lifetime-admin`` when no console group exists) and renamed into
+place, so it is never reachable by others. Membership of the console group only lets an account connect; it grants no
+role. A peer without any role is disconnected before anything is read, like a Windows account the pipe's DACL does not
+admit.
 Clients refuse a socket whose listening process is not root, the ``lifetime`` service account or themselves.
 
 Standard library only. Linux only: every entry point raises OSError where SO_PEERCRED does not exist.
@@ -25,6 +27,7 @@ import time
 MAX_MESSAGE = 1024 * 1024 + 4096
 RUNTIME_DIRECTORY = '/run/lifetime-server'
 ADMIN_GROUP = 'lifetime-admin'
+CONSOLE_GROUP = 'lifetime-console'
 SERVICE_USER = 'lifetime'
 USER, GROUP = 'unix:uid:', 'unix:gid:'
 
@@ -47,6 +50,13 @@ def socket_path(directory, port):
 
 def admin_group():
     return os.environ.get('LIFETIME_ADMIN_GROUP') or ADMIN_GROUP
+
+
+def socket_group():
+    """The group that may connect to the socket (no role by itself): the console group, or the admin group on an
+    installation that has no console group yet."""
+    console = os.environ.get('LIFETIME_CONSOLE_GROUP') or CONSOLE_GROUP
+    return console if group_id(console) is not None else admin_group()
 
 
 def group_id(name):
@@ -142,7 +152,7 @@ class SocketServer:
     def __init__(self, path, handler, admitted, workers=16, timeout=10, group=None):
         _linux()
         self.path, self.handler, self.admitted, self.timeout = str(path), handler, admitted, timeout
-        self.group = admin_group() if group is None else group
+        self.group = socket_group() if group is None else group
         self._listener, self._thread, self._stopping = None, None, threading.Event()
         self._workers, self._lock = set(), threading.Lock()
         self._slots = threading.BoundedSemaphore(workers)

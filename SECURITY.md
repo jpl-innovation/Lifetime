@@ -347,7 +347,10 @@ of its groups; the role matrix, power gate, rate limits and audit chain are the 
 without any role is disconnected before its request is read, as the pipe's DACL refuses it on Windows.
 
 The socket is created under a temporary name (reachable only by its owner whatever the umask), set to 0660 with
-group `lifetime-admin`, then renamed into place, so it is never briefly open to others. Its folder is 0755 and owned
+group `lifetime-console` (or `LIFETIME_CONSOLE_GROUP`; the admin group when no console group exists), then renamed into
+place, so it is never briefly open to others. Membership of `lifetime-console` only allows connecting: it grants no
+role, and a member without an assigned role is disconnected unread. To give an account a role, add it to
+`lifetime-console` and assign the role with `set_role`. `root` and `lifetime-admin` remain Admin. Its folder is 0755 and owned
 by the `lifetime` service account. A stale socket left by a crash is replaced only if nothing answers on it; a live
 socket or any other file at that path stops the channel (the server then runs on the token channel and logs
 *Named administration channel unavailable*). The client checks with `SO_PEERCRED` that the listening process belongs
