@@ -1499,6 +1499,9 @@ class ServerWindow(QMainWindow):
         note = self.label('After restoring, computers need a new code and approval to connect again.')
         note.setWordWrap(True)
         layout.addWidget(note)
+        note = self.label('Monitoring history and alert settings are saved beside the backup as a second file (name.monitoring.sqlite) and restored with it when that file is there. The mail password and webhook address are not included: enter them again after restoring on another server.')
+        note.setObjectName('muted')
+        layout.addWidget(note)
         self.admin_layout.addWidget(backups)
         usage_panel, usage_holder = self._panel()
         self.overview_usage.layout().setContentsMargins(0, 0, 0, 0)
@@ -2299,6 +2302,13 @@ class ServerWindow(QMainWindow):
             if operation == 'set_configuration':
                 self._configuration_dirty = False
             self.status_label.setText(self.t('Changes saved.'))
+            if operation == 'backup' and isinstance(result, dict) and result.get('monitoring'):
+                self.status_label.setText(self.t('Backup saved. Monitoring history is in {name} beside it: keep both files together.',
+                                                 name=Path(result['monitoring']).name))
+            elif operation == 'restore' and isinstance(result, dict):
+                self.status_label.setText(self.t(
+                    'Restored, including monitoring history and alert settings.' if result.get('monitoring') == 'restored' else
+                    'Restored. No monitoring file was beside this backup, so the current alert history and settings were kept.'))
             self._revision += 1
             self._load_devices()
             self._load_overview()

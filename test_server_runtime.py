@@ -270,6 +270,32 @@ class RuntimeTests(unittest.TestCase):
         for name in ('admin-token', 'server-key.pem', 'server-cert.pem', 'server.sqlite', 'server.sqlite-wal'):
             self.assertEqual(self.admin_raw('/v1/backup', {'path': str(self.root / name)})[0], 400)
 
+    def test_backup_and_restore_carry_monitoring_history_beside_the_database(self):
+        request, credential = self.pair()
+        self.public('sync', self.message(request), credential)
+        self.runtime.monitor.tick()
+        self.admin.call('set_schedule', scope='group', key='Lab', kind='always')
+        backup = self.root / 'snapshot.sqlite'
+        result = self.admin.call('backup', path=str(backup))
+        companion = self.root / 'snapshot.monitoring.sqlite'
+        self.assertEqual(Path(result['monitoring']), companion.resolve())
+        self.admin.call('delete_schedule', scope='group', key='Lab')
+        restored = self.admin.call('restore', path=str(backup))
+        self.assertEqual(restored['monitoring'], 'restored')
+        self.assertIn(('group', 'lab'), [(row['scope'], row['key']) for row in self.admin.call('schedules')])
+        history = self.admin.call('presence', device_id=request['device_id'])
+        self.assertEqual(history[-1]['state'], 'online')
+        self.assertIsNotNone(history[-1]['end_at'])     # it ends at the backup; what followed is not invented
+        # A damaged monitoring file stops the restore before the server database changes.
+        self.admin.call('set_configuration', reporting_interval=120)
+        companion.write_bytes(b'not a database' * 100)
+        self.assertEqual(self.admin_raw('/v1/restore', {'path': str(backup)})[0], 400)
+        self.assertEqual(self.admin.call('configuration')['reporting_interval'], 120)
+        # Without the file beside it, the database is restored and monitoring stays as it is.
+        companion.unlink()
+        self.assertEqual(self.admin.call('restore', path=str(backup))['monitoring'], 'not-included')
+        self.assertIn(('group', 'lab'), [(row['scope'], row['key']) for row in self.admin.call('schedules')])
+
     def test_alerts_through_the_admin_api_with_reserved_files_and_no_secret_in_replies(self):
         request, credential = self.pair()
         self.public('sync', self.message(request), credential)

@@ -1805,6 +1805,13 @@ _ALERTS_VI = {
     'No approved computers yet': 'Chưa có máy tính nào được duyệt',
     'Choose a computer': 'Hãy chọn một máy tính',
     'Enter a group name': 'Hãy nhập tên nhóm',
+    'Monitoring history and alert settings are saved beside the backup as a second file (name.monitoring.sqlite) and restored with it when that file is there. The mail password and webhook address are not included: enter them again after restoring on another server.':
+        'Lịch sử theo dõi và cài đặt cảnh báo được lưu cạnh bản sao lưu thành một tệp thứ hai (tên.monitoring.sqlite) và được khôi phục cùng khi có tệp đó. Mật khẩu thư và địa chỉ webhook không được đưa vào: hãy nhập lại sau khi khôi phục trên máy chủ khác.',
+    'Backup saved. Monitoring history is in {name} beside it: keep both files together.':
+        'Đã lưu bản sao lưu. Lịch sử theo dõi nằm trong {name} bên cạnh: hãy giữ cả hai tệp cùng nhau.',
+    'Restored, including monitoring history and alert settings.': 'Đã khôi phục, gồm cả lịch sử theo dõi và cài đặt cảnh báo.',
+    'Restored. No monitoring file was beside this backup, so the current alert history and settings were kept.':
+        'Đã khôi phục. Không có tệp theo dõi bên cạnh bản sao lưu này nên lịch sử cảnh báo và cài đặt hiện tại được giữ nguyên.',
     'Time zone: local, UTC, +07:00 or Asia/Ho_Chi_Minh': 'Múi giờ: local, UTC, +07:00 hoặc Asia/Ho_Chi_Minh',
 }
 for _key, _text in _ALERTS_VI.items():

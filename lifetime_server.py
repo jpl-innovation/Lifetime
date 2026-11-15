@@ -41,6 +41,12 @@ DATABASES = ('server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm',
              'monitoring.sqlite', 'monitoring.sqlite-wal', 'monitoring.sqlite-shm')
 
 
+def monitoring_backup(path):
+    """Monitoring history travels beside a dashboard backup: lifetime-backup.sqlite -> lifetime-backup.monitoring.sqlite."""
+    path = Path(path)
+    return path.with_name(path.stem + '.monitoring' + (path.suffix or '.sqlite'))
+
+
 def _regular(path, directory=False):
     info = path.lstat()
     if (not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
@@ -399,6 +405,8 @@ class _Handler(BaseHTTPRequestHandler):
                     runtime._check_backup_path(value['path'])
                 if operation == 'server_info':
                     result = runtime.server_info()
+                elif operation in ('backup', 'restore'):
+                    result = getattr(runtime, operation)(value['path'])
                 elif operation == 'names':
                     result = runtime.set_names(**value)
                 elif operation == 'invitation':
@@ -413,8 +421,6 @@ class _Handler(BaseHTTPRequestHandler):
                         result = dict(result, alerts=runtime.monitor.summary())
                     elif operation == 'device':
                         result = dict(result, alerts=runtime.monitor.device_alerts(value['device_id']))
-                    if operation == 'restore':
-                        runtime._renew_certificate()    # the restored names may differ
             elif self.path == '/v1/enroll':
                 result = runtime._store.enroll(value, peer_ip=self.client_address[0])
             elif self.path == '/v1/claim':
@@ -506,14 +512,34 @@ class ServerRuntime:
     def _check_backup_path(self, value):
         if not isinstance(value, str) or not value or '\x00' in value:
             raise ProtocolError('Invalid backup path')
-        path = Path(value).resolve()
         protected = [self.directory / name for name in
                      ('admin-token', 'server-key.pem', 'server-cert.pem', 'server-cert.new.pem',
                       'server-cert.previous.pem', 'alert-secrets.bin', *DATABASES)]
-        if any(path == item.resolve() or
-               (path.exists() and item.exists() and os.path.samefile(path, item))
-               for item in protected):
-            raise ProtocolError('Reserved runtime path')
+        for path in (Path(value).resolve(), monitoring_backup(Path(value).resolve())):
+            if any(path == item.resolve() or
+                   (path.exists() and item.exists() and os.path.samefile(path, item))
+                   for item in protected):
+                raise ProtocolError('Reserved runtime path')
+
+    def backup(self, path):
+        """The server database, and monitoring history and alert settings beside it (never alert-secrets.bin)."""
+        result = self._store.backup(path)
+        return dict(result, monitoring=self.monitor.backup(monitoring_backup(result['path']))['path'])
+
+    def restore(self, path):
+        """Restore the server database and, when the backup has its monitoring file beside it, monitoring too.
+        Both are checked before anything changes; without that file the current monitoring data stays."""
+        companion = monitoring_backup(Path(path).resolve())
+        snapshot = self.monitor.read_backup(companion) if companion.is_file() else None
+        try:
+            result = self._store.restore(path)
+            if snapshot is not None:
+                self.monitor.restore(snapshot)
+        finally:
+            if snapshot is not None:
+                snapshot.close()
+        self._renew_certificate()       # the restored names may differ
+        return dict(result, monitoring='restored' if snapshot is not None else 'not-included')
 
     def start(self):
         with self._lock:

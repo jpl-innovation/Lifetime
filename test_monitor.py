@@ -165,6 +165,30 @@ class PersistenceTests(MonitorCase):
         self.monitor.forget(ID)
         self.assertEqual(self.monitor.presence(ID), [])
 
+    def test_restore_ends_open_history_as_unknown_and_never_resends_waiting_messages(self):
+        self.fleet.add()
+        self.monitor.tick()
+        with self.monitor._transaction() as db:
+            db.execute('''INSERT INTO deliveries(incident_id,kind,channel,ref,status,next_at,created_at,updated_at)
+                VALUES (NULL,'summary','email','2026-11-16','queued',?,?,?)''', (stamp(T0),) * 3)
+        backup = Path(self.temporary.name) / 'b.monitoring.sqlite'
+        self.monitor.backup(backup)
+        self.clock.advance(hours=2)
+        snapshot = self.monitor.read_backup(backup)
+        try:
+            self.monitor.restore(snapshot)
+        finally:
+            snapshot.close()
+        self.assertEqual([(row['state'], row['reason']) for row in self.monitor.presence(ID)],
+                         [('unknown', 'restored'), ('online', 'reporting')])
+        self.assertEqual(self.monitor.deliveries()[0]['error'], 'interrupted')
+        self.assertEqual(self.monitor.deliver(), 0)
+        foreign = Path(self.temporary.name) / 'foreign.sqlite'
+        with contextlib.closing(sqlite3.connect(foreign)) as other:
+            other.execute('CREATE TABLE x (y)')
+        with self.assertRaises(monitoring.MonitorError):
+            self.monitor.read_backup(foreign)
+
     def test_retention_and_size_quota_remove_oldest_closed_history_only(self):
         self.fleet.add()
         for minute in range(400):       # flapping produces many closed intervals

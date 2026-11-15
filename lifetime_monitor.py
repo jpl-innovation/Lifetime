@@ -13,9 +13,11 @@ import contextlib
 import datetime as dt
 import functools
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
+import tempfile
 import threading
 import uuid
 import zoneinfo
@@ -32,6 +34,7 @@ PRESENCE = ('online', 'offline', 'unknown')
 BACKOFF = (60, 300, 900, 3600)  # seconds before the 2nd to 5th attempt; after the 5th the delivery has failed
 RECOVER_SECONDS = 300           # a problem must stay away this long before its incident resolves (no flapping storms)
 ACTIVE = ('pending', 'open', 'acknowledged', 'suppressed')
+BACKUP_TABLES = ('settings', 'schedules', 'maintenance', 'presence', 'incidents', 'timeline', 'deliveries')  # parents first
 
 # Built-in rules. ``threshold``/``minutes`` are the editable defaults with their allowed ranges; ``direction`` and
 # ``hysteresis`` make a reading inside the band keep the current state instead of flipping it.
@@ -889,6 +892,98 @@ class Monitor:
             db.execute('DELETE FROM incidents WHERE device_id=?', (device_id,))
             db.execute("DELETE FROM schedules WHERE scope='device' AND key=?", (device_id,))
             db.execute("DELETE FROM maintenance WHERE scope='device' AND key=?", (device_id,))
+
+    # ---- backup and restore (beside the server database backup) ----
+
+    def backup(self, path):
+        """A consistent copy of monitoring.sqlite (history, incidents, rules, schedules, notification settings; never
+        the mail password or webhook address, which live in alert-secrets.bin), written atomically."""
+        path = Path(path).resolve()
+        descriptor, temporary = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=path.parent)
+        os.close(descriptor)
+        try:
+            with contextlib.closing(sqlite3.connect(temporary, isolation_level=None)) as destination:
+                with self._lock:
+                    self._db.backup(destination)
+                self._validate(destination)
+            with open(temporary, 'r+b') as handle:
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        return dict(path=str(path), schema_version=SCHEMA_VERSION)
+
+    @staticmethod
+    def _validate(db):
+        """Refuse anything that is not an intact monitoring database of this or an older schema."""
+        if (db.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID
+                or not 1 <= db.execute('PRAGMA user_version').fetchone()[0] <= SCHEMA_VERSION
+                or db.execute('PRAGMA integrity_check').fetchall() != [('ok',)]
+                or db.execute('PRAGMA foreign_key_check').fetchone()):
+            raise MonitorError('Invalid or unsupported monitoring backup')
+
+    @staticmethod
+    def read_backup(path):
+        """Load and check a monitoring backup into memory (read-only source). The caller closes the result."""
+        snapshot = sqlite3.connect(':memory:', isolation_level=None)
+        try:
+            with contextlib.closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as source:
+                source.execute('PRAGMA trusted_schema=OFF')
+                source.backup(snapshot)
+            snapshot.execute('PRAGMA trusted_schema=OFF')
+            Monitor._validate(snapshot)
+            _migrate(snapshot)          # an older backup gains the newer tables
+            expected = sqlite3.connect(':memory:', isolation_level=None)
+            try:
+                _migrate(expected)
+                schema = "SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
+                if snapshot.execute(schema).fetchall() != expected.execute(schema).fetchall():
+                    raise MonitorError('Unexpected monitoring backup schema')
+            finally:
+                expected.close()
+            snapshot.row_factory = sqlite3.Row
+            for row in snapshot.execute('SELECT start_at,end_at FROM presence'):
+                _time(row['start_at'])
+                if row['end_at'] is not None:
+                    _time(row['end_at'])
+            for row in snapshot.execute('SELECT value FROM schedules'):
+                _schedule(json.loads(row['value']))
+            for row in snapshot.execute('SELECT value FROM settings'):
+                json.loads(row['value'])
+            return snapshot
+        except BaseException as error:
+            snapshot.close()
+            if isinstance(error, (sqlite3.Error, ValueError, TypeError, KeyError)):
+                raise MonitorError('Invalid or unsupported monitoring backup') from None
+            raise
+
+    def restore(self, snapshot):
+        """Replace everything monitoring keeps with a checked snapshot from ``read_backup``, in one transaction.
+
+        History that was open when the backup was taken ends at its last heartbeat (what followed is unknown), and
+        messages still waiting in it are marked interrupted, so a restore never sends an old alert again."""
+        heartbeat = snapshot.execute("SELECT value FROM meta WHERE key='heartbeat'").fetchone()
+        now = self.clock()
+        end = min(_time(heartbeat[0]), now) if heartbeat else now
+        open_ids = [row[0] for row in snapshot.execute('SELECT device_id FROM presence WHERE end_at IS NULL')]
+        snapshot.execute('UPDATE presence SET end_at=max(start_at,?) WHERE end_at IS NULL', (_stamp(end),))
+        if end < now:
+            snapshot.executemany("INSERT INTO presence(device_id,state,reason,start_at,end_at) VALUES (?,'unknown','restored',?,?)",
+                                 [(device_id, _stamp(end), _stamp(now)) for device_id in open_ids])
+        snapshot.execute("UPDATE deliveries SET status='failed',error='interrupted' WHERE status IN ('queued','sending')")
+        with self._transaction() as db:
+            for table in reversed(BACKUP_TABLES):
+                db.execute(f'DELETE FROM {table}')      # nosec B608: fixed table names
+            for table in BACKUP_TABLES:
+                rows = snapshot.execute(f'SELECT * FROM {table}').fetchall()     # nosec B608
+                if rows:
+                    db.executemany(f'INSERT INTO {table} VALUES ({",".join("?" * len(rows[0]))})',   # nosec B608
+                                   [tuple(row) for row in rows])
+        with self._lock:
+            self.status = {}
+            self.started_at = now       # like a restart: a computer must report again before it counts as down
+        return dict(restored=True)
 
     # ---- retention and size ----
 
