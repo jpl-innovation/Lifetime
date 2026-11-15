@@ -136,7 +136,7 @@ class AlertsUI:
             return dict(incidents=client.call('incidents', state=state, limit=200), rules=client.call('alert_rules'),
                         schedules=client.call('schedules'), maintenance=client.call('maintenance'),
                         notifications=client.call('notifications'), deliveries=client.call('deliveries', limit=50),
-                        time_zones=client.call('time_zones'),
+                        time_zones=client.call('time_zones'), coverage_floor=client.call('coverage_floor'),
                         # ponytail: first 500 approved computers for the pickers; page through if a fleet outgrows it
                         devices=[dict(device_id=d['device_id'], name=(d.get('identity') or {}).get('display_name') or d['device_id'],
                                       group=(d.get('identity') or {}).get('department') or '')
@@ -377,6 +377,19 @@ class AlertsUI:
         content.addLayout(days)
         self.schedule_holidays = QLineEdit()
         content.addWidget(self.schedule_holidays)
+        floor_row = ControlRow()
+        self.floor_label = w.label('Minimum coverage for availability')
+        self.coverage_floor = QSpinBox()
+        self.coverage_floor.setRange(1, 100)
+        self.coverage_floor.setSuffix(' %')
+        self.coverage_floor.setValue(80)
+        self.coverage_floor.editingFinished.connect(self.save_floor)
+        floor_row.addWidget(self.floor_label, 1)
+        floor_row.addWidget(self.coverage_floor)
+        content.addLayout(floor_row)
+        note = w.label('Availability reports count only these hours. Below this coverage (the share of them actually observed) a result says insufficient evidence.')
+        note.setObjectName('muted')
+        content.addWidget(note)
         actions = QHBoxLayout()
         actions.addStretch()
         self.schedule_delete = w.button('Remove selected', self.delete_schedule)
@@ -545,6 +558,7 @@ class AlertsUI:
         for box, key in ((self.summary_enabled, 'Daily summary'), (self.webhook_enabled, 'Webhook')):
             box.setAccessibleName(self.t(key))
         self.smtp_port.setAccessibleName(self.t('Port'))
+        self.coverage_floor.setAccessibleName(self.t('Minimum coverage for availability'))
         self.summary_hour.setAccessibleName(self.t('Daily summary at'))
         self.webhook_url.setAccessibleName(self.t('Webhook (https://)'))
         self.schedule_table.setHorizontalHeaderLabels([self.t('Applies to'), self.t('Hours')])
@@ -570,6 +584,8 @@ class AlertsUI:
             self._render_notifications(result['notifications'])
             self._fresh['notifications'] = False
         self._fill_devices(result.get('devices') or [])
+        if not self.coverage_floor.hasFocus() and result.get('coverage_floor'):
+            self.coverage_floor.setValue(result['coverage_floor'])
         zones = result.get('time_zones') or {}
         self.zone_note.setText(self.t(NO_TZDATA))
         self.zone_note.setVisible(not zones.get('iana', True))
@@ -734,6 +750,10 @@ class AlertsUI:
             start=self.schedule_start.time().toString('HH:mm'), end=self.schedule_end.time().toString('HH:mm'),
             weekdays=[day for day, box in enumerate(self.weekday_boxes) if box.isChecked()],
             holidays=[part.strip() for part in self.schedule_holidays.text().split(',') if part.strip()]), self.schedule_save)
+
+    def save_floor(self):
+        if self.coverage_floor.value() != (self.result or {}).get('coverage_floor'):
+            self._call('set_coverage_floor', dict(percent=self.coverage_floor.value()))
 
     def delete_schedule(self):
         rows = self.schedule_table.selectionModel().selectedRows()

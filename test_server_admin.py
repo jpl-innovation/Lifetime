@@ -22,6 +22,14 @@ class AdminClientTests(unittest.TestCase):
                 self.assertEqual(connection.request.call_args.args[3]['Authorization'], 'Bearer ' + 'a' * 43)
                 connection.close.assert_called_once()
 
+    def test_every_server_operation_is_callable_from_the_dashboard(self):
+        import lifetime_server
+        with tempfile.TemporaryDirectory() as root:
+            client = AdminClient(root, 8450)
+            for operation in lifetime_server._ADMIN:
+                with self.assertRaises(FileNotFoundError, msg=operation):     # past the allow-list, at the token
+                    client.call(operation)
+
     def test_no_implicit_network_and_invalid_token(self):
         with tempfile.TemporaryDirectory() as root, patch('lifetime_admin.http.client.HTTPConnection') as factory:
             client = AdminClient(root, 8450)

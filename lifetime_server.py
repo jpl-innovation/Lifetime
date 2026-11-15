@@ -273,6 +273,9 @@ _ADMIN = {
     'test_notification': ('monitor.test_notification', ('channel',), ()),
     'deliveries': ('monitor.deliveries', (), ('limit', 'offset')),
     'time_zones': ('monitor.time_zones', (), ()),
+    'availability': ('monitor.availability', ('device_ids',), ('start', 'end', 'as_of', 'daily')),
+    'set_coverage_floor': ('monitor.set_coverage_floor', ('percent',), ()),
+    'coverage_floor': ('monitor.coverage_floor', (), ()),
 }
 
 

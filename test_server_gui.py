@@ -170,6 +170,10 @@ class FakeAdmin:
             return dict(lifetime_notify.DEFAULTS, password_set=True, webhook='', secrets_unreadable=False)
         if operation == 'time_zones':
             return dict(iana=self.iana, message='')
+        if operation == 'coverage_floor':
+            return 80
+        if operation == 'set_coverage_floor':
+            return dict(coverage_floor=arguments['percent'])
         if operation == 'test_notification':
             return dict(channel=arguments['channel'], status='failed', error='tls')
         if operation in ('set_alert_rule', 'set_schedule', 'delete_schedule', 'add_maintenance', 'delete_maintenance',
@@ -1203,6 +1207,10 @@ class ServerGuiTests(unittest.TestCase):
         self.wait_idle()
         self.assertFalse(any(operation == 'set_schedule' for operation, _, _ in self.api.calls))
         self.assertIn('+07:00', self.window.status_label.text())
+        alerts.coverage_floor.setValue(90)
+        alerts.save_floor()
+        self.wait_idle()
+        self.assertIn(('set_coverage_floor', dict(percent=90)), [(operation, arguments) for operation, arguments, _ in self.api.calls])
         self.window.language = 'vi'
         self.window.retranslate()
         self.assertIn('tzdata', alerts.zone_note.text())

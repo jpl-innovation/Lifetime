@@ -303,6 +303,9 @@ class RuntimeTests(unittest.TestCase):
         self.runtime.monitor.tick()
         alerts = self.admin.call('device', device_id=request['device_id'])['alerts']
         self.assertEqual((alerts['incidents'], alerts['status']['presence']), ([], 'online'))
+        measured = self.admin.call('availability', device_ids=[request['device_id']])['devices'][0]
+        self.assertEqual((measured['device_id'], measured['bad_s']), (request['device_id'], 0))
+        self.assertEqual(self.admin_raw('/v1/availability', {'device_ids': []})[0], 400)
         rules = self.admin.call('set_alert_rule', rule='disk_low', threshold=15)
         self.assertEqual(next(rule for rule in rules if rule['rule'] == 'disk_low')['threshold'], 15)
         self.assertEqual(self.admin_raw('/v1/set_alert_rule', {'rule': 'disk_low', 'threshold': 500})[0], 400)

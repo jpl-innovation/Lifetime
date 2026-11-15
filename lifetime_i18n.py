@@ -1805,6 +1805,9 @@ _ALERTS_VI = {
     'No approved computers yet': 'Chưa có máy tính nào được duyệt',
     'Choose a computer': 'Hãy chọn một máy tính',
     'Enter a group name': 'Hãy nhập tên nhóm',
+    'Minimum coverage for availability': 'Độ bao phủ tối thiểu cho mức sẵn sàng',
+    'Availability reports count only these hours. Below this coverage (the share of them actually observed) a result says insufficient evidence.':
+        'Báo cáo mức sẵn sàng chỉ tính các giờ này. Nếu độ bao phủ (phần thời gian thực sự quan sát được) thấp hơn mức này, kết quả sẽ ghi là chưa đủ bằng chứng.',
     'Monitoring history and alert settings are saved beside the backup as a second file (name.monitoring.sqlite) and restored with it when that file is there. The mail password and webhook address are not included: enter them again after restoring on another server.':
         'Lịch sử theo dõi và cài đặt cảnh báo được lưu cạnh bản sao lưu thành một tệp thứ hai (tên.monitoring.sqlite) và được khôi phục cùng khi có tệp đó. Mật khẩu thư và địa chỉ webhook không được đưa vào: hãy nhập lại sau khi khôi phục trên máy chủ khác.',
     'Backup saved. Monitoring history is in {name} beside it: keep both files together.':
