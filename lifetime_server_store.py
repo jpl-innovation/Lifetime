@@ -1452,6 +1452,60 @@ class Store:
                     rows=ordered[offset:offset+limit], matching=len(rows), groups=sorted(groups, key=str.casefold),
                     recent_events=events[:20], updated_at=_stamp(_now()), date=selected.isoformat())
 
+    def monitor_snapshot(self):
+        """What alert rules may use, per approved computer (read-only).
+
+        Presence uses the same rule as the dashboard (live silence or the overdue window). Readings appear only when
+        the computer's policy allows them (resources; crashes only with health), so a rule can never fire on data the
+        computer does not share. ``metrics_fresh`` is False when the last readings are older than the overdue window.
+        """
+        now = _now()
+        result = []
+        with self._transaction() as db:
+            interval = db.execute('SELECT reporting_interval FROM settings WHERE singleton=1').fetchone()[0]
+            threshold = max(OVERDUE_SECONDS, interval * 3)
+            for row in db.execute("SELECT * FROM devices WHERE status='approved'").fetchall():
+                identity, policy = json.loads(row['identity']), json.loads(row['policy'])
+                device_id = row['device_id']
+                samples = self._live_samples.get(device_id)
+                received = self._last_seen(row)
+                silence = LIVE_SILENCE_SECONDS if samples else threshold
+                closed = self._ws_down.get(device_id)
+                online, offline_since, reason = None, None, None
+                if received:
+                    online = not ((now - _time(received)).total_seconds() > silence or closed)
+                    if not online:
+                        offline_since = closed or _stamp(_time(received) + dt.timedelta(seconds=silence))
+                        reason = 'link-closed' if closed else 'report-overdue'
+                item = dict(device_id=device_id, name=identity.get('display_name') or device_id,
+                            group=identity.get('department', ''), created_at=row['created_at'],
+                            last_report=row['last_received_at'], online=online, threshold=threshold,
+                            offline_since=offline_since and _stamp(min(now, _time(offline_since))), reason=reason,
+                            client_version=row['client_version'], resources=bool(policy.get('resources')),
+                            health=bool(policy.get('health')), metrics=None, metrics_fresh=False, laptop=None,
+                            crashes_30d=None)
+                if policy.get('resources'):
+                    readings = json.loads(row['readings']) if row['readings'] else {}
+                    specs, perf = readings.get('specs') or {}, dict(readings.get('performance') or {})
+                    ram, used = specs.get('ram_bytes'), perf.get('ram_used_bytes')
+                    perf['ram_percent'] = min(100, 100 * used / ram) if ram and used is not None else None
+                    perf['disk_free_percent'] = _disk_percent(specs, perf)
+                    fresh_at = row['readings_received_at']
+                    if samples and (now - _time(samples[-1]['observed_at'])).total_seconds() < 20:
+                        perf.update({k: v for k, v in samples[-1].items() if k != 'observed_at' and v is not None})
+                        fresh_at = samples[-1]['observed_at']
+                    if readings or fresh_at:
+                        item['metrics'] = {key: perf.get(key) for key in
+                                           ('cpu_percent', 'ram_percent', 'disk_free_percent', 'battery_health_percent', 'temperature_c')}
+                        item['metrics_fresh'] = bool(fresh_at and (now - _time(fresh_at)).total_seconds() <= threshold)
+                    if specs or perf.get('battery_percent') is not None:
+                        item['laptop'] = any(value is not None for value in (
+                            specs.get('battery_design_wh'), perf.get('battery_percent'), perf.get('battery_health_percent')))
+                if policy.get('health') and row['health']:
+                    item['crashes_30d'] = json.loads(row['health']).get('crashes_30d')
+                result.append(item)
+        return result
+
     def request_refresh(self, device_id):
         with self._transaction() as db:
             row = self._device_row(db, device_id)

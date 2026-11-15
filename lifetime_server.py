@@ -36,6 +36,9 @@ HANDSHAKE_TIMEOUT = 5
 HEADER_TIMEOUT = 10
 BODY_TIMEOUT = 10
 CERTIFICATE_CHECK = 3600    # seconds between renewal checks while the server runs
+MONITOR_TICK = 15           # seconds between alert evaluations
+DATABASES = ('server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm',
+             'monitoring.sqlite', 'monitoring.sqlite-wal', 'monitoring.sqlite-shm')
 
 
 def _regular(path, directory=False):
@@ -243,6 +246,8 @@ _ADMIN = {
     'organisation': ('organisation', (), ('name',)),
     'names': (None, ('names',), ()),
     'server_log': ('server_log', (), ('limit', 'offset')),
+    # Monitoring (alerts): methods of the runtime's Monitor, the only writer of monitoring.sqlite.
+    'presence': ('monitor.presence', ('device_id',), ('limit',)),
 }
 
 
@@ -379,8 +384,12 @@ class _Handler(BaseHTTPRequestHandler):
                     result = runtime.set_names(**value)
                 elif operation == 'invitation':
                     result = runtime._store.create_invitation(runtime.fingerprint, **value)
+                elif method.startswith('monitor.'):
+                    result = getattr(runtime.monitor, method[8:])(**value)
                 else:
                     result = getattr(runtime._store, method)(**value)
+                    if operation == 'delete':
+                        runtime.monitor.forget(value['device_id'])
                     if operation == 'restore':
                         runtime._renew_certificate()    # the restored names may differ
             elif self.path == '/v1/enroll':
@@ -438,6 +447,8 @@ class ServerRuntime:
         self._renew_lock = threading.Lock()
         self._maintenance = None
         self._maintenance_stop = threading.Event()
+        self._watcher = None
+        self.monitor = None
         self.directory = Path(directory).absolute()
         self.address, self._hostname, _ = tls._address(address)
         for number in (port, admin_port):
@@ -475,7 +486,7 @@ class ServerRuntime:
         path = Path(value).resolve()
         protected = [self.directory / name for name in
                      ('admin-token', 'server-key.pem', 'server-cert.pem', 'server-cert.new.pem',
-                      'server-cert.previous.pem', 'server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm')]
+                      'server-cert.previous.pem', 'alert-secrets.bin', *DATABASES)]
         if any(path == item.resolve() or
                (path.exists() and item.exists() and os.path.samefile(path, item))
                for item in protected):
@@ -490,7 +501,7 @@ class ServerRuntime:
                 _protect_directory(self.directory)
                 self._token = _admin_token(self.directory / 'admin-token')
                 context, bundle = _certificate(self.directory, self.address)
-                for name in ('server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm'):
+                for name in DATABASES:
                     path = self.directory / name
                     try:
                         path.lstat()
@@ -500,6 +511,8 @@ class ServerRuntime:
                         _regular(path)
                         tls.protect_private(path)
                 self._store = Store(self.directory / 'server.sqlite')
+                from lifetime_monitor import Monitor
+                self.monitor = Monitor(self.directory / 'monitoring.sqlite', self._store, clock=self.clock).start()
                 if self._renew_certificate():       # due, or the names changed: same key, new certificate
                     context, bundle = _certificate(self.directory, self.address)
                 self.fingerprint = bundle['fingerprint']
@@ -527,6 +540,8 @@ class ServerRuntime:
                 self._maintenance_stop.clear()
                 self._maintenance = threading.Thread(target=self._maintain, name='Lifetime-certificate', daemon=True)
                 self._maintenance.start()
+                self._watcher = threading.Thread(target=self._watch, name='Lifetime-alerts', daemon=True)
+                self._watcher.start()
                 self._store.log_event('server-started')
                 # Loopback tests never multicast. LAN/VPN installations announce
                 # only public service metadata; failure leaves manual pairing.
@@ -619,6 +634,11 @@ class ServerRuntime:
             listener.close()
             thread.join()
 
+    def _watch(self):
+        while not self._maintenance_stop.wait(MONITOR_TICK):
+            with contextlib.suppress(Exception):    # a failing pass is retried at the next tick
+                self.monitor.tick()
+
     def _maintain(self):
         while not self._maintenance_stop.wait(CERTIFICATE_CHECK):
             with contextlib.suppress(Exception):
@@ -688,6 +708,9 @@ class ServerRuntime:
             if self._maintenance is not None:
                 self._maintenance.join()
                 self._maintenance = None
+            if self._watcher is not None:
+                self._watcher.join()
+                self._watcher = None
             if self.hub is not None:
                 self.hub.stop()
                 self.hub = None
@@ -704,6 +727,10 @@ class ServerRuntime:
             started = bool(self._servers)
             self._servers.clear()
             self._threads.clear()
+            if self.monitor is not None:
+                with contextlib.suppress(Exception):
+                    self.monitor.close()
+                self.monitor = None
             if self._store is not None:
                 if started:
                     with contextlib.suppress(Exception):
