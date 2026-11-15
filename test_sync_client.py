@@ -492,6 +492,30 @@ class CapabilityTests(SyncFixture):
         self.assertTrue(self.report()['trimmed'])
         self.assertFalse(set(self.calls[-1][1]['history']) & set(protocol.HISTORY_EXTRA))
 
+    def test_last_problem_reaches_only_a_server_that_takes_it(self):
+        self.server_capabilities = protocol.CAPABILITIES
+        self.pair()
+        self.transport.side_effect = TimeoutError('secret-host.internal')
+        self.report()
+        self.assertEqual(self.machine._load()['problem']['kind'], 'timeout')
+        self.transport.side_effect = self.exchange
+        self.assertEqual(self.report()['status'], 'connected')
+        self.assertEqual(self.calls[-1][1]['problem']['kind'], 'timeout')
+        self.assertEqual(self.store.get_device(self.machine.device_id)['last_problem']['kind'], 'timeout')
+        self.assertNotIn('problem', self.machine._load())
+        self.assertNotIn('secret-host', json.dumps(self.calls[-1][1]))
+        # A 1.1 server never receives it (its strict check would refuse the report), and nothing is "trimmed" for it.
+        self.enterContext(patch.object(storage, 'validate_sync', side_effect=strict_1_1))
+        self.server_capabilities = None
+        self.report()
+        self.transport.side_effect = ConnectionRefusedError()
+        self.report()
+        self.transport.side_effect = self.exchange
+        status = self.report()
+        self.assertEqual((status['status'], status['trimmed']), ('connected', False))
+        self.assertNotIn('problem', self.calls[-1][1])
+        self.assertNotIn('problem', self.machine._load())
+
     def test_capabilities_are_validated_and_forgotten_for_a_new_server(self):
         self.server_capabilities = protocol.CAPABILITIES
         self.pair(self.HISTORY)

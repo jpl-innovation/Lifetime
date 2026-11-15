@@ -68,7 +68,7 @@ class FakeAdmin:
         if operation == 'server_info':
             return dict(address='https://localhost:8443', host='127.0.0.1', port=8443,
                         name='Demo-Server', fingerprint='0' * 64, discovery=False)
-        if operation == 'invitations':
+        if operation in ('invitations', 'server_log'):
             return []
         if operation == 'pending_enrollments':
             return [dict(request_id=p['request_id'], device_id=r['device_id'], name=r['identity']['display_name'],
@@ -640,14 +640,17 @@ class ServerGuiTests(unittest.TestCase):
         row = device(1)
         row['identity']['deployment_date'] = '2026-01-02'
         row['client_version'] = '1.0.1'
+        row['last_problem'] = dict(kind='timeout', at='2020-01-02T12:00:00+00:00')
         row['policy']['history'] = True
         row['history'] = {'recording_started': '2026-01-01T00:00:00Z', 'daily': {'2026-11-08': 60}}
         self.load([row])
         self.select(row['device_id'])
         self.assertEqual(self.window.detail_name.text(), row['identity']['display_name'])
         self.assertEqual(self.window.detail_total.text(), '3.0 h')
-        for key in ('Asset tag', 'Department', 'Location', 'Deployment date', 'Last seen', 'Client version', 'Coverage', 'Tracking since'):
+        for key in ('Asset tag', 'Department', 'Location', 'Deployment date', 'Last seen', 'Client version', 'Last problem', 'Coverage', 'Tracking since'):
             self.assertIn(key + '\n', self.window.detail_text.toPlainText())   # labels carry no colon, as on Overview
+        self.assertIn('No answer (timeout) · 2 Jan 2020', self.window.detail_text.toPlainText())
+        self.assertIn('1.0.1', self.window.detail_text.toPlainText())
         self.assertIn('2 Jan 2026', self.window.detail_text.toPlainText())
         self.assertNotRegex(self.window.detail_text.toPlainText(), r'\d{4}-\d{2}-\d{2}')
         self.window.copy_device_id.click()
@@ -721,6 +724,14 @@ class ServerGuiTests(unittest.TestCase):
         self.assertIn('8 Dec 2027', self.window.certificate_warning.text())
         self.window.language_button.click()
         self.assertIn('không thể gia hạn', self.window.certificate_warning.text())
+        result['log'] = [dict(time='2026-11-15T01:00:00+00:00', kind='report-rejected', category='invalid',
+                              device_id='d1', name='Lab PC', count=3),
+                         dict(time='2026-11-15T00:00:00+00:00', kind='server-started', category=None, device_id=None, name=None, count=1)]
+        self.window._render_server_info(result)
+        self.assertFalse(self.window.server_log.isHidden())
+        self.assertEqual(self.window.server_log.item(0, 1).text(), 'Từ chối báo cáo: dữ liệu không hợp lệ (3 lần)')
+        self.assertEqual(self.window.server_log.item(0, 2).text(), 'Lab PC')
+        self.assertEqual(self.window.server_log.item(1, 1).text(), 'Máy chủ đã khởi động')
         self.window.names_edit.setText('a.local, 192.0.2.5; b.local')
         self.window.names_button.click()
         self.wait_idle()

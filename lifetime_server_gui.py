@@ -40,6 +40,26 @@ from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, s
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
 THEME_KEYS = ('auto', 'light', 'dark')
+# Why a computer's last report failed (its own category, or what the server saw), for the device detail.
+PROBLEM_TEXT = {'certificate': 'Server certificate not trusted', 'expired': 'Certificate out of date or wrong clock',
+                'hostname': 'Address not in the certificate', 'tls': 'Secure connection failed',
+                'name': 'Server name not found', 'refused': 'Connection refused', 'timeout': 'No answer (timeout)',
+                'dropped': 'Connection interrupted', 'network': 'No network path', 'protocol': 'Reply not understood',
+                'internal': 'Internal error on the computer', 'rejected': 'Report rejected by the server',
+                'conflict': 'Report conflicts with stored data'}
+LOG_TEXT = {('server-started', None): 'Server started', ('server-stopped', None): 'Server stopped',
+            ('names-changed', None): 'Server names changed',
+            ('certificate-renewed', 'expiry'): 'Certificate renewed (before expiry)',
+            ('certificate-renewed', 'names'): 'Certificate renewed (new names)',
+            ('certificate-renewal-failed', None): 'Certificate renewal failed',
+            ('report-rejected', 'invalid'): 'Report refused: invalid data',
+            ('report-rejected', 'credential'): 'Report refused: not a connected computer',
+            ('report-rejected', 'conflict'): 'Report refused: conflicts with stored data',
+            ('report-rejected', 'throttled'): 'Report refused: too many attempts',
+            ('enrollment-refused', 'invalid'): 'Connection refused: invalid request',
+            ('enrollment-refused', 'code'): 'Connection refused: wrong or used code',
+            ('enrollment-refused', 'conflict'): 'Connection refused: conflicting request',
+            ('enrollment-refused', 'throttled'): 'Connection refused: too many attempts'}
 
 
 def _create_bundle(client, directory, address, ttl, uses):
@@ -1362,6 +1382,25 @@ class ServerWindow(QMainWindow):
         organisation_row.addWidget(self.button('Save organisation', lambda: self._mutate('organisation', dict(name=self.organisation_edit.text()))))
         form.addRow(self.label('Organisation'), organisation_row)
         self.admin_layout.addWidget(server)
+        log_panel, log_layout = self._section('Server log')
+        log_note = self.label('Recent server events: starts and stops, certificate renewals and refused requests. No report contents or codes are kept.')
+        log_note.setObjectName('muted')
+        log_layout.addWidget(log_note)
+        self.server_log = QTableWidget(0, 3)
+        self.server_log.setObjectName('serverLog')
+        self._style_table(self.server_log)
+        self.server_log.setFixedHeight(220)
+        self.server_log.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.server_log.setAccessibleName(self.t('Server log'))
+        self.server_log.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for column in (0, 2):
+            self.server_log.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        log_layout.addWidget(self.server_log)
+        self.server_log_empty = self.label('No server events yet')
+        self.server_log_empty.setObjectName('muted')
+        log_layout.addWidget(self.server_log_empty)
+        self.server_log.hide()
+        self.admin_layout.addWidget(log_panel)
         retention, form = self._form_section('Data retention')
         self.retention_boundary = QLabel()
         self.retention_boundary.setWordWrap(True)
@@ -1598,6 +1637,8 @@ class ServerWindow(QMainWindow):
             self.chart_range.setItemText(index, self.t(key))
         self.invitation_table.setHorizontalHeaderLabels([self.t(key) for key in ('Invitation', 'Expires', 'Uses left', 'Wrong guesses', 'Status', 'Actions')])
         self.admin_pending.setHorizontalHeaderLabels([self.t('Device'), self.t('Awaiting approval'), '', ''])
+        self.server_log.setHorizontalHeaderLabels([self.t(key) for key in ('Time', 'Event', 'Device')])
+        self.server_log.setAccessibleName(self.t('Server log'))
         self.fleet_group.setItemText(0, self.t('All groups'))
         locale = QLocale('vi_VN' if self.language == 'vi' else 'en_GB')
         self.setLocale(locale)
@@ -2137,6 +2178,7 @@ class ServerWindow(QMainWindow):
                   ('Deployment date', self._date(identity['deployment_date']) if identity.get('deployment_date') else missing),
                   ('Last seen', self._relative(device.get('last_received_at'))),
                   ('Client version', device.get('client_version') or missing),
+                  ('Last problem', self._problem_text(device.get('last_problem'))),
                   ('Coverage', coverage),
                   ('Tracking since', self._date(tracking) if tracking else missing)]
         def table(rows):
@@ -2676,7 +2718,8 @@ class ServerWindow(QMainWindow):
         client = self.client
         invitation_offset = self._invitation_offset
         def work():
-            return dict(info=client.call('server_info'), invitations=client.call('invitations', limit=100, offset=invitation_offset), pending=client.call('pending_enrollments'))
+            return dict(info=client.call('server_info'), invitations=client.call('invitations', limit=100, offset=invitation_offset),
+                        pending=client.call('pending_enrollments'), log=client.call('server_log', limit=50))
         if not self._submit(work, self._server_info_finished):
             self._info_busy = False
 
@@ -2709,6 +2752,7 @@ class ServerWindow(QMainWindow):
         self.certificate_warning.setText(self.t('Lifetime Server could not renew its security certificate. The current one works until {date}. Check the server names under Administration.',
                                                 date=self._date(certificate['expires'])) if failed and certificate.get('expires') else '')
         self.certificate_warning.setVisible(bool(self.certificate_warning.text()))
+        self._render_server_log(result.get('log') or [])
         self.server_name.setText(info['name'])
         selections = {}
         for table in (self.invitation_table, self.admin_pending):
@@ -2776,6 +2820,28 @@ class ServerWindow(QMainWindow):
                     table.selectRow(index)
                     break
         self._admin_selection_changed()
+
+    def _problem_text(self, problem):
+        """'No answer (timeout) · 3 h ago': a category the computer or server recorded, never error text."""
+        if not problem:
+            return self.t('None reported')
+        kind = str(problem.get('kind'))
+        label = (self.t('Server error {code}', code=kind[5:]) if kind.startswith('http-')
+                 else self.t(PROBLEM_TEXT.get(kind, 'Unknown')))
+        return label + ' · ' + self._relative(problem.get('at'))
+
+    def _render_server_log(self, log):
+        self.server_log.setRowCount(len(log))
+        for index, entry in enumerate(log):
+            event = self.t(LOG_TEXT.get((entry.get('kind'), entry.get('category')), 'Unknown'))
+            if entry.get('count', 1) > 1:
+                event = self.t('{event} ({count} times)', event=event, count=entry['count'])
+            for column, value in enumerate((self._timestamp(entry.get('time')), event, entry.get('name') or entry.get('device_id') or '')):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.server_log.setItem(index, column, item)
+        self.server_log.setVisible(bool(log))
+        self.server_log_empty.setVisible(not log)
 
     def _certificate_text(self, certificate):
         """'8 Dec 2027 · renewed automatically' plus the names it covers; None when unknown."""

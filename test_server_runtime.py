@@ -10,6 +10,7 @@ import copy
 import datetime as dt
 import http.client
 import io
+import json
 from pathlib import Path
 import secrets
 import socket
@@ -382,6 +383,28 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn('capabilities', decode(body))
         # Advertising never loosens validation: an unknown field is still refused as a whole.
         self.status(400, 'sync', dict(self.message(request, seq=3), unknown=True), credential)
+
+    def test_server_log_and_last_problem_from_refused_reports_without_secrets(self):
+        request, credential = self.pair()
+        self.status(400, 'sync', dict(self.message(request), records=[{'seq': 1, 'secret-field': 'payload-text'}]), credential)
+        self.status(403, 'sync', self.message(request), 'y' * 43)
+        bad = self.enrollment(code='LTS-0000-0000-0000-0000-0000')
+        self.status(403, 'enroll', bad)
+        device = self.admin.call('device', device_id=request['device_id'])
+        self.assertEqual(device['last_problem']['kind'], 'rejected')
+        log = self.admin.call('server_log')
+        self.assertEqual([(e['kind'], e['category'], e['device_id']) for e in log[:3]],
+                         [('enrollment-refused', 'code', None), ('report-rejected', 'credential', None),
+                          ('report-rejected', 'invalid', request['device_id'])])
+        self.assertEqual(log[-1]['kind'], 'server-started')
+        text = json.dumps(log)
+        for secret in (credential, 'y' * 43, 'payload-text', request['poll_token'], 'LTS-0000'):
+            self.assertNotIn(secret, text)
+        self.runtime.stop()
+        self.runtime.start()
+        self.admin = AdminClient(self.root, urlsplit(self.runtime.admin_address).port, timeout=3)
+        kinds = [e['kind'] for e in self.admin.call('server_log', limit=3)]
+        self.assertEqual(kinds[:2], ['server-started', 'server-stopped'])
 
     def test_failed_renewal_keeps_the_current_certificate_and_warns(self):
         now = dt.datetime.now(dt.timezone.utc)

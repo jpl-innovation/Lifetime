@@ -50,14 +50,21 @@ class ReadingsV2Tests(unittest.TestCase):
         value['readings'] = dict(observed_at='2026-11-07T12:00:00Z', specs=dict(hardware={'fans': []}),
                                  health=dict(version=1))
         value['health'] = dict(version=1, detail={})
+        value['problem'] = dict(kind='http-503', at='2026-11-07T11:00:00Z')
         original = copy.deepcopy(value)
         self.assertEqual(without_extended(value, CAPABILITIES), value)
         only = without_extended(value, ('hardware',))
         self.assertEqual(only['history'], dict(daily={}))
         self.assertNotIn('detail', only['health'])
         self.assertEqual(only['readings'], dict(observed_at='2026-11-07T12:00:00Z', specs=dict(hardware={'fans': []})))
+        self.assertNotIn('problem', only)
         legacy = without_extended(value)
         self.assertEqual(legacy['readings'], dict(observed_at='2026-11-07T12:00:00Z', specs={}))
+        self.assertEqual(validate_sync(dict(message(), problem=dict(kind='timeout', at='2026-11-07T11:00:00Z')))['problem']['kind'], 'timeout')
+        for problem in (dict(kind='http-999', at='2026-11-07T11:00:00Z'), dict(kind='text', at='2026-11-07T11:00:00Z'),
+                        dict(kind='timeout', at='2026-11-07T11:00:00'), dict(kind='timeout', at='2026-11-07T11:00:00Z', detail='x')):
+            with self.subTest(problem=problem), self.assertRaises(ProtocolError):
+                validate_sync(dict(message(), problem=problem))
         self.assertEqual(value, original)
         self.assertEqual(validate_capabilities(['history.detail', 'live.v2']), ['history.detail', 'live.v2'])
         for bad in ('hardware', ['Hardware'], [''], ['x'*33], ['a']*33, [1]):

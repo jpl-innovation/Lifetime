@@ -73,6 +73,9 @@ class StoreTests(unittest.TestCase):
         for table in ('invitations', 'guess_ips', 'events'):
             self.store._db.execute('DROP TABLE ' + table)
         self.store._db.execute('ALTER TABLE devices DROP COLUMN client_version')
+        self.store._db.execute('ALTER TABLE devices DROP COLUMN last_problem')
+        self.store._db.execute('ALTER TABLE devices DROP COLUMN last_problem_at')
+        self.store._db.execute('DROP TABLE server_log')
         self.store._db.execute('ALTER TABLE settings DROP COLUMN server_names')
         self.store._db.execute('ALTER TABLE settings DROP COLUMN organisation')
         self.store._db.execute('ALTER TABLE settings DROP COLUMN reporting_interval')
@@ -1072,6 +1075,49 @@ class SpecsControlTests(unittest.TestCase):
         self.store.server_names([])
         self.store.restore(backup)
         self.assertEqual(self.store.server_names()['names'], ['lifetime.school.local', '192.0.2.10'])
+
+    def test_last_problem_server_log_and_migration_from_v8(self):
+        import lifetime_protocol as protocol
+        self.online()
+        problem = dict(kind='timeout', at='2026-11-15T01:00:00Z')
+        self.sync(problem=problem)
+        self.assertEqual(self.store.get_device(self.device)['last_problem'], dict(kind='timeout', at='2026-11-15T01:00:00.000000+00:00'))
+        self.sync(problem=dict(kind='refused', at='2026-11-14T01:00:00Z'))         # an older report never replaces a newer one
+        self.assertEqual(self.store.list_devices()[0]['last_problem']['kind'], 'timeout')
+        for bad in (dict(kind='Timeout', at=problem['at']), dict(kind='http-999', at=problem['at']),
+                    dict(kind='timeout', at='yesterday'), dict(kind='timeout'), dict(problem, text='secret')):
+            with self.subTest(bad=bad), self.assertRaises(protocol.ProtocolError):
+                self.sync(problem=bad)
+        # Refusals: attached to a computer only when its credential proves it; otherwise anonymous.
+        self.store.note_refused('/v1/sync', 'invalid', self.device, self.credential)
+        self.assertEqual(self.store.get_device(self.device)['last_problem']['kind'], 'rejected')
+        self.store.note_refused('/v1/sync', 'invalid', self.device, 'x' * 43)
+        self.store.note_refused('/v1/sync', 'invalid', self.device, 'x' * 43)
+        self.store.note_refused('/v1/enroll', 'code')
+        log = self.store.server_log()
+        self.assertEqual([(e['kind'], e['category'], e['device_id'], e['count']) for e in log],
+                         [('enrollment-refused', 'code', None, 1), ('report-rejected', 'invalid', None, 2),
+                          ('report-rejected', 'invalid', self.device, 1)])
+        self.assertNotIn(self.credential, json.dumps(log))
+        with self.assertRaises(StoreError):
+            self.store.log_event('report-rejected', 'free text')
+        for _ in range(storage.MAX_LOG + 5):
+            self.store.log_event('server-started' if _ % 2 else 'server-stopped')
+        self.assertLessEqual(len(self.store.server_log(limit=500)) + len(self.store.server_log(limit=500, offset=500)), storage.MAX_LOG + 1)
+        backup = self.root/'problem-backup.sqlite'
+        self.store.backup(backup)
+        self.store.restore(backup)
+        self.assertEqual(self.store.get_device(self.device)['last_problem']['kind'], 'rejected')
+        # A version 8 database gains the columns and the log on open.
+        self.store._db.execute('ALTER TABLE devices DROP COLUMN last_problem')
+        self.store._db.execute('ALTER TABLE devices DROP COLUMN last_problem_at')
+        self.store._db.execute('DROP TABLE server_log')
+        self.store._db.execute('PRAGMA user_version=8')
+        self.store.close()
+        self.store = Store(self.path)
+        self.assertIsNone(self.store.get_device(self.device)['last_problem'])
+        self.assertEqual(self.store.server_log(), [])
+        self.store.backup(backup)
 
     def test_migrate_v6_and_backup_with_commands(self):
         self.online()

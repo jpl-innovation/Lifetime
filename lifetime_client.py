@@ -5,6 +5,7 @@ step() performs at most one request and otherwise returns redacted local status.
 No constructor, import or standalone capture initiates any network request.
 Commands are persisted and acknowledged before any power action is executed.
 """
+import contextlib
 import http.client
 import math
 import secrets
@@ -237,6 +238,8 @@ class SyncClient:
         if time.time() < state.get('legacy_server_until', 0):
             accepted = []
         self._full = message
+        if state.get('problem'):        # why the last attempt failed, for the server's device page (category only)
+            message = dict(message, problem=state['problem'])
         message = protocol.without_extended(message, accepted)
         self._sent_extended = message != protocol.without_extended(message)
         response = tls.request_json(state['bundle'], '/v1/sync', message,
@@ -297,6 +300,7 @@ class SyncClient:
                         current.update(last_sync=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now)),
                                        status='connected', enrollment=None, enrollment_sent=True,
                                        last_error=None, last_error_at=None)
+                        current.pop('problem', None)    # told the server (or it cannot take it); either way it is history
                         current['bundle']['code'] = 'enrolled'
                         if 'reporting_interval' in response:
                             current['interval'] = response['reporting_interval']
@@ -334,6 +338,9 @@ class SyncClient:
                     delay = min(MAX_BACKOFF, 2**(current['failures']-1))
                     current.update(next_attempt=now+delay, status='unreachable',
                                    last_error=error_kind(error), last_error_at=int(now))
+                    with contextlib.suppress(protocol.ProtocolError):
+                        current['problem'] = protocol.validate_problem(dict(
+                            kind=current['last_error'], at=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now))))
                     if (current['last_error'] in LOST and current['failures'] >= 2
                             and time.monotonic() >= self._rediscover_at):
                         lost = dict(current['bundle'])

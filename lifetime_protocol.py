@@ -60,9 +60,26 @@ def validate_identity(value):
         raise ProtocolError(str(error)) from None
 
 
+# Why a computer could not report, as the secret-free category it shows on its Connect page (lifetime_client.error_kind).
+PROBLEMS = ('certificate', 'expired', 'hostname', 'tls', 'name', 'refused', 'timeout', 'dropped', 'network',
+            'protocol', 'internal')
+
+
+def validate_problem(value):
+    """The computer's last failed attempt: a fixed category word and when it happened, never error text."""
+    _object(value, ('kind', 'at'), ('kind', 'at'))
+    kind = value['kind']
+    if not isinstance(kind, str) or not (kind in PROBLEMS or re.fullmatch(r'http-[1-5][0-9]{2}', kind)):
+        raise ProtocolError('Invalid problem category')
+    timestamp(value['at'])
+    return value
+
+
 def validate_sync(message):
-    _object(message, ('version', 'device_id', 'policy_version', 'policy', 'records', 'history', 'readings', 'health', 'client_version', 'command_result'),
+    _object(message, ('version', 'device_id', 'policy_version', 'policy', 'records', 'history', 'readings', 'health', 'client_version', 'command_result', 'problem'),
             ('version', 'device_id', 'policy_version', 'policy', 'records'))
+    if 'problem' in message:
+        validate_problem(message['problem'])
     if type(message['version']) is not int or message['version'] != VERSION:
         raise ProtocolError('Unsupported protocol version')
     identifier(message['device_id'])
@@ -276,7 +293,7 @@ def validate_health_detail(detail):
 # reply ("capabilities"), but only to a computer that asked for the list with the request header
 # "Lifetime-Accept: capabilities", so an older computer never sees an unknown reply field.
 # A server that sends no list accepts the 1.1 format only.
-CAPABILITIES = ('history.detail', 'health.detail', 'hardware')
+CAPABILITIES = ('history.detail', 'health.detail', 'hardware', 'problem')
 
 
 def validate_capabilities(value):
@@ -299,6 +316,8 @@ def without_extended(message, capabilities=()):
     if 'hardware' not in capabilities and 'specs' in result.get('readings', {}):
         result['readings'] = dict(result['readings'], specs={
             k: v for k, v in result['readings']['specs'].items() if k != 'hardware'})
+    if 'problem' not in capabilities:
+        result.pop('problem', None)
     return result
 
 

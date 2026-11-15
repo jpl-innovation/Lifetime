@@ -17,7 +17,7 @@ class AdminClient:
         if operation not in ('live', 'devices', 'device', 'code', 'approve', 'deny', 'revoke', 'delete',
                              'send_command', 'cancel_command', 'wake', 'identity', 'retain', 'backup', 'restore', 'configuration', 'set_configuration', 'refresh', 'overview',
                              'invitation', 'invitations', 'revoke_invitation', 'fleet', 'server_info', 'pending_enrollments', 'organisation',
-                             'names'):
+                             'names', 'server_log'):
             raise ValueError('Unknown administrative operation')
         token = (self.directory / 'admin-token').read_text(encoding='ascii').strip()
         if not 32 <= len(token) <= 256 or any(ord(c) < 33 or ord(c) > 126 for c in token):

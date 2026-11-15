@@ -19,9 +19,9 @@ import tempfile
 import threading
 import uuid
 
-from lifetime_protocol import ProtocolError, number, validate_identity, validate_sync, validate_performance
+from lifetime_protocol import ProtocolError, number, validate_identity, validate_problem, validate_sync, validate_performance
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 APPLICATION_ID = 0x4C544D45
 MAX_BYTES = 1024 * 1024
 MAX_CODES = 1000
@@ -34,6 +34,13 @@ OVERDUE_SECONDS = 600
 LIVE_SILENCE_SECONDS = 30   # a computer that has been reporting live and goes quiet is shown offline this fast
 MAX_PAGE = 500
 DELTA_FIELDS = ('awake_seconds', 'measured_seconds', 'imported_seconds')
+MAX_LOG = 500
+# Server log: what happened, never request bodies, codes or credentials. Refusals carry only a category.
+LOG_KINDS = {'server-started': (None,), 'server-stopped': (None,), 'names-changed': (None,),
+             'certificate-renewed': ('expiry', 'names'), 'certificate-renewal-failed': (None,),
+             'report-rejected': ('invalid', 'credential', 'conflict', 'throttled'),
+             'enrollment-refused': ('invalid', 'code', 'conflict', 'throttled')}
+SERVER_PROBLEMS = ('rejected', 'conflict')      # what the server itself saw go wrong with a computer's report
 
 
 class StoreError(ValueError):
@@ -253,6 +260,14 @@ def _migrate(db):
             if 'server_names' not in {row[1] for row in db.execute('PRAGMA table_info(settings)')}:
                 db.execute("ALTER TABLE settings ADD COLUMN server_names TEXT NOT NULL DEFAULT '[]'")
             db.execute('PRAGMA user_version=8')
+        if version < 9:
+            columns = {row[1] for row in db.execute('PRAGMA table_info(devices)')}
+            for column in ('last_problem', 'last_problem_at'):
+                if column not in columns:
+                    db.execute(f'ALTER TABLE devices ADD COLUMN {column} TEXT')
+            db.execute('''CREATE TABLE IF NOT EXISTS server_log (event_id INTEGER PRIMARY KEY, time TEXT NOT NULL,
+                kind TEXT NOT NULL, category TEXT, device_id TEXT, count INTEGER NOT NULL DEFAULT 1 CHECK(count >= 1))''')
+            db.execute('PRAGMA user_version=9')
         db.commit()
     except BaseException:
         db.rollback()
@@ -494,6 +509,49 @@ class Store:
             if name is not None:
                 db.execute('UPDATE settings SET organisation=? WHERE singleton=1', (name.strip(),))
             return dict(organisation=db.execute('SELECT organisation FROM settings WHERE singleton=1').fetchone()[0])
+
+    @staticmethod
+    def _log(db, kind, category=None, device_id=None):
+        """Append to the bounded server log; the same event again within a minute only raises its count."""
+        if category not in LOG_KINDS[kind]:
+            raise StoreError('Invalid server log entry')
+        now = _stamp(_now())
+        last = db.execute('SELECT * FROM server_log ORDER BY event_id DESC LIMIT 1').fetchone()
+        if (last and (last['kind'], last['category'], last['device_id']) == (kind, category, device_id)
+                and (_now() - _time(last['time'])).total_seconds() < 60):
+            db.execute('UPDATE server_log SET count=count+1,time=? WHERE event_id=?', (now, last['event_id']))
+        else:
+            db.execute('INSERT INTO server_log(time,kind,category,device_id) VALUES (?,?,?,?)', (now, kind, category, device_id))
+            db.execute('DELETE FROM server_log WHERE event_id <= (SELECT MAX(event_id)-? FROM server_log)', (MAX_LOG,))
+
+    def log_event(self, kind, category=None):
+        with self._transaction() as db:
+            self._log(db, kind, category)
+
+    def note_refused(self, path, category, device_id=None, credential=None):
+        """Log a refused public request. Only a request whose credential proves which computer sent it
+        is attached to that computer (its "last problem"); anything else stays anonymous."""
+        kind = 'enrollment-refused' if path in ('/v1/enroll', '/v1/claim') else 'report-rejected'
+        with self._transaction() as db:
+            known = None
+            try:
+                if device_id is not None and credential is not None and kind == 'report-rejected':
+                    row = db.execute('SELECT credential_hash FROM devices WHERE device_id=?', (_identifier(device_id),)).fetchone()
+                    if row and row['credential_hash'] and hmac.compare_digest(row['credential_hash'], _hash(_secret(credential))):
+                        known = device_id
+            except (ProtocolError, AuthenticationError):
+                pass
+            if known and category in ('invalid', 'conflict'):
+                db.execute('UPDATE devices SET last_problem=?,last_problem_at=? WHERE device_id=?',
+                           ('rejected' if category == 'invalid' else 'conflict', _stamp(_now()), known))
+            self._log(db, kind, category, known)
+
+    def server_log(self, limit=100, offset=0):
+        _page(limit, offset)
+        with self._transaction() as db:
+            return [dict(row) for row in db.execute('''SELECT event_id,time,kind,category,server_log.device_id,count,
+                json_extract(devices.identity,'$.display_name') AS name FROM server_log LEFT JOIN devices USING(device_id)
+                ORDER BY event_id DESC LIMIT ? OFFSET ?''', (limit, offset))]
 
     def server_names(self, names=None):
         """Extra names and IPs for the server certificate (the configured address is always included)."""
@@ -766,6 +824,10 @@ class Store:
             db.execute('UPDATE devices SET retired_seq=?,last_received_at=? WHERE device_id=?', (retired_seq, received, device_id))
             if 'client_version' in message:
                 db.execute('UPDATE devices SET client_version=? WHERE device_id=?', (message['client_version'], device_id))
+            if 'problem' in message:    # why its last attempt failed, by its own clock; a newer record wins
+                at = _stamp(_time(message['problem']['at']))
+                db.execute('''UPDATE devices SET last_problem=?,last_problem_at=? WHERE device_id=?
+                    AND (last_problem_at IS NULL OR last_problem_at<=?)''', (message['problem']['kind'], at, device_id, at))
             db.execute("UPDATE requests SET poll_hash=NULL,status='completed' WHERE device_id=? AND status='approved'", (device_id,))
             interval = db.execute('SELECT reporting_interval FROM settings WHERE singleton=1').fetchone()[0]
             refresh = bool(row['refresh_requested'])
@@ -815,6 +877,7 @@ class Store:
                   'record_count': count, 'coverage': 'unknown',
                   'retained_usage': usage}
         result['client_version'] = row['client_version']
+        result['last_problem'] = dict(kind=row['last_problem'], at=row['last_problem_at']) if row['last_problem'] else None
         result['health'] = json.loads(row['health']) if row['health'] and policy.get('health') else None
         result['unstable'] = bool(result['health'] and (result['health'].get('crashes_30d') or 0) >= 3)
         readings = json.loads(row['readings']) if row['readings'] and policy.get('resources') else {}
@@ -909,6 +972,7 @@ class Store:
                 last_received_at,latest_seq,latest_record,history_received_at,readings_received_at,
                 retired_seq,retained_before,history IS NOT NULL AS history_available,
                 readings,readings IS NOT NULL AS readings_available,health,health_received_at,health IS NOT NULL AS health_available,client_version,
+                last_problem,last_problem_at,
                 json_extract(history,?) AS today FROM devices'''
                               + where + ' ORDER BY ' + order + ' LIMIT ? OFFSET ?',
                               (f'$.daily."{day}"', *parameters, limit, offset)).fetchall()
@@ -1111,6 +1175,10 @@ class Store:
             _time(row['created_at'])
             if row['last_received_at']:
                 _time(row['last_received_at'])
+            if row['last_problem'] is not None or row['last_problem_at'] is not None:
+                if row['last_problem'] not in SERVER_PROBLEMS:
+                    validate_problem(dict(kind=row['last_problem'], at=row['last_problem_at']))
+                _time(row['last_problem_at'])
             base = {'version': 1, 'device_id': row['device_id'],
                     'policy_version': row['policy_version'], 'policy': policy, 'records': []}
             if row['latest_record']:
@@ -1170,6 +1238,13 @@ class Store:
                 _identifier(row['device_id'])
             if row['kind'] not in ('enrollment-pending', 'invitation-used', 'revoked', 'command-pending', 'command-delivered', 'command-done', 'command-failed', 'command-cancelled', 'command-expired', 'wake'):
                 raise StoreError('Invalid event')
+            _time(row['time'])
+        for row in db.execute('SELECT * FROM server_log'):
+            if (row['kind'] not in LOG_KINDS or row['category'] not in LOG_KINDS[row['kind']]
+                    or type(row['count']) is not int or row['count'] < 1):
+                raise StoreError('Invalid server log entry')
+            if row['device_id'] is not None:
+                _identifier(row['device_id'])
             _time(row['time'])
         for row in db.execute('SELECT * FROM commands'):
             _identifier(row['command_id'])

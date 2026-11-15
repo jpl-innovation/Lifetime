@@ -242,6 +242,7 @@ _ADMIN = {
     'pending_enrollments': ('pending_enrollments', (), ('limit', 'offset')),
     'organisation': ('organisation', (), ('name',)),
     'names': (None, ('names',), ()),
+    'server_log': ('server_log', (), ('limit', 'offset')),
 }
 
 
@@ -327,7 +328,18 @@ class _Handler(BaseHTTPRequestHandler):
             raise ProtocolError('Invalid JSON object')
         return value
 
+    def _refused(self, category, credential, value):
+        """Note a refused computer request in the server log: a category only, never the payload or a secret."""
+        if self.server.admin or self.path not in ('/v1/enroll', '/v1/claim', '/v1/sync', '/v1/live', '/v1/leave'):
+            return
+        if category == 'credential' and self.path in ('/v1/enroll', '/v1/claim'):
+            category = 'code'
+        device = value.get('device_id') if isinstance(value, dict) else None
+        with contextlib.suppress(Exception):
+            self.server.runtime._store.note_refused(self.path, category, device, credential)
+
     def _dispatch(self):
+        credential = value = None
         try:
             runtime = self.server.runtime
             if self.server.admin:
@@ -390,14 +402,20 @@ class _Handler(BaseHTTPRequestHandler):
                 result = dict(result, capabilities=list(CAPABILITIES))     # only a computer that asked gets the new field
             self._reply(200, result)
         except _HTTPError as error:
+            if error.status in (400, 401, 413):
+                self._refused('credential' if error.status == 401 else 'invalid', credential, value)
             self.send_error(error.status)
         except ThrottledError:
+            self._refused('throttled', credential, value)
             self.send_error(429)
         except AuthenticationError:
+            self._refused('credential', credential, value)
             self.send_error(403)
         except ConflictError:
+            self._refused('conflict', credential, value)
             self.send_error(409)
         except (ProtocolError, StoreError, TypeError, ValueError, RecursionError):
+            self._refused('invalid', credential, value)
             self.send_error(400)
         except (TimeoutError, ConnectionError):
             self.send_error(408)
@@ -509,6 +527,7 @@ class ServerRuntime:
                 self._maintenance_stop.clear()
                 self._maintenance = threading.Thread(target=self._maintain, name='Lifetime-certificate', daemon=True)
                 self._maintenance.start()
+                self._store.log_event('server-started')
                 # Loopback tests never multicast. LAN/VPN installations announce
                 # only public service metadata; failure leaves manual pairing.
                 try:
@@ -635,7 +654,11 @@ class ServerRuntime:
                 with contextlib.suppress(OSError):
                     staged.unlink()
                 self.certificate['warning'] = 'renewal-failed'
+                with contextlib.suppress(Exception):
+                    self._store.log_event('certificate-renewal-failed')
                 return False
+            with contextlib.suppress(Exception):
+                self._store.log_event('certificate-renewed', 'names' if set(info['names']) != set(names) else 'expiry')
             renewed = tls.certificate_info(pem)
             self.certificate.update(expires=renewed['expires'].isoformat(), names=renewed['names'],
                                     warning=None, renewed_at=now.isoformat())
@@ -652,7 +675,10 @@ class ServerRuntime:
         """Extra names and IPs for the certificate (the address name always comes first); renews now."""
         if not isinstance(names, list) or len(names) > tls.MAX_NAMES:
             raise ProtocolError('Invalid server names')
-        self._store.server_names(tls.server_names([self._hostname, *names])[1:])
+        before = self._store.server_names()['names']
+        after = self._store.server_names(tls.server_names([self._hostname, *names])[1:])['names']
+        if after != before:
+            self._store.log_event('names-changed')
         self._renew_certificate()
         return self.server_info()
 
@@ -675,9 +701,13 @@ class ServerRuntime:
                 server.close_connections()
             for server in self._servers:
                 server.server_close()
+            started = bool(self._servers)
             self._servers.clear()
             self._threads.clear()
             if self._store is not None:
+                if started:
+                    with contextlib.suppress(Exception):
+                        self._store.log_event('server-stopped')
                 self._store.close()
                 self._store = None
             self._token = None
