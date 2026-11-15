@@ -39,7 +39,8 @@ MAX_LOG = 500
 LOG_KINDS = {'server-started': (None,), 'server-stopped': (None,), 'names-changed': (None,),
              'certificate-renewed': ('expiry', 'names'), 'certificate-renewal-failed': (None,),
              'report-rejected': ('invalid', 'credential', 'conflict', 'throttled'),
-             'enrollment-refused': ('invalid', 'code', 'conflict', 'throttled')}
+             'enrollment-refused': ('invalid', 'code', 'conflict', 'throttled'),
+             'admin-pipe-unavailable': (None,), 'restore-applied': (None,), 'restore-failed': (None,)}
 SERVER_PROBLEMS = ('rejected', 'conflict')      # what the server itself saw go wrong with a computer's report
 
 
@@ -1613,7 +1614,18 @@ class Store:
             command_id, now = str(uuid.uuid4()), _stamp(_now())
             db.execute("INSERT INTO commands VALUES (?,?,?,'pending',?,?,'')", (command_id, device_id, action, now, now))
             self._event(db, device_id, 'command-pending')
-            return dict(db.execute('SELECT * FROM commands WHERE command_id=?', (command_id,)).fetchone())
+            # The id and expiry travel with the command; the computer refuses it after the same ten minutes.
+            return dict(db.execute('SELECT * FROM commands WHERE command_id=?', (command_id,)).fetchone(),
+                        expires_at=_stamp(_time(now) + dt.timedelta(minutes=10)))
+
+    def cancel_power_commands(self):
+        """Cancel every sleep, restart or shutdown that has not finished (a role that allowed it was taken away)."""
+        with self._transaction() as db:
+            rows = db.execute("SELECT command_id,device_id FROM commands WHERE action!='refresh' AND status IN ('pending','delivered')").fetchall()
+            for row in rows:
+                db.execute("UPDATE commands SET status='cancelled',updated_at=? WHERE command_id=?", (_stamp(_now()), row['command_id']))
+                self._event(db, row['device_id'], 'command-cancelled')
+            return len(rows)
 
     def cancel_command(self, command_id):
         _identifier(command_id)

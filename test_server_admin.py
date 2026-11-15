@@ -30,6 +30,18 @@ class AdminClientTests(unittest.TestCase):
                 with self.assertRaises(FileNotFoundError, msg=operation):     # past the allow-list, at the token
                     client.call(operation)
 
+    def test_every_server_operation_has_a_role_rule(self):
+        # Default deny: an operation in no class is refused to everyone (Admin included) and fails here first.
+        # test_server_access runs the full role x operation matrix over the same list.
+        import lifetime_access as access
+        import lifetime_server
+        from lifetime_admin import OPERATIONS
+        for operation in lifetime_server._ADMIN:
+            self.assertEqual(sum(operation in group for group in (access.READ, access.AUDIT_READ, access.OPERATE,
+                                                                  access.ADMINISTER)), 1, operation)
+            self.assertIn(operation, access.PERMISSIONS['admin'], operation)
+        self.assertEqual(OPERATIONS, set(lifetime_server._ADMIN))
+
     def test_no_implicit_network_and_invalid_token(self):
         with tempfile.TemporaryDirectory() as root, patch('lifetime_admin.http.client.HTTPConnection') as factory:
             client = AdminClient(root, 8450)

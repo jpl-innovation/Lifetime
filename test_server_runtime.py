@@ -750,6 +750,10 @@ class PowerRuntimeTests(unittest.TestCase):
                 ('cancel_command', 'cancel_command', dict(command_id=str(uuid.uuid4()))),
                 ('wake', 'wake', dict(device_id=str(uuid.uuid4())))):
             with patch.object(self.runtime._store, method, return_value={'ok': True}) as call:
+                if operation == 'wake' and sys.platform != 'win32':     # power needs a named Windows account
+                    with self.assertRaisesRegex(ValueError, 'HTTP 403'):
+                        self.admin.call(operation, **args)
+                    continue
                 self.assertEqual(self.admin.call(operation, **args), {'ok': True})
                 call.assert_called_once_with(**args)
 

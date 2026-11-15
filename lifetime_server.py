@@ -24,8 +24,11 @@ import sys
 import threading
 import time
 import datetime as dt
+import uuid
 
+import lifetime_access as access
 import lifetime_permissions as permissions
+import lifetime_server_backup as archive
 from lifetime_protocol import CAPABILITIES, MAX_BYTES, ProtocolError, canonical, decode
 from lifetime_server_store import (AuthenticationError, ConflictError, Store,
                                    StoreError, ThrottledError)
@@ -38,7 +41,11 @@ BODY_TIMEOUT = 10
 CERTIFICATE_CHECK = 3600    # seconds between renewal checks while the server runs
 MONITOR_TICK = 15           # seconds between alert evaluations
 DATABASES = ('server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm',
-             'monitoring.sqlite', 'monitoring.sqlite-wal', 'monitoring.sqlite-shm')
+             'monitoring.sqlite', 'monitoring.sqlite-wal', 'monitoring.sqlite-shm',
+             'access.sqlite', 'access.sqlite-wal', 'access.sqlite-shm')
+POWER_WINDOW = 600          # seconds over which remote power requests are counted
+POWER_PER_DEVICE = 3        # power commands (and Turn on) per computer in that window
+POWER_PER_ACTOR = 10        # per named administrator or operator in that window
 
 
 def monitoring_backup(path):
@@ -281,7 +288,29 @@ _ADMIN = {
     'delete_check': ('monitor.delete_check', ('check_id',), ()),
     'check_scopes': ('monitor.check_scopes', (), ()),
     'set_check_scopes': ('monitor.set_check_scopes', ('scopes',), ()),
+    # Access: who is calling, roles, the audit trail and archive backups (methods of the runtime).
+    'whoami': (None, (), ()),
+    'roles': (None, (), ()),
+    'set_role': (None, ('principal', 'role'), ()),
+    'delete_role': (None, ('sid',), ()),
+    'audit': (None, (), ('limit', 'before')),
+    'verify_audit': (None, (), ()),
+    'backup_archive': (None, ('path',), ()),
+    'verify_backup': (None, ('path',), ()),
+    'stage_restore': (None, ('path',), ()),
 }
+
+
+def _status(error):
+    """The HTTP status for an error, on either admin channel (never its text)."""
+    if isinstance(error, _HTTPError):
+        return error.status
+    for kind, status in ((ThrottledError, 429), (AuthenticationError, 403), (ConflictError, 409),
+                         ((ProtocolError, StoreError, TypeError, ValueError, RecursionError), 400),
+                         ((TimeoutError, ConnectionError), 408)):
+        if isinstance(error, kind):
+            return status
+    return 500
 
 
 def _fields(value, required, optional=()):
@@ -407,28 +436,7 @@ class _Handler(BaseHTTPRequestHandler):
             credential = self._bearer() if not self.server.admin and self.path in ('/v1/sync', '/v1/live', '/v1/leave') else None
             value = self._body()
             if self.server.admin:
-                method, required, optional = _ADMIN[operation]
-                _fields(value, required, optional)
-                if operation in ('backup', 'restore'):
-                    runtime._check_backup_path(value['path'])
-                if operation == 'server_info':
-                    result = runtime.server_info()
-                elif operation in ('backup', 'restore'):
-                    result = getattr(runtime, operation)(value['path'])
-                elif operation == 'names':
-                    result = runtime.set_names(**value)
-                elif operation == 'invitation':
-                    result = runtime._store.create_invitation(runtime.fingerprint, **value)
-                elif method.startswith('monitor.'):
-                    result = getattr(runtime.monitor, method[8:])(**value)
-                else:
-                    result = getattr(runtime._store, method)(**value)
-                    if operation == 'delete':
-                        runtime.monitor.forget(value['device_id'])
-                    elif operation == 'overview':      # alert badges ride along with the counters
-                        result = dict(result, alerts=runtime.monitor.summary())
-                    elif operation == 'device':
-                        result = dict(result, alerts=runtime.monitor.device_alerts(value['device_id']))
+                result = runtime.admin_call(operation, value, access.TOKEN_ACTOR)
             elif self.path == '/v1/enroll':
                 result = runtime._store.enroll(value, peer_ip=self.client_address[0])
             elif self.path == '/v1/claim':
@@ -487,6 +495,10 @@ class ServerRuntime:
         self._watcher = None
         self.monitor = None
         self.checker = None
+        self.access = None
+        self._pipe = None
+        self._access_lock = threading.Lock()     # role changes and power commands: a revocation is never overtaken
+        self._power_log = []                     # (monotonic time, device, actor SID) of recent power requests
         self.directory = Path(directory).absolute()
         self.address, self._hostname, _ = tls._address(address)
         for number in (port, admin_port):
@@ -523,7 +535,7 @@ class ServerRuntime:
             raise ProtocolError('Invalid backup path')
         protected = [self.directory / name for name in
                      ('admin-token', 'server-key.pem', 'server-cert.pem', 'server-cert.new.pem',
-                      'server-cert.previous.pem', 'alert-secrets.bin', *DATABASES)]
+                      'server-cert.previous.pem', 'alert-secrets.bin', *DATABASES, *archive.RESERVED)]
         for path in (Path(value).resolve(), monitoring_backup(Path(value).resolve())):
             if any(path == item.resolve() or
                    (path.exists() and item.exists() and os.path.samefile(path, item))
@@ -550,6 +562,141 @@ class ServerRuntime:
         self._renew_certificate()       # the restored names may differ
         return dict(result, monitoring='restored' if snapshot is not None else 'not-included')
 
+    # ---- one path for every admin request, whichever channel it came on ----
+
+    def admin_call(self, operation, value, identity):
+        """Run one admin operation for a caller its channel has already identified (a Windows identity from the pipe,
+        or ``access.TOKEN_ACTOR`` for the token). Fields are checked, the role must allow the operation (default
+        deny), and every state-changing or refused request is written to the audit trail with its result."""
+        if not isinstance(operation, str) or operation not in _ADMIN:
+            raise _HTTPError(404)
+        method, required, optional = _ADMIN[operation]
+        roles = self.access.roles_for(identity)
+        target, correlation = access.target_of(value), str(uuid.uuid4())
+        if operation not in access.operations(roles):       # before any validation: a refused caller learns nothing
+            self.access.record(identity, roles, operation, target, 'denied', correlation)
+            raise _HTTPError(403)
+        _fields(value, required, optional)
+        if not access.state_changing(operation):
+            return self._execute(operation, method, value, identity)
+        if operation == 'acknowledge' and identity.get('sid'):
+            value = dict(value, by=identity['name'][:64])        # the Windows account, never a name the client typed
+        power = operation == 'wake' or (operation == 'send_command' and value.get('action') != 'refresh')
+        try:
+            with self._access_lock if power or operation in ('set_role', 'delete_role') else contextlib.nullcontext():
+                if power:
+                    roles = self._power_gate(operation, value, identity)
+                result = self._execute(operation, method, value, identity)
+        except Exception as error:
+            self.access.record(identity, roles, operation, target, 'failed-%d' % _status(error), correlation)
+            raise
+        if operation == 'send_command' and isinstance(result, dict) and result.get('command_id'):
+            correlation = result['command_id']
+        try:
+            self.access.record(identity, roles, operation, target, 'ok', correlation)
+        except Exception:
+            if power and operation == 'send_command':       # an unrecorded remote command does not go out
+                with contextlib.suppress(Exception):
+                    self._store.cancel_command(correlation)
+            raise
+        return result
+
+    def _power_gate(self, operation, value, identity):
+        """Remote power needs a named Windows account whose role still allows it now (checked under the same lock as
+        role changes), and stays within the per-computer and per-account rate limits."""
+        if not identity.get('sid'):
+            raise _HTTPError(403)       # the shared token cannot say who is asking
+        roles = self.access.roles_for(identity)
+        if operation not in access.operations(roles):
+            raise _HTTPError(403)
+        now = time.monotonic()
+        self._power_log = [entry for entry in self._power_log if now - entry[0] < POWER_WINDOW]
+        device = value.get('device_id')
+        if (sum(entry[1] == device for entry in self._power_log) >= POWER_PER_DEVICE
+                or sum(entry[2] == identity['sid'] for entry in self._power_log) >= POWER_PER_ACTOR):
+            raise ThrottledError('Too many remote power requests')
+        self._power_log.append((now, device, identity['sid']))
+        return roles
+
+    def _execute(self, operation, method, value, identity):
+        if operation in ('backup', 'restore', 'backup_archive', 'verify_backup', 'stage_restore'):
+            self._check_backup_path(value['path'])
+        if operation == 'server_info':
+            return self.server_info()
+        if operation in ('backup', 'restore'):
+            return getattr(self, operation)(value['path'])
+        if operation == 'names':
+            return self.set_names(**value)
+        if operation == 'invitation':
+            return self._store.create_invitation(self.fingerprint, **value)
+        if operation == 'whoami':
+            return self.whoami(identity)
+        if operation == 'roles':
+            return self.access.roles()
+        if operation == 'set_role':
+            return self.set_role(identity, **value)
+        if operation == 'delete_role':
+            return self.delete_role(**value)
+        if operation == 'audit':
+            return self.access.audit(**value)
+        if operation == 'verify_audit':
+            return self.access.verify()
+        if operation in ('backup_archive', 'verify_backup', 'stage_restore'):
+            if operation == 'backup_archive':
+                return archive.create(self, value['path'])
+            if operation == 'verify_backup':
+                return archive.verify(value['path'], self.directory)
+            return archive.stage(self.directory, value['path'])
+        if method.startswith('monitor.'):
+            return getattr(self.monitor, method[8:])(**value)
+        result = getattr(self._store, method)(**value)
+        if operation == 'delete':
+            self.monitor.forget(value['device_id'])
+        elif operation == 'overview':      # alert badges ride along with the counters
+            result = dict(result, alerts=self.monitor.summary())
+        elif operation == 'device':
+            result = dict(result, alerts=self.monitor.device_alerts(value['device_id']))
+        return result
+
+    def whoami(self, identity):
+        roles = self.access.roles_for(identity)
+        return dict(name=identity.get('name'), sid=identity.get('sid'), channel=identity.get('channel', 'pipe'),
+                    roles=sorted(roles), role=access.role_label(roles), builtin=access.builtin_admin(identity),
+                    operations=sorted(access.operations(roles) & set(_ADMIN)))
+
+    def set_role(self, identity, principal, role):
+        """Give a Windows account or group a role (resolved to its SID here, never trusted from the dashboard).
+        Lowering or removing a role that allowed remote power cancels every power command still waiting."""
+        if sys.platform != 'win32':
+            raise ProtocolError('Roles are for Windows accounts')
+        import lifetime_pipe
+        sid, name, kind = lifetime_pipe.lookup_account(principal)
+        previous = self.access.set_role(sid, name, kind, role, identity.get('name') or 'unknown')
+        if previous in ('admin', 'operator') and role not in ('admin', 'operator'):
+            self._store.cancel_power_commands()
+        return self.access.roles()
+
+    def delete_role(self, sid):
+        if self.access.delete_role(sid) in ('admin', 'operator'):
+            self._store.cancel_power_commands()
+        return self.access.roles()
+
+    def _pipe_request(self, identity, raw):
+        """A request on the Windows pipe: {operation, arguments} -> {status, result}. The identity is the one Windows
+        reported for the pipe's client; nothing in the request can change it."""
+        identity = dict(identity, channel='pipe')
+        try:
+            request = decode(raw)
+            if (not isinstance(request, dict) or set(request) != {'operation', 'arguments'}
+                    or not isinstance(request['operation'], str)):
+                raise ProtocolError('Invalid admin request')
+            reply = canonical(dict(status=200, result=self.admin_call(request['operation'], request['arguments'], identity)))
+        except Exception as error:
+            reply = canonical(dict(status=_status(error)))
+        if len(reply) > MAX_BYTES:
+            reply = canonical(dict(status=413))
+        return reply
+
     def start(self):
         with self._lock:
             if self._servers:
@@ -558,6 +705,7 @@ class ServerRuntime:
                 self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
                 _protect_directory(self.directory)
                 self._token = _admin_token(self.directory / 'admin-token')
+                staged = archive.prepare_staged(self.directory)     # a restore waiting for this start: key first
                 context, bundle = _certificate(self.directory, self.address)
                 for name in DATABASES:
                     path = self.directory / name
@@ -568,10 +716,15 @@ class ServerRuntime:
                     else:
                         _regular(path)
                         tls.protect_private(path)
+                self.access = access.Access(self.directory / 'access.sqlite')
                 self._store = Store(self.directory / 'server.sqlite')
                 from lifetime_monitor import Monitor
                 self.monitor = Monitor(self.directory / 'monitoring.sqlite', self._store, clock=self.clock,
                                        server_name=socket.gethostname()[:63]).start()
+                if staged == 'failed':
+                    self._store.log_event('restore-failed')
+                elif staged is not None:
+                    archive.finish_staged(self, staged)        # before any listener opens
                 if self._renew_certificate():       # due, or the names changed: same key, new certificate
                     context, bundle = _certificate(self.directory, self.address)
                 self.fingerprint = bundle['fingerprint']
@@ -593,6 +746,8 @@ class ServerRuntime:
                 self.monitor.blocked_ports = {admin.server_port}     # checks never reach the admin listener
                 self.checker = self.monitor.attach_checker(Checker()).start()
                 self._validate_certificate(context, bundle)
+                if sys.platform == 'win32':
+                    self._start_pipe(admin.server_port)
                 for server in self._servers:
                     thread = threading.Thread(target=server.serve_forever,
                                               kwargs={'poll_interval': 0.05},
@@ -621,6 +776,18 @@ class ServerRuntime:
             except BaseException:
                 self.stop()
                 raise
+
+    def _start_pipe(self, port):
+        """The identity-bound admin channel. If it cannot start (for example another program took its name first),
+        the server still runs with the token channel only, and the server log says so."""
+        import lifetime_pipe
+        try:
+            own = lifetime_pipe.current_identity()['sid']
+            self._pipe = lifetime_pipe.PipeServer(lifetime_pipe.pipe_name(port), self._pipe_request,
+                                                  lambda: self.access.pipe_descriptor(own)).start()
+        except OSError:
+            self._pipe = None
+            self._store.log_event('admin-pipe-unavailable')
 
     def _refresh_host_readings(self):
         """Hardware probes take seconds, so they run aside; requests return the last result."""
@@ -778,6 +945,9 @@ class ServerRuntime:
             if self.checker is not None:
                 self.checker.stop()
                 self.checker = None
+            if self._pipe is not None:
+                self._pipe.stop()
+                self._pipe = None
             if self.hub is not None:
                 self.hub.stop()
                 self.hub = None
@@ -804,21 +974,48 @@ class ServerRuntime:
                         self._store.log_event('server-stopped')
                 self._store.close()
                 self._store = None
+            if self.access is not None:
+                self.access.close()
+                self.access = None
             self._token = None
             self._public_address = self._admin_address = None
 
 
+def _offline(args):
+    """Maintenance that needs no running server. Prints a JSON report; exit 0 when it is good."""
+    import json
+    try:
+        if args.mode == 'verify-audit':
+            report = access.verify_directory(args.directory)
+        elif not args.archive:
+            report = dict(ok=False, problem='archive-required')
+        elif args.mode == 'verify-backup':
+            report = archive.verify(args.archive, args.directory)
+        else:
+            report = archive.stage(args.directory, args.archive)
+    except (OSError, ValueError) as error:
+        report = dict(ok=False, problem=type(error).__name__)
+    print(json.dumps(report, indent=1), flush=True)
+    return 0 if report.get('ok') else 1
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Lifetime Server console runtime')
-    parser.add_argument('mode', nargs='?', choices=('console',), default='console')
+    parser = argparse.ArgumentParser(description='Lifetime Server console runtime and offline maintenance')
+    parser.add_argument('mode', nargs='?', choices=('console', 'restore', 'verify-backup', 'verify-audit'),
+                        default='console', help='restore stages an archive for the next start; verify-backup and '
+                        'verify-audit only read')
     parser.add_argument('--directory', required=True)
+    parser.add_argument('--archive', help='backup archive (.zip) for restore and verify-backup')
     parser.add_argument('--address', default='https://localhost:8443')
     parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', type=int, default=8443)
     parser.add_argument('--admin-port', type=int, default=0)
     args = parser.parse_args(argv)
+    if args.mode != 'console':
+        return _offline(args)
     configuration = vars(args)
     configuration.pop('mode')
+    configuration.pop('archive')
     stopped = threading.Event()
     previous = {}
     for number in (signal.SIGINT, signal.SIGTERM):
