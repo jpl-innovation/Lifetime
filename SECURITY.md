@@ -239,7 +239,7 @@ protected administration API, and every setting is validated (ranges, time zones
   the file is encrypted with DPAPI (`CryptProtectData` through ctypes, for the account that runs the server,
   normally SYSTEM, with an application-specific entropy) and its ACL is reset to Administrators and SYSTEM before
   anything is written. On other systems DPAPI does not exist, so the file is plain JSON protected only by 0600
-  permissions on a 0700 data directory: protect the server account and backups accordingly. The dashboard shows only
+  permissions on a 0700 data directory: protect the server account and backups accordingly. See "Lifetime Server on Linux" below. The dashboard shows only
   whether a password is set and the webhook's host. A file written by another account (for example after copying
   the data directory to another machine) cannot be decrypted and is reported as unreadable: enter the secrets again.
 - **Transport.** Mail uses only the standard library (`smtplib`, `ssl`) with STARTTLS or implicit TLS, certificate
@@ -303,10 +303,11 @@ exactly one permission class in `lifetime_access.py`; an operation in no class i
 included, and the tests fail until it is classified (default deny). The dashboard only greys out what the server
 would refuse.
 
-**The token channel.** The loopback HTTP API with `admin-token` stays for Linux and older dashboards. It cannot tell
-who is calling, so whoever can read the token (Administrators and SYSTEM, by the file's ACL) is Admin and is recorded
-as `admin-token`. Remote power is refused on it: it needs a named Windows account. On Linux there is no named channel,
-so the dashboard cannot send remote power commands there.
+**The token channel.** The loopback HTTP API with `admin-token` stays for older dashboards and for callers
+without a role on the named channel. It cannot tell who is calling, so whoever can read the token
+(Administrators and SYSTEM by the file's ACL; root and the `lifetime` account on Linux) is Admin and is
+recorded as `admin-token`. Remote power is refused on it: it needs a named account, which on Linux comes
+from the Unix socket (see "Lifetime Server on Linux").
 
 **Remote power.** Besides the owner's consent on the computer: a named, authorised Windows account; the role is
 checked again under the same lock as role changes, so removing a role always wins against a command in flight, and
@@ -333,6 +334,47 @@ the certificate, and applies it only at the next start, before any listener open
 audit trail, so a restore can never bring back an older trail or a role that was removed, and it invalidates every
 computer credential, code and polling token as before.
 
+## Lifetime Server on Linux
+
+**Identity: a Unix domain socket with SO_PEERCRED.** On Linux the named pipe is replaced by
+`/run/lifetime-server/admin-<admin port>.sock` (a console run without that folder uses the data directory). The
+kernel reports the uid and gid of the connecting process (`SO_PEERCRED`); the server turns them into an identity of
+the same shape as a Windows token: `unix:uid:N` with the user name, and the primary plus supplementary groups from
+the user database (`getgrouplist`) as `unix:gid:N`. A request cannot name its caller (the same `operation` /
+`arguments` rule as the pipe). `root` and members of `lifetime-admin` (or `LIFETIME_ADMIN_GROUP`) are always Admin and
+`root` cannot be given a lower role; every other account has no access until a role is assigned to its uid or one
+of its groups; the role matrix, power gate, rate limits and audit chain are the same code as on Windows. A caller
+without any role is disconnected before its request is read, as the pipe's DACL refuses it on Windows.
+
+The socket is created under a temporary name (reachable only by its owner whatever the umask), set to 0660 with
+group `lifetime-admin`, then renamed into place, so it is never briefly open to others. Its folder is 0755 and owned
+by the `lifetime` service account. A stale socket left by a crash is replaced only if nothing answers on it; a live
+socket or any other file at that path stops the channel (the server then runs on the token channel and logs
+*Named administration channel unavailable*). The client checks with `SO_PEERCRED` that the listening process belongs
+to `root`, the `lifetime` account or itself before it sends anything.
+
+Limits: membership is read from the user database at each request, not from the calling process, so a user removed
+from a group loses that role immediately, and one just added gains it before signing in again. Forwarding the socket
+over SSH (documented for headless servers) makes the server see the SSH account, which is the intended identity. The
+admin token on the loopback HTTP port still makes its reader Admin; only root and the `lifetime` account can read it.
+
+**Secrets file.** On Linux `alert-secrets.bin` is plain JSON in a 0600 file owned by `lifetime` inside the 0700 data
+directory: file-permission protection, not encryption (there is no DPAPI). Root, the service account and anyone with
+the disk, a disk image or a raw copy of the data directory can read the SMTP password and the webhook URL. Dashboard
+backups exclude it, as on Windows. Use dedicated, revocable credentials for alerts.
+
+**Service and container.** The systemd unit runs as `lifetime` with `NoNewPrivileges`, `ProtectSystem=full`,
+`ProtectHome=read-only`, `PrivateTmp` and `UMask=0077`; the OpenRC and SysV scripts drop to `lifetime` with
+`supervise-daemon`, `setpriv` or `runuser` and the same umask. The container image runs as the non-root `lifetime`
+account, publishes only 8443 and keeps 8444 and the admin socket inside the container. The administration port is
+never exposed by any of them, and there is no network-reachable administration interface.
+
+**Linux clients.** Remote power on a Linux computer uses `systemctl --no-ask-password` / `shutdown +1` with systemd,
+otherwise `loginctl --no-ask-password` or logind over D-Bus with `interactive=false`: polkit decides, nothing ever
+asks for a password, and Lifetime never runs sudo. If none is available the command is reported as failed ("not
+supported"). The AppImage passes its own path (`$APPIMAGE`), never a path inside its temporary mount, to autostart
+entries and background processes.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem. Use GitHub's private vulnerability reporting on this repository
@@ -345,7 +387,9 @@ the shared Company server dialog uses a separate user ledger at
 `${XDG_STATE_HOME:-~/.local/state}/lifetime-agent`. The existing privileged
 `/var/lib/lifetime-agent` CLI default is unchanged. `install_linux.sh
 --company-agent` offers a separate, default-No consent prompt before initializing
-the user ledger and enabling `lifetime-company-agent.service`. The unit has
+the user ledger and enabling `lifetime-company-agent.service`.
+Without a systemd user manager it writes an XDG autostart entry instead
+(`~/.config/autostart/lifetime-company-agent.desktop`) and starts the agent once. The unit has
 `UMask=0077`, `NoNewPrivileges=true`, and no credentials in its arguments. It
 records/retries while the user manager is running; no lingering is enabled.
 Enrollment and optional history/system information require their own explicit

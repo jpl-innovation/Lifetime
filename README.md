@@ -22,8 +22,9 @@ Devices shows shared Activity, Health and hardware details for a demo computer.
 | Edition | For | Download |
 |---|---|---|
 | **Lifetime for Windows** | Windows 10 / 11 laptops and desktops | `Lifetime-Windows.zip` |
-| **Lifetime for Linux** | Linux with systemd and Python 3.11+ | `Lifetime-Linux.tar.gz` |
+| **Lifetime for Linux** | Any Linux desktop with glibc 2.28+ (Debian 10+, Ubuntu 20.04+, RHEL 8+, Fedora, openSUSE, Arch...) | `Lifetime-Linux-x86_64.AppImage` or `.tar.gz` |
 | **Lifetime Server** | Windows Server, for IT teams that look after many computers | `Lifetime-Server-Windows.zip` |
+| **Lifetime Server for Linux** | Any Linux server with glibc 2.28+ (no desktop needed), or any Linux with Docker/Podman | `Lifetime-Server-Linux-x86_64.tar.gz` (also `aarch64`), or the `Dockerfile` |
 
 The Windows and Linux editions work fully on their own. Connecting a computer to a Lifetime Server is optional and only happens when someone chooses to. A connected computer streams live readings over one encrypted socket and can be restarted, put to sleep or shut down from the server, only if its owner allowed it.
 
@@ -64,19 +65,59 @@ python -m pip install PyQt6
 2. Follow [server operations](docs/SERVER_OPERATIONS.md) to install the service and open the firewall port you choose.
 3. Open **Lifetime Server**, click **Add device**, and connect computers as described above.
 
-### Linux
+### Lifetime Server for Linux (any distribution, headless)
 
-1. Download **Lifetime-Linux.tar.gz**, then:
+The server runs on any Linux server with glibc 2.28 or newer, with no desktop and no system Python: Debian 10+, Ubuntu 20.04+, RHEL/AlmaLinux/Rocky 8+, Fedora, openSUSE Leap 15.3+, Arch, on x86_64 or aarch64.
 
 ```sh
-tar -xzf Lifetime-Linux.tar.gz
-cd Lifetime-Linux
-bash install_linux.sh
+tar -xzf Lifetime-Server-Linux-x86_64.tar.gz
+cd Lifetime-Server-Linux-x86_64
+sudo ./install_server_linux.sh --address https://server.school.lan:8443 --admin "$USER"
+sudo /opt/lifetime-server/LifetimeServerRuntime admin --directory /var/lib/lifetime-server --admin-port 8444 --operation invitation
 ```
 
-2. Open **Lifetime** from your application menu.
+It installs to `/opt/lifetime-server`, keeps its data in `/var/lib/lifetime-server` (0700, system account `lifetime`) and runs as a systemd service that restarts on failure; without systemd it installs an OpenRC or SysV init script instead. The installer prints the firewall rule for `ufw` or `firewalld` (port 8443 from your local network only; the administration port 8444 stays on 127.0.0.1 and must never be opened). `root` and members of the `lifetime-admin` group are Admin; other Unix users and groups get Operator, Auditor or Viewer roles, exactly like Windows accounts on a Windows server. Windows and Linux computers connect to a Linux server exactly as to a Windows one.
 
-The installer needs Python 3 and PyQt6 and offers to install PyQt6 for you (no sudo, unless you choose to allow journal access). Distribution packages: `python3-pyqt6` (Debian/Ubuntu/Fedora) or `python-pyqt6` (Arch). It sets up a systemd **user** service, so no root rights are needed.
+**Any Linux with Docker or Podman** (also musl hosts such as Alpine): `docker build -t lifetime-server .` in a source checkout, then see [server operations](docs/SERVER_OPERATIONS.md#linux-server). The container runs as a non-root user with its data in a volume.
+
+**Dashboard:** on a Linux desktop, run `Lifetime-Linux-x86_64.AppImage --run-tool LifetimeServerDashboard --directory /var/lib/lifetime-server --admin-port 8444` against a server on the same computer. For a headless server, forward its admin socket over SSH (see [server operations](docs/SERVER_OPERATIONS.md#linux-server)); there is deliberately no network-reachable admin interface.
+
+### Linux desktop (any distribution, no Python needed)
+
+One build runs on every desktop distribution with glibc 2.28 or newer, on GNOME, KDE Plasma, XFCE, Cinnamon, MATE, LXQt and Budgie, under X11 or Wayland. It brings its own Python and Qt.
+
+**AppImage** (nothing to install): download **Lifetime-Linux-x86_64.AppImage**, then
+
+```sh
+chmod +x Lifetime-Linux-x86_64.AppImage
+./Lifetime-Linux-x86_64.AppImage
+```
+
+**Install for your user** (menu entry, `~/.local/lib/lifetime`, no root): download **Lifetime-Linux-x86_64.tar.gz**, then
+
+```sh
+tar -xzf Lifetime-Linux-x86_64.tar.gz
+cd Lifetime-Linux-x86_64
+./install_linux.sh            # ./uninstall_linux.sh removes it again; your history is kept
+```
+
+Tracking at login is chosen inside Lifetime. Where systemd runs it uses a systemd **user** service; on distributions without systemd (Devuan, antiX, MX with SysV, Void, Artix, Gentoo with OpenRC) it uses XDG autostart (`~/.config/autostart`), which every desktop above honours. Nothing needs root; sudo is only offered (never run on its own) to let you read the full system journal for earlier usage.
+
+Without systemd there is no journal, so **Verify** and **Add earlier usage** say "Not available" and Lifetime counts from the day you install it. Missing tools (`nmcli`/`iw` for Wi-Fi, `lspci` for graphics names) only make those fields say "Not available". Remote power from a Lifetime Server uses `systemctl`, or without systemd `loginctl` (elogind) or logind over D-Bus, never sudo and never a password prompt; if none is available the server is told "not supported".
+
+| Distribution | Versions | Verified |
+|---|---|---|
+| Debian | 10, 11, 12 | CI containers |
+| Ubuntu (and Mint, Pop!\_OS, elementary, Zorin) | 20.04, 22.04, 24.04 | CI containers (derivatives share Ubuntu's base) |
+| Fedora | current | CI container |
+| RHEL, AlmaLinux, Rocky Linux | 8, 9 | CI containers (Rocky) |
+| openSUSE Leap | 15.3 and newer | CI container |
+| Arch Linux (and Manjaro, EndeavourOS) | rolling | CI container |
+| Alpine and other musl distributions | — | **not supported** (the build needs glibc) |
+
+"CI containers" means: the bundle and the AppImage start headless (`QT_QPA_PLATFORM=offscreen`) and pass `--self-check`, the tracker records, and a client enrolls with a Lifetime Server and syncs. Containers have no display, desktop session or systemd, so the window on real X11/Wayland desktops, login autostart and the tray still need checking on real machines (see the release notes). 64-bit x86 only for the desktop: PyQt6's ARM64 Linux wheels need a newer glibc than 2.28, so an ARM64 desktop build would not reach the same distributions (the server is built for ARM64).
+
+**From source** (Python 3.11+ and PyQt6 from your distribution): run `bash install_linux.sh` in a source checkout.
 
 ## What it shows
 
@@ -121,7 +162,7 @@ On the developer's laptop, the awake time reported by Lifetime matched the Windo
 
 ## Files and data
 
-Data lives in `%APPDATA%\Lifetime\` (Windows) or `~/.local/share/lifetime/` (Linux): `ledger.json` (the record), `settings.json`, `status.json`. Back up `ledger.json` to keep your history. Uninstall: remove the *Lifetime Tracker* scheduled task / `lifetime-tracker.service`, the shortcut, and the install folder.
+Data lives in `%APPDATA%\Lifetime\` (Windows) or `~/.local/share/lifetime/` (Linux): `ledger.json` (the record), `settings.json`, `status.json`. Back up `ledger.json` to keep your history. Uninstall: on Windows remove the *Lifetime Tracker* scheduled task, the shortcut and the install folder; on Linux run `uninstall_linux.sh` (or delete the AppImage and `~/.config/autostart/lifetime-*.desktop`).
 
 ## Build from source
 
@@ -132,16 +173,17 @@ python lifetime_tracker.py --run   # run the tracker
 python -m unittest discover     # tests
 ```
 
-Windows executables: `./build_windows.ps1` (needs `pyinstaller`, produces `package\`). Releases are built automatically by GitHub Actions when a version tag such as `v1.0.0` is pushed.
+Windows executables: `./build_windows.ps1` (needs `pyinstaller`, produces `package\`). Linux bundles: `packaging/linux/build_linux.sh build` inside a `rockylinux:8` container, then `packaging/linux/build_linux.sh package` (see `.github/workflows/windows.yml`). Releases are built automatically by GitHub Actions when a version tag such as `v1.0.0` is pushed.
 
 ## Supported systems
 
-Windows 10 and 11 (x64 and ARM64), and Linux with systemd and Python 3.11+. Desktops without a battery or without an NVIDIA GPU are handled. Windows 10, ARM64, non-English Windows and Linux paths are covered by automated tests but have had less real-world testing than Windows 11 x64.
+Windows 10 and 11 (x64 and ARM64), and Linux desktops with glibc 2.28 or newer (x86_64; with or without systemd; X11 or Wayland; see the table under Download). Lifetime Server runs on Windows Server and on Linux servers with glibc 2.28+ (x86_64 and aarch64) or in a container. Desktops without a battery or without an NVIDIA GPU are handled. Windows 10, ARM64, non-English Windows and Linux paths are covered by automated tests but have had less real-world testing than Windows 11 x64.
 
 ## Troubleshooting and known issues
 
 - **Windows says "Windows protected your PC".** The programs are not code-signed yet. Choose **More info -> Run anyway**, or use the Python route above.
-- **Linux: Verify shows a gap of a couple of minutes after a suspend.** On some laptops the journal timestamps for suspend events are approximate, so the comparison can be off by about the length of the sleep. The total itself comes from the awake-only clock and is not affected. To help fix this, run `python3 lifetime_signals.py --verify-debug` right after a suspend and resume, and attach the output to an issue.
+- **Linux: Verify shows a gap of a couple of minutes after a suspend.** On some laptops the journal timestamps for suspend events are approximate, so the comparison can be off by about the length of the sleep. The total itself comes from the awake-only clock and is not affected. To help fix this, run `python3 lifetime_signals.py --verify-debug` (from a source checkout) right after a suspend and resume, and attach the output to an issue.
+- **Linux: the window does not open.** Run `Lifetime --self-check` (or `./Lifetime-Linux-x86_64.AppImage --self-check`) in a terminal and attach its output to an issue. On Wayland, `QT_QPA_PLATFORM=xcb` forces X11 (XWayland) if your compositor has a problem. If an AppImage says FUSE is missing, run it with `--appimage-extract-and-run` or use the tar.gz.
 - **Linux: no Wi-Fi or graphics details.** Wi-Fi uses NetworkManager (`nmcli`) or `iw`; graphics names use `lspci`. Install them with your package manager if a field shows "Not available".
 - **Something else.** Open an issue on GitHub with your operating system, Python version and the exact message.
 
@@ -348,8 +390,9 @@ Windows accounts or groups a role: **Operator** (view, acknowledge incidents, ma
 power for one computer at a time where its owner allowed it), **Auditor** (view and the audit trail) or **Viewer**
 (view only). The server checks the role on every request; the dashboard greys out what the role cannot do and says
 why. Whoever can read the `admin-token` file (Administrators and SYSTEM) is also Admin through the older loopback
-channel, which Linux and older dashboards use; remote power needs a named Windows account, so it is not available
-through the token. **Audit trail** records every change and every remote command with the Windows account, role,
+channel, which older dashboards use; remote power needs a named account, so it is not available through the
+token. On a Linux server the same roles apply to Unix users and groups over a local socket (root and
+`lifetime-admin` are Admin); see [server operations](docs/SERVER_OPERATIONS.md#linux-server). **Audit trail** records every change and every remote command with the Windows account, role,
 target, result and time, hash-chained so an edited or removed entry is detected (**Verify audit trail**, **Export
 CSV**). **Backup and restore** writes one protected `.zip` archive with a `.sha256` file and restores it at the next
 server start. See [server operations](docs/SERVER_OPERATIONS.md#named-administrators-and-roles) and

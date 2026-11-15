@@ -16,10 +16,11 @@ done and tested here, and the gate still needs a real-world run.
 
 ## Owner decisions recorded
 
-- **Remote power needs a named Windows account.** Sleep, restart, shutdown and Wake-on-LAN from the dashboard are
-  accepted only on the identity-bound Windows channel (a named account with a role that allows it), never over the
-  anonymous `admin-token` channel. Linux servers have only the token channel, so remote power is not available on a
-  Linux server. Kept deliberately for safety: every power command must name the person who sent it. (Stage 3, `146e6ce`.)
+- **Remote power needs a named account.** Sleep, restart, shutdown and Wake-on-LAN from the dashboard are
+  accepted only on the identity-bound channel (a named Windows account on the pipe, or since the Linux stage a named
+  Unix account on the `SO_PEERCRED` socket) with a role that allows it, never over the anonymous `admin-token`
+  channel. Kept deliberately for safety: every power command must name the person who sent it. (Stage 3, `146e6ce`;
+  Linux stage.)
 - **Supported size = tested size.** No fleet size is claimed beyond what has been measured
   ([benchmarks](benchmarks/README.md)); today 50 simulated computers. (Stage 4, `d780550`.)
 - **Agent updates stop at download, check and stage.** The agent never runs a package; the existing installer
@@ -113,3 +114,22 @@ done and tested here, and the gate still needs a real-world run.
 | 8 | README, release notes, this status file | implemented | this commit |
 | — | Run 3-5 pilot sites with 20-50 computers, side-by-side runs with five independent technicians, 10+ interviews, three paying commitments | **owner action** | |
 | Gate | No release-blocking incident; scorecard met or reported as unmet; data/security/licensing plan; paying commitments if launching | not started: **owner action** | |
+
+## Linux stage: every Linux, one desktop build
+
+| # | Plan item | Status |
+|---|---|---|
+| A | One desktop build: PyInstaller bundle built on glibc 2.28 (Rocky Linux 8), AppImage and tar.gz, Qt xcb and Wayland plugins, `--self-check`, per-user install/uninstall, XDG autostart without systemd, "Not available" without journal/tools, remote power via systemctl/loginctl/D-Bus without prompts | implemented; unit tests on Windows with patching; **CI** builds and container smoke tests (11 distributions) need a push; **needs real machines**: real X11/Wayland desktops, autostart, tray, remote power. aarch64 desktop not built (PyQt6 aarch64 wheels need a newer glibc). |
+| B | Linux server: headless bundle (x86_64, aarch64), `install_server_linux.sh` (systemd, OpenRC, SysV), restart/uninstall, firewall hint, Dockerfile, Unix socket with `SO_PEERCRED` and role mapping, 0600 secrets file, `admin` command line, dashboard on a Linux desktop, SSH socket forwarding | implemented; role mapping and socket tested with patching here, the real socket only in Linux CI; **needs real machines**: systemd unit, OpenRC, firewalls, reboot, SSH forwarding. |
+| C | CI: Rocky 8 build, smoke tests in Debian 10/11/12, Ubuntu 20.04/22.04/24.04, Fedora, Rocky 8/9, openSUSE Leap 15, Arch; installer run without systemd (Debian 12, Rocky 9); container image; release files and SHA256SUMS | implemented; **not yet run** (needs the owner's approval to push). |
+
+**Owner decisions (Linux stage)**
+
+- Socket group trade-off: the admin socket is 0660 with group `lifetime-admin`, and that group is also always Admin,
+  so by default only Admins can reach the socket. Operators/Auditors/Viewers who are not Admin need the socket group
+  changed (`LIFETIME_ADMIN_GROUP`), which also makes that group Admin, so lower roles are then given per user. A
+  separate "console" group (may connect, no role by itself) would remove the trade-off; not built without approval.
+- Proposal, not built: a network-reachable admin interface for headless servers (for example the dashboard over
+  mutual-TLS). Today: the command line on the server, the dashboard on a Linux desktop, or the socket forwarded over SSH.
+- Publishing the container image to a registry (GHCR) and signing the AppImage are not set up.
+- The old Python-source `Lifetime-Linux.tar.gz` is no longer a release file (one Linux client version).
