@@ -796,12 +796,20 @@ def replace_running_agent(directory, timeout=20):
             pass
 
 
-def main(argv=None):
+EXIT_INVALID, EXIT_UNREACHABLE, EXIT_REFUSED = 2, 3, 4      # for scripted (GPO/Intune) installs
+
+
+def main(argv=None, stdin=None):
     parser = argparse.ArgumentParser(description='Explicit machine capture and company reporting; installs nothing')
     parser.add_argument('--directory', type=Path)
     parser.add_argument('--initialize', action='store_true')
     parser.add_argument('--run', action='store_true')
     parser.add_argument('--enroll-bundle-file', type=Path)
+    parser.add_argument('--connection-stdin', action='store_true',
+                        help='read a connection line, or a pairing code with --server, from standard input '
+                             '(never from the command line, where other users could see it)')
+    parser.add_argument('--server', help='server address for a pairing code read with --connection-stdin')
+    parser.add_argument('--check', action='store_true', help='only validate the options and exit; changes nothing')
     parser.add_argument('--policy-history', action='store_true')
     parser.add_argument('--policy-resources', action='store_true')
     parser.add_argument('--policy-health', action='store_true')
@@ -812,21 +820,39 @@ def main(argv=None):
     parser.add_argument('--set-policy', action='store_true')
     parser.add_argument('--import-ledger', type=Path)
     args = parser.parse_args(argv)
-    if (args.policy_history or args.policy_resources or args.policy_health or args.policy_control) and not (args.enroll_bundle_file or args.set_policy):
+    enrolling = bool(args.enroll_bundle_file or args.connection_stdin)
+    if (args.policy_history or args.policy_resources or args.policy_health or args.policy_control) and not (enrolling or args.set_policy):
         parser.error('Optional reporting permissions require explicit enrollment')
+    if args.enroll_bundle_file and args.connection_stdin:
+        parser.error('Use either a bundle file or a connection line, not both')
+    if args.server is not None and not args.connection_stdin:
+        parser.error('--server is only used with --connection-stdin')
     directory = args.directory if args.directory is not None else machine_directory()
-    bundle = None
-    if args.enroll_bundle_file:
-        import lifetime_tls as tls
-        with args.enroll_bundle_file.open(encoding='utf-8-sig') as source:
-            bundle = source.read(tls.MAX_BUNDLE_BYTES*2+1).strip()
-        tls.decode_bundle(bundle)
+    bundle = connection = None
+    # Validate everything before any data is created or changed; messages never repeat the secret.
+    identity = {'display_name': args.display_name}
+    try:
+        protocol.validate_identity(identity)
+        if args.enroll_bundle_file:
+            import lifetime_tls as tls
+            with args.enroll_bundle_file.open(encoding='utf-8-sig') as source:
+                bundle = source.read(tls.MAX_BUNDLE_BYTES*2+1).strip()
+            tls.decode_bundle(bundle)
+        if args.connection_stdin:
+            from lifetime_connection import parse
+            value = (stdin or sys.stdin.buffer).read(2400)
+            value = value.decode('utf-8-sig') if isinstance(value, bytes) else value.lstrip('﻿')
+            connection = parse(value.strip(), args.server or '')
+    except (OSError, ValueError):
+        parser.exit(EXIT_INVALID, 'Invalid enrollment input: check the connection line or code, server address, bundle and display name.\n')
+    if args.check:
+        return None
     agent = (MachineAgent.initialize(directory) if args.initialize or
-             (bundle is not None and not (directory / DATABASE).exists()) else MachineAgent(directory))
+             (enrolling and not (directory / DATABASE).exists()) else MachineAgent(directory))
     try:
         policy = dict(history=args.policy_history, resources=args.policy_resources)
         policy.update(health=args.policy_health, control=args.policy_control)
-        if bundle is not None or args.set_policy:
+        if enrolling or args.set_policy:
             agent.set_policy(policy)
         if args.disable_reporting:
             agent.disable_reporting()
@@ -834,7 +860,17 @@ def main(argv=None):
             agent.import_ledger(args.import_ledger)
         if bundle is not None:
             from lifetime_client import SyncClient
-            SyncClient(agent).start_enrollment(bundle, {'display_name': args.display_name}, policy)
+            SyncClient(agent).start_enrollment(bundle, identity, policy)
+        if connection is not None:
+            from lifetime_client import SyncClient, error_kind
+            try:
+                status = SyncClient(agent).start_connection(connection[1], connection[0], identity, policy)
+            except (OSError, ValueError) as error:      # unreachable, or not the server this code belongs to
+                print('Could not verify the server with this code: ' + error_kind(error), file=sys.stderr)
+                raise SystemExit(EXIT_UNREACHABLE) from None
+            if status['status'] == 'invalid-code':
+                print('The server refused this code (used, expired or revoked).', file=sys.stderr)
+                raise SystemExit(EXIT_REFUSED)
         if args.background:
             replace_running_agent(directory)
             command = ([sys.executable] if getattr(sys, 'frozen', False) else

@@ -518,6 +518,51 @@ class ConnectionCliTests(unittest.TestCase):
             self.assertNotIn('--enroll-bundle-file', spawn.call_args.args[0])
             machine.close.assert_called_once()
 
+    def test_scripted_connection_line_or_code_from_stdin_with_exit_codes(self):
+        import io
+        from lifetime_connection import connection_line, issue
+        code = issue('0' * 64)
+        line = connection_line('lifetime.school.local', code)
+        with tempfile.TemporaryDirectory() as root:
+            # --check validates without creating or opening anything.
+            self.assertIsNone(agent.main(['--directory', root, '--check', '--connection-stdin', '--policy-history'], io.StringIO(line + '\n')))
+            self.assertIsNone(agent.main(['--directory', root, '--check', '--connection-stdin', '--server', '192.0.2.7'], io.StringIO(code.lower())))
+            # Windows PowerShell may put a byte-order mark before piped text.
+            self.assertIsNone(agent.main(['--directory', root, '--check', '--connection-stdin'], io.BytesIO(b'\xef\xbb\xbf' + line.encode() + b'\r\n')))
+            self.assertEqual(list(Path(root).iterdir()), [])
+            for arguments, value in ((['--connection-stdin'], code),                         # a code needs --server
+                                     (['--connection-stdin'], line.replace('LTS-', 'LTS-X')), # damaged code
+                                     (['--connection-stdin', '--server', 'http://x'], code),
+                                     (['--connection-stdin', '--display-name', 'bad\x00name'], line),
+                                     (['--server', 'x.local'], ''),
+                                     (['--connection-stdin', '--enroll-bundle-file', 'b.txt'], line)):
+                stderr = io.StringIO()
+                with self.subTest(arguments=arguments), patch.object(agent.sys, 'stderr', stderr), \
+                        self.assertRaises(SystemExit) as caught:
+                    agent.main(['--directory', root, *arguments], io.StringIO(value))
+                self.assertEqual(caught.exception.code, agent.EXIT_INVALID)
+                self.assertNotIn(code[4:], stderr.getvalue())
+            self.assertEqual(list(Path(root).iterdir()), [])
+            machine = Mock()
+            policy = dict(history=True, resources=False, health=False, control=False)
+            with patch.object(agent.MachineAgent, 'initialize', return_value=machine), patch('lifetime_client.SyncClient') as client:
+                client.return_value.start_connection.return_value = dict(status='pending')
+                agent.main(['--directory', root, '--connection-stdin', '--policy-history', '--display-name', 'Lab PC'], io.StringIO(line))
+                client.return_value.start_connection.assert_called_once_with(code, 'https://lifetime.school.local:8443',
+                                                                             dict(display_name='Lab PC'), policy)
+                machine.set_policy.assert_called_once_with(policy)
+                for outcome, expected in ((ConnectionRefusedError(), agent.EXIT_UNREACHABLE),
+                                          (dict(status='invalid-code'), agent.EXIT_REFUSED)):
+                    if isinstance(outcome, dict):
+                        client.return_value.start_connection.side_effect, client.return_value.start_connection.return_value = None, outcome
+                    else:
+                        client.return_value.start_connection.side_effect = outcome
+                    stderr = io.StringIO()
+                    with self.subTest(outcome=outcome), patch.object(agent.sys, 'stderr', stderr), self.assertRaises(SystemExit) as caught:
+                        agent.main(['--directory', root, '--connection-stdin'], io.StringIO(line))
+                    self.assertEqual(caught.exception.code, expected)
+                    self.assertNotIn(code[4:], stderr.getvalue())
+
     def test_packaged_background_agent_gets_its_own_extraction_folder(self):
         # The one-file program starts a copy of itself for --background. Without this variable the copy shares the
         # first one's temporary folder, which the first deletes on exit; the copy then fails on every file it loads

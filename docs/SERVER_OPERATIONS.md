@@ -53,9 +53,23 @@ For a manual source runtime or dashboard, see the root README commands. The runt
 
 ## Agent enrollment and operations
 
-The machine agent is separate from the desktop tracker and never imports a per-user ledger implicitly. Install it elevated from the package using `install_agent_windows.ps1`; packaged mode uses `LifetimeAgent.exe`, and source mode creates a standard-library-only Python environment. Reporting requires both `-EnableReporting` and a selected server `-BundleFile`. Optional `-TrackHistory` and `-ResourceReadings` require that explicit enrollment. `-ImportLedger` is a one-time explicit import. `-Start` starts the machine startup task. The agent installer protects its machine data directory and preserves it during uninstall.
+The machine agent is separate from the desktop tracker and never imports a per-user ledger implicitly. Install it elevated from the package using `install_agent_windows.ps1`; packaged mode uses `LifetimeAgent.exe`, and source mode creates a standard-library-only Python environment. Reporting requires `-EnableReporting` and exactly one way to reach the server: `-ConnectionLine` (copied from **Add device** on the server), `-PairingCode` with `-Server`, or a `-BundleFile`. Awake time is the only thing shared by default; `-TrackHistory`, `-ResourceReadings`, `-HealthReadings` and `-PowerControl` each have to be named, and only with that explicit enrollment. `-ImportLedger` is a one-time explicit import. `-Start` starts the machine startup task. The agent installer protects its machine data directory and preserves it during uninstall.
 
-The source agent CLI is `lifetime_agent.py`. Useful explicit options are `--help`, `--initialize`, `--run`, `--directory`, `--enroll-bundle-file`, `--policy-history`, `--policy-resources`, and `--import-ledger`. Optional policy flags require an enrollment bundle. Review the bundle fingerprint and address before pairing, then approve the pending device in the server dashboard. No automatic approval or remote administration is provided.
+### Silent deployment (GPO, Intune, scripts)
+
+The agent installer never prompts, so the same command works from a GPO computer startup script, an Intune Win32 app or a remote shell running as SYSTEM or an administrator. Use the packaged agent and one code with enough uses for the batch (**Add device** > Allowed uses, up to 100, valid up to 24 hours):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install_agent_windows.ps1 -Mode Packaged -EnableReporting -ConnectionLine "lifetime-connect-v1:https://lifetime.school.local:8443 LTS-XXXX-XXXX-XXXX-XXXX-XXXX" -TrackHistory -Start
+```
+
+- Every parameter is checked before anything is changed, including the agent's own check of the code (checksum), address and display name. The code reaches the agent through standard input, not its command line.
+- Exit codes: `0` installed; `1` unexpected failure; `2` invalid parameters; `3` server unreachable, or not the server this code belongs to; `4` code refused by the server (used up, expired or revoked); `5` not run as administrator or not Windows; `6` an agent is already installed (nothing changed; uninstall first to change its settings). After a failure no startup task is registered and existing data is kept.
+- A log is appended to `install.log` in the agent data directory (default `%ProgramData%\Lifetime\Agent`, readable by administrators and SYSTEM only). It records the steps, the sharing choices and the exit code, never the code or connection line. A failure before the data directory exists is logged to `%TEMP%\LifetimeAgent-install.log`.
+- Each computer still appears under **Pending approval** and reports only after an administrator approves it. Treat the deployment script as a secret while its code is valid, and revoke the invitation when the rollout is done.
+- Not yet verified on real GPO or Intune deployments: run a pilot group first and check the exit codes in your tool.
+
+The source agent CLI is `lifetime_agent.py`. Useful explicit options are `--help`, `--initialize`, `--run`, `--directory`, `--enroll-bundle-file`, `--connection-stdin` (a connection line, or a code with `--server`, read from standard input), `--check` (validate only), `--policy-history`, `--policy-resources`, and `--import-ledger`. Optional policy flags require explicit enrollment. Approve the pending device in the server dashboard. No automatic approval or remote administration is provided.
 
 ## Backup and restore
 
