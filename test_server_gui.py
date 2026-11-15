@@ -43,6 +43,8 @@ class FakeAdmin:
         self.fail = set()
         self.interval = 60
         self.retained_before = None
+        self.incidents = []
+        self.alerts = None
         self.gui_thread = threading.get_ident()
         self.lock = threading.Lock()
 
@@ -109,7 +111,8 @@ class FakeAdmin:
                         known_devices=len(known), unknown_devices=len(self.rows) - len(known),
                         recent_events=[dict(device_id=row['device_id'], kind='report-received', time=row['last_received_at'])
                                        for row in self.rows[:20]],
-                        health='available', schema_version=4, server_time='2026-11-07T12:00:00+00:00')
+                        health='available', schema_version=4, server_time='2026-11-07T12:00:00+00:00',
+                        **({'alerts': self.alerts} if self.alerts else {}))
         if operation == 'configuration':
             return dict(reporting_interval=self.interval, retained_before=self.retained_before)
         if operation == 'set_configuration':
@@ -135,6 +138,40 @@ class FakeAdmin:
             return dict(arguments)
         if operation == 'code':
             return dict(code='secret-pairing-code', expires_at='2026-11-07T12:10:00Z', uses=arguments['uses'])
+        if operation == 'incidents':
+            wanted = arguments.get('state', '')
+            return copy.deepcopy([item for item in self.incidents if not wanted or item['state'] == wanted
+                                  or wanted == 'active' and item['state'] in ('open', 'acknowledged', 'suppressed')])
+        if operation == 'incident':
+            item = next(item for item in self.incidents if item['id'] == arguments['incident_id'])
+            return dict(copy.deepcopy(item), timeline=[dict(time=item['started_at'], kind='pending', detail=''),
+                                                       dict(time=item['started_at'], kind='opened', detail='')],
+                        deliveries=[dict(kind='open', channel='email', status='failed', attempts=5, error='auth',
+                                         updated_at=item['started_at'])])
+        if operation == 'acknowledge':
+            item = next(item for item in self.incidents if item['id'] == arguments['incident_id'])
+            item.update(state='acknowledged', acknowledged_by=arguments['by'], acknowledged_at=item['started_at'])
+            return copy.deepcopy(item)
+        if operation == 'alert_rules':
+            import lifetime_monitor
+            return [dict(rule=name, enabled=rule['enabled'], threshold=rule['threshold'], minutes=rule['minutes'],
+                         **({'version': rule['version']} if 'version' in rule else {}),
+                         **({'range': list(rule['range'])} if 'range' in rule else {}),
+                         minutes_range=list(rule.get('minutes_range', (0, 10080))))
+                    for name, rule in lifetime_monitor.RULES.items()]
+        if operation == 'schedules':
+            return [dict(scope='default', key='', kind='auto', timezone='local', start='08:00', end='18:00',
+                         weekdays=[0, 1, 2, 3, 4], holidays=[])]
+        if operation in ('maintenance', 'deliveries'):
+            return []
+        if operation == 'notifications':
+            import lifetime_notify
+            return dict(lifetime_notify.DEFAULTS, password_set=True, webhook='', secrets_unreadable=False)
+        if operation == 'test_notification':
+            return dict(channel=arguments['channel'], status='failed', error='tls')
+        if operation in ('set_alert_rule', 'set_schedule', 'delete_schedule', 'add_maintenance', 'delete_maintenance',
+                         'set_notifications'):
+            return dict(arguments)
         raise ValueError('Unknown mock operation')
 
 
@@ -862,7 +899,7 @@ class ServerGuiTests(unittest.TestCase):
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget
         self.assertIsInstance(self.window.tabs, QStackedWidget)
-        self.assertEqual(self.window.tabs.count(), 4)
+        self.assertEqual(self.window.tabs.count(), 5)
         bar = self.window.tabs.tabBar()
         bar.setFocus()
         with patch('lifetime_server_devices.reduced_motion', return_value=False):
@@ -1035,6 +1072,104 @@ class ServerGuiTests(unittest.TestCase):
                 self.window._apply_window_style()
                 self.assertFalse(self.window.grab().isNull())
 
+
+    def incident(self, number=1, state='open', **values):
+        return dict(dict(id=number, device_id=device(0)['device_id'], rule='disk_low', cause='disk_low', state=state,
+                         started_at='2026-11-07T11:00:00+00:00', opened_at='2026-11-07T11:30:00+00:00',
+                         acknowledged_by=None, acknowledged_at=None, resolved_at=None, resolution=None, notified=1,
+                         value=4.0, device_name='Computer 000', group_name='Sales'), **values)
+
+    def test_incidents_page_badge_acknowledge_and_vietnamese(self):
+        self.api.incidents = [self.incident(), self.incident(2, 'resolved', rule='offline', value=None,
+                                                             resolved_at='2026-11-07T12:00:00+00:00', resolution='recovered')]
+        self.api.alerts = dict(open=1, acknowledged=0, suppressed=0, pending=0, active=1, paused=0, telemetry_missing=0)
+        self.load([device(0)])
+        alerts = self.window.alerts
+        self.assertTrue(alerts.badge.isVisible())
+        self.assertEqual(alerts.badge.text(), '1 open alert')
+        self.assertEqual(self.window.tabs.tabText(2), 'Incidents (1)')
+        alerts.badge.click()
+        self.assertEqual(self.window.tabs.currentIndex(), 2)
+        self.assertEqual(alerts.table.rowCount(), 1)        # current problems only by default
+        self.assertEqual([alerts.table.item(0, column).text() for column in (0, 1, 2)],
+                         ['Computer 000', 'Disk almost full · 4%', 'Needs attention'])
+        alerts.filter.setCurrentIndex(alerts.filter.findData(''))
+        self.wait_idle()
+        self.assertEqual(alerts.table.rowCount(), 2)
+        alerts.table.selectRow(0)
+        self.wait_idle()
+        self.assertIn('Incident opened', alerts.detail.text())
+        self.assertIn('Sign-in refused', alerts.detail.text())
+        self.assertTrue(alerts.acknowledge_button.isEnabled())
+        alerts.acknowledge_button.click()
+        self.wait_idle()
+        call = next(arguments for operation, arguments, _ in self.api.calls if operation == 'acknowledge')
+        self.assertEqual(call['incident_id'], 1)
+        self.assertTrue(call['by'])
+        self.assertEqual(alerts.table.item(0, 2).text(), 'Acknowledged')
+        self.assertFalse(alerts.acknowledge_button.isEnabled())
+        self.window.language = 'vi'
+        self.window.retranslate()
+        self.assertEqual(self.window.tabs.tabText(2), 'Sự cố (1)')
+        self.assertEqual(alerts.table.item(0, 2).text(), 'Đã xác nhận')
+        self.assertEqual(alerts.badge.text(), '1 cảnh báo đang mở')
+        self.api.alerts = None
+        self.window.refresh()
+        self.wait_idle()
+        self.assertFalse(alerts.badge.isVisible())
+
+    def test_device_detail_shows_its_incident_history_and_monitoring_state(self):
+        row = device(0)
+        row['alerts'] = dict(incidents=[self.incident(state='acknowledged', acknowledged_by='Lan')],
+                             status=dict(presence='online', expected=True, paused=True, missing=['cpu_high']))
+        self.load([row])
+        self.window.tabs.setCurrentIndex(1)
+        self.window._select_box(row['device_id'])
+        self.wait_idle()
+        text = self.window.detail_text.toPlainText()
+        for expected in ('Incidents', 'Disk almost full · 4%', 'Acknowledged', 'Paused by maintenance',
+                         'Telemetry missing: Processor busy'):
+            self.assertIn(expected, text)
+
+    def test_alert_settings_save_through_the_admin_api(self):
+        self.load([device(0)])
+        alerts = self.window.alerts
+        box, threshold, minutes, version, label = alerts.rule_rows['disk_low']
+        self.assertEqual(label.text(), 'Disk almost full')
+        threshold.setValue(20)
+        alerts.rule_rows['agent_outdated'][3].setText('1.2.0')
+        alerts.save_rules()
+        self.wait_idle()
+        changes = [arguments for operation, arguments, _ in self.api.calls if operation == 'set_alert_rule']
+        self.assertEqual(changes, [dict(rule='disk_low', enabled=True, minutes=30, threshold=20),
+                                   dict(rule='agent_outdated', enabled=False, minutes=0, version='1.2.0')])
+        alerts.schedule_scope.setCurrentIndex(alerts.schedule_scope.findData('group'))
+        alerts.schedule_key.setText('Sales')
+        alerts.schedule_kind.setCurrentIndex(alerts.schedule_kind.findData('business'))
+        alerts.schedule_holidays.setText('2026-12-25, 2027-01-01')
+        alerts.save_schedule()
+        self.wait_idle()
+        schedule = next(arguments for operation, arguments, _ in self.api.calls if operation == 'set_schedule')
+        self.assertEqual((schedule['scope'], schedule['key'], schedule['kind'], schedule['weekdays'], schedule['holidays']),
+                         ('group', 'Sales', 'business', [0, 1, 2, 3, 4], ['2026-12-25', '2027-01-01']))
+        alerts.window_scope.setCurrentIndex(0)
+        alerts.add_window()
+        self.wait_idle()
+        window = next(arguments for operation, arguments, _ in self.api.calls if operation == 'add_maintenance')
+        self.assertEqual(window['scope'], 'all')
+        self.assertLess(window['start'], window['end'])
+        self.assertEqual(alerts.password.placeholderText(), 'Saved. Type to replace it.')
+        alerts.email_enabled.setChecked(True)
+        alerts.smtp_host.setText('mail.school.local')
+        alerts.recipients.setText('it@school.local; head@school.local')
+        alerts.save_notifications()
+        self.wait_idle()
+        saved = next(arguments for operation, arguments, _ in self.api.calls if operation == 'set_notifications')
+        self.assertNotIn('password', saved)         # an empty field keeps the stored password
+        self.assertEqual(saved['recipients'], ['it@school.local', 'head@school.local'])
+        alerts.send_test('email')
+        self.wait_idle()
+        self.assertEqual(alerts.test_result.text(), 'Test message failed: Secure connection failed')
 
 
 class AddComputerSheetTests(unittest.TestCase):

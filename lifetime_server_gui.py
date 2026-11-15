@@ -29,6 +29,7 @@ import os
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
+from lifetime_server_alerts import AlertsUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
 from lifetime_reveal import RollLabel, fade_in
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
@@ -253,6 +254,7 @@ class ServerWindow(QMainWindow):
         self._open_after_load = None
         self._make_overview()
         self._make_devices()
+        self.alerts = AlertsUI(self)        # the Incidents page, the header alert badge and the alert settings
         self._make_admin()
         self._make_this_server()
         self.local_server = QLabel(self.t('Local server: {name}', name=socket.gethostname()), body)
@@ -1401,6 +1403,7 @@ class ServerWindow(QMainWindow):
         log_layout.addWidget(self.server_log_empty)
         self.server_log.hide()
         self.admin_layout.addWidget(log_panel)
+        self.alerts.admin(self.admin_layout)
         retention, form = self._form_section('Data retention')
         self.retention_boundary = QLabel()
         self.retention_boundary.setWordWrap(True)
@@ -1622,8 +1625,9 @@ class ServerWindow(QMainWindow):
         for widget, key, setter in self._bindings:
             getattr(widget, setter)(self.t(key))
             widget.setAccessibleName(self.t(key))
-        for index, key in enumerate(('Overview', 'Devices', 'Administration', 'This Server')):
+        for index, key in enumerate(('Overview', 'Devices', 'Incidents', 'Administration', 'This Server')):
             self.tabs.setTabText(index, self.t(key))
+        self.alerts.retranslate()
         for index, key in enumerate(('All statuses', 'Pending approval', 'Approved', 'Denied', 'Disconnected', 'Connected', 'Offline', 'Unavailable')):
             self.status_filter.setItemText(index, self.t(key))
         self.table.setHorizontalHeaderLabels([self.t(key) for key in
@@ -1715,7 +1719,7 @@ class ServerWindow(QMainWindow):
             self.status_label.setText(self.t(
                 "Can't reach the Lifetime server. Make sure it is running."))
         elif not self._status_failure:
-            self.status_label.setText(self.t('Working…' if self._jobs else 'Ready'))
+            self.status_label.setText(self.t('Working…' if any(job not in self._quiet_jobs for job in self._jobs) else 'Ready'))
         callback(result, success)
         self._update_busy()
 
@@ -1728,6 +1732,7 @@ class ServerWindow(QMainWindow):
         self._load_overview()
         self._load_fleet()
         self._load_server_info()
+        self.alerts.load()
 
     def _load_overview(self):
         if self._closed:
@@ -1770,6 +1775,7 @@ class ServerWindow(QMainWindow):
             self._load_overview()
 
     def _render_overview(self, result):
+        self.alerts.overview(result.get('alerts'))
         for key, code in (('All devices', 'total'), ('Online', 'reporting'),
                           ('Offline', 'report-overdue'), ('Pending approval', 'pending'),
                           ('Approved', 'approved'), ('Denied', 'denied'), ('Disconnected', 'revoked'), ('Unavailable', 'unavailable')):
@@ -2185,7 +2191,7 @@ class ServerWindow(QMainWindow):
             return '<table width="100%" cellspacing="0" cellpadding="4">' + ''.join(
                 T('<tr><td style="color:#9FB0CC;">') + e(self.t(key)) +
                 '</td><td>' + e(value) + '</td></tr>' for key, value in rows) + '</table>'   # no colons, as on Overview
-        contents = table(fields)
+        contents = table(fields) + self.alerts.device_html(device)
         health = (device.get('readings') or {}).get('health') or device.get('health') or {}
         contents += '<p style="font-weight:600;margin:12px 0 4px">' + e(self.t('Health')) + '</p>'
         contents += table([(title, missing if health.get(field) is None else (self._timestamp(health[field]) if field == 'last_crash' else str(health[field]) + ('%' if field == 'battery_health' else ''))) for title, field in (('Crashes in 30 days', 'crashes_30d'), ('Unexpected shutdowns in 30 days', 'shutdowns_30d'), ('Battery health', 'battery_health'), ('Cycle count', 'cycle_count'), ('Last crash', 'last_crash'))])
