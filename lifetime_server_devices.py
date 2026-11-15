@@ -11,7 +11,7 @@ from lifetime_server_widgets import reduced_motion, more_icon
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_theme
 from lifetime_glass import STYLES, set_style, active_style, paint_classic, paint_glass, Glass, glass   # shared with the desktop app
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase
-from lifetime_widgets_dashboard import VISUAL_ROLE, MiniSpark, StatusChip, chip_width, paint_cell
+from lifetime_widgets_dashboard import VISUAL_ROLE, HeartbeatBar, MiniSpark, StatusChip, chip_width, paint_cell
 
 
 class SegmentedBar(QTabBar):
@@ -638,6 +638,11 @@ class DeviceBox(QWidget):
             self.sparks[key] = spark
         meters.addStretch()
         layout.addLayout(meters)
+        # The last 24 hours, one tick an hour (online, offline, unknown), when monitoring has a record.
+        self.presence = HeartbeatBar(14)
+        self.presence.setMaximumWidth(360)
+        self.presence.hide()
+        layout.addWidget(self.presence)
         layout.addWidget(self.bottom)
         # Labels must let the whole card receive mouse input.
         for label in self.findChildren(QLabel):
@@ -690,9 +695,13 @@ class DeviceBox(QWidget):
         battery = perf.get('battery_percent')
         self.bottom.setText(t('Disk free: {disk} · Battery: {battery} · Last seen: {seen}', disk=disk_text,
                              battery=missing if battery is None else f'{battery:.0f}%', seen=window._relative(device.get('last_received_at'))))
+        ticks, presence = window.presence_ticks(device.get('presence'))
+        self.presence.set_ticks(ticks, presence)
+        self.presence.setVisible(bool(ticks))
         self.menu_button.setAccessibleName(t('Actions for {name}', name=name))
         self.intro.ready()
-        self.setAccessibleName(' · '.join((self.name.text(), self.user.text(), self.status.text(), self.spec.text(), self.attention.text(), self.bottom.text())))
+        self.setAccessibleName(' · '.join(part for part in (self.name.text(), self.user.text(), self.status.text(), self.spec.text(),
+                                                            self.attention.text(), presence, self.bottom.text()) if part))
         self.setToolTip(self.accessibleName())
 
     def _intro_step(self):

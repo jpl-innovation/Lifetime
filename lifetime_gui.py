@@ -30,7 +30,7 @@ from lifetime_setup import SetupDialog, SettingsPage, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
-from lifetime_widgets_dashboard import Icon as Glyph
+from lifetime_widgets_dashboard import CapacityBar, StatusChip, Icon as Glyph
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase, progress, warm_pages
 from lifetime_tasks import Tasks
 
@@ -346,6 +346,20 @@ class StatCard(QFrame):
         self.divider = False
         self.list_mode = False
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_height()
+
+    def _fit_height(self):
+        """104 px holds a two-line heading; a narrow tile whose heading wraps to three lines (Vietnamese at 1024 px:
+        'Hoạt động trung bình / ngày') grows instead of cutting the last line off."""
+        if self.list_mode:
+            return
+        width = self.width() - 32 - 22     # margins, then the glyph and its gap
+        needed = 24 + self.heading_label.heightForWidth(max(1, width)) + 8 + self.value.sizeHint().height()
+        if self.height() != max(104, needed):
+            self.setFixedHeight(max(104, needed))
+
     def set_list_mode(self, enabled, divider):
         self.list_mode, self.divider = enabled, divider
         self.box.setDirection(QVBoxLayout.Direction.LeftToRight if enabled else QVBoxLayout.Direction.TopToBottom)
@@ -353,6 +367,7 @@ class StatCard(QFrame):
         self.box.setStretch(1, 1 if enabled else 0)
         self.value.setAlignment(Qt.AlignmentFlag.AlignRight if enabled else Qt.AlignmentFlag.AlignLeft)
         self.setFixedHeight(56 if enabled else 104)
+        self._fit_height()
         self.update()
 
     def set_number(self, value, formatter):
@@ -744,6 +759,23 @@ class Window(QWidget):
         intro = label(tr('Reports and details for this computer.'), 'caption')
         intro.setWordWrap(True)
         reports_layout.addWidget(intro)
+        # Where the saved time comes from, as one bar: measured here, read back from the OS logs, typed in by hand.
+        # Each part also has a chip with its glyph and words, so the colours are never the only key.
+        self.sources_panel = QFrame()
+        self.sources_panel.setObjectName('insetPanel')
+        sources = QVBoxLayout(self.sources_panel)
+        sources.setContentsMargins(16, 14, 16, 14)
+        sources.setSpacing(10)
+        self.sources_bar = CapacityBar()
+        sources.addWidget(self.sources_bar)
+        chips = QHBoxLayout()
+        chips.setSpacing(8)
+        self.source_chips = {key: StatusChip(kind) for key, kind in (('measured', 'good'), ('imported', 'info'), ('baseline', 'neutral'))}
+        for chip in self.source_chips.values():
+            chips.addWidget(chip)
+        chips.addStretch()
+        sources.addLayout(chips)
+        reports_layout.addWidget(self.sources_panel)
         self.report_list = QFrame()
         self.report_list.setObjectName('insetPanel')
         reports_list = QVBoxLayout(self.report_list)
@@ -1148,6 +1180,17 @@ class Window(QWidget):
             text = tr('verify.ledger_error', message=text)
         self.verification.setText(text)
 
+    def _show_sources(self, parts):
+        known = {key: parts[f'{key}_seconds'] for key in self.source_chips if parts.get(f'{key}_seconds') is not None}
+        total = sum(known.values())
+        self.sources_panel.setVisible(total > 0)       # nothing saved yet: no empty bar
+        words = {'measured': 'Measured: {time}', 'imported': 'OS logs: {time}', 'baseline': 'Manual baseline: {time}'}
+        for key, chip in self.source_chips.items():
+            chip.set_state(chip.kind, tr(words[key], time=duration(known[key]) if key in known else tr('Not available')))
+        self.sources_bar.set_segments([(known.get(key, 0), self.source_chips[key].kind) for key in self.source_chips], total,
+                                      tr('Where the saved time comes from'), duration(total),
+                                      ', '.join(chip.text() for chip in self.source_chips.values()))
+
     def tray_status(self):
         if not self.isVisible():    # the window timer is stopped while hidden
             self.refresh()
@@ -1360,6 +1403,7 @@ class Window(QWidget):
                 return duration(value) if value is not None else tr('Not available')
             self.source_breakdown.setText(tr('Saved sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}',
                 measured=component(parts['measured_seconds']), imported=component(parts['imported_seconds']), baseline=component(parts['baseline_seconds'])))
+            self._show_sources(parts)
             if not self.initialized or abs(total - self.hero.target) > 5:
                 self.hero.set_total(total)
             else:

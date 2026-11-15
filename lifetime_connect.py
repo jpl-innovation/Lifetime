@@ -361,8 +361,20 @@ class ConnectPage(QWidget):
         self._report_started = None
         f = self.forms[4]
         self.connected_title = self.pulse(f, 'Connected', True)
-        self.summary = self.note(f, '')
-        self.summary.setTextFormat(Qt.TextFormat.PlainText)
+        # The connection as a card: the server's name, then its address, the last report and what is shared.
+        from lifetime_widgets_dashboard import InfoCard
+        self.summary = InfoCard('network', '')
+        self.summary_values = {}
+        for key in ('Server address', 'Last report', 'Shared with the server'):
+            value = QLabel()
+            value.setTextFormat(Qt.TextFormat.PlainText)
+            self.summary_values[key] = (self.summary.add_row(self.t(key), value), value)
+        self.summary_trimmed = QLabel()
+        self.summary_trimmed.setObjectName('caption')
+        self.summary_trimmed.setWordWrap(True)
+        self.summary_trimmed.setTextFormat(Qt.TextFormat.PlainText)
+        self.summary.extra.addWidget(self.summary_trimmed)
+        f.addWidget(self.summary)
         self.unreachable = self.note(f, "Can't reach the server right now. Lifetime will keep trying.")
         self.unreachable.hide()
         self.button(f, 'Change what is shared', self.change_policy)
@@ -650,10 +662,15 @@ class ConnectPage(QWidget):
                 names.append(title)
         if self.status.get('updates'):
             names.append(UPDATES)
-        self.summary.setText(self.server_name + '\n' + self.server_address + '\n' +
-                             self.t('Last report: {time}', time=self._local_time(self.status.get('last_sync')) or self.t('Not available')) +
-                             '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)) +
-                             ('\n\n' + self.t(TRIMMED) if self.status.get('trimmed') else ''))
+        self.summary.title.setText(self.server_name)
+        values = {'Server address': self.server_address,
+                  'Last report': self._local_time(self.status.get('last_sync')) or self.t('Not available'),
+                  'Shared with the server': '\n'.join(self.t(name) for name in names)}
+        for key, (title, value) in self.summary_values.items():
+            title.setText(self.t(key))      # the language may have changed since the card was built
+            value.setText(values[key])
+        self.summary_trimmed.setText(self.t(TRIMMED) if self.status.get('trimmed') else '')
+        self.summary_trimmed.setVisible(bool(self.status.get('trimmed')))
         self._set_reachable(self.status.get('status') not in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
 
     def _code_rejected(self, state):

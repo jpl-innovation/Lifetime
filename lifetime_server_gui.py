@@ -38,7 +38,7 @@ from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_sty
 from lifetime_charts import Plot, Insights
 from lifetime_health_gui import HealthPage
 from lifetime_system_gui import HardwarePanel
-from lifetime_widgets_dashboard import VISUAL_ROLE, CapacityBar, EmptyState, HeartbeatBar, InfoCard, StatusChip, SummaryStrip, interval_ticks
+from lifetime_widgets_dashboard import VISUAL_ROLE, CapacityBar, EmptyState, EventRail, HeartbeatBar, InfoCard, StatusChip, SummaryStrip, interval_ticks
 from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
@@ -67,6 +67,12 @@ LOG_TEXT = {('server-started', None): 'Server started', ('server-stopped', None)
             ('restore-applied', None): 'Backup restored at start',
             ('restore-failed', None): 'Staged backup refused at start (kept as restore-failed.zip)'}
 
+# The rail dot of a server log event: green for a healthy step, amber for a refused request, red for a failure.
+LOG_KIND = {'server-started': 'good', 'certificate-renewed': 'good', 'restore-applied': 'good',
+            'server-stopped': 'neutral', 'names-changed': 'info',
+            'report-rejected': 'warning', 'enrollment-refused': 'warning', 'admin-pipe-unavailable': 'warning',
+            'certificate-renewal-failed': 'danger', 'restore-failed': 'danger'}
+
 
 def _create_bundle(client, directory, address, ttl, uses):
     # Read/validate public trust material before consuming a new pairing code.
@@ -83,6 +89,30 @@ def text(key, language='en', **values):
     else:
         value = SERVER_TEXT_VI.get(key, key) if language == 'vi' else key
     return value.format(**values)
+
+
+class ElidedLabel(QLabel):
+    """One line that ends in '…' when it has less room than its text, with the whole text as the tooltip. The header
+    subtitle gets only what the brand column has left: 'Demo-Server · Mạng nội bộ' was cut to 'Mạng nộ'."""
+    def __init__(self):
+        super().__init__()
+        self.full = ''
+
+    def setText(self, text):
+        self.full = str(text)
+        self._elide()
+
+    def text(self):
+        return self.full
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
+        shown = self.fontMetrics().elidedText(self.full, Qt.TextElideMode.ElideRight, max(0, self.width()))
+        super().setText(shown)
+        self.setToolTip(self.full if shown != self.full else '')
 
 
 class _Item(QTableWidgetItem):
@@ -106,6 +136,7 @@ class ServerWindow(QMainWindow):
         self.tasks.completed.connect(lambda number, result: self._completed(number, result, True))
         self.tasks.failed.connect(lambda number, error: self._completed(number, None, False, error))
         self._jobs = {}
+        self._presence_cache = {}       # device id -> (monotonic time, presence rows); written by the list worker only
         self._quiet_jobs = set()
         self._closed = False
         self._revision, self._list_busy, self._list_again = 0, False, False
@@ -177,7 +208,7 @@ class ServerWindow(QMainWindow):
         title.setFont(font)
         title.setStyleSheet('font-size: 20px; font-weight: 600;')
         names.addWidget(title)
-        self.network_label = self.label('Local network')
+        self.network_label = self.bind(ElidedLabel(), 'Local network')
         self.network_label.setObjectName('muted')
         self.network_label.setWordWrap(False)
         self.network_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -502,21 +533,16 @@ class ServerWindow(QMainWindow):
         title = self.label('Recent events')
         title.setObjectName('sectionTitle')
         events_layout.addWidget(title)
-        self.events = QTableWidget(0, 3)
+        # The latest five events as a rail, newest at the top: what happened in words, then when and which computer.
+        self.events = EventRail()
         self.events.setObjectName('fleetEvents')
-        self._style_table(self.events)
         self.events.setAccessibleName(self.t('Recent events'))
-        self.events.horizontalHeader().hide()
-        self.events.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        # The event ("Went offline") is what people read, so it gets the width it needs; the long computer name yields.
-        self.events.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.events.setTextElideMode(Qt.TextElideMode.ElideMiddle)
-        self.events.horizontalHeader().setMinimumSectionSize(40)     # the default 100 px pushed the time out of the panel
-        self.events.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.events.verticalHeader().setDefaultSectionSize(40)
-        self.events.setMinimumHeight(216)     # five rows of chips, not cut at the bottom
-        self.events.setMaximumHeight(222)
+        self.events.setFixedHeight(5 * EventRail.ROW)       # room for the loading skeleton until the first answer
         events_layout.addWidget(self.events)
+        self.events_empty = self.label('No events yet')
+        self.events_empty.setObjectName('muted')
+        self.events_empty.hide()
+        events_layout.addWidget(self.events_empty)
         self.gauge_panel, gauge_layout = self._panel()
         title = self.label('Online now')
         title.setObjectName('sectionTitle')
@@ -1449,20 +1475,22 @@ class ServerWindow(QMainWindow):
         log_note = self.label('Recent server events: starts and stops, certificate renewals and refused requests. No report contents or codes are kept.')
         log_note.setObjectName('muted')
         log_layout.addWidget(log_note)
-        self.server_log = QTableWidget(0, 3)
+        self.server_log = EventRail()
         self.server_log.setObjectName('serverLog')
-        self._style_table(self.server_log)
-        self.server_log.setFixedHeight(220)
-        self.server_log.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.server_log.setAccessibleName(self.t('Server log'))
-        self.server_log.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for column in (0, 2):
-            self.server_log.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        log_layout.addWidget(self.server_log)
+        self.server_log_scroll = QScrollArea()      # five rows tall; the rest of the 50 scrolls
+        self.server_log_scroll.setWidget(self.server_log)
+        self.server_log_scroll.setWidgetResizable(True)
+        self.server_log_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.server_log_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.server_log_scroll.setFixedHeight(5 * EventRail.ROW)
+        self.server_log_scroll.viewport().setAutoFillBackground(False)
+        self.server_log.setAutoFillBackground(False)
+        log_layout.addWidget(self.server_log_scroll)
         self.server_log_empty = self.label('No server events yet')
         self.server_log_empty.setObjectName('muted')
         log_layout.addWidget(self.server_log_empty)
-        self.server_log.hide()
+        self.server_log_scroll.hide()
         self.admin_layout.addWidget(log_panel)
         self.access_ui.audit_section(self.admin_layout)
         self.alerts.admin(self.admin_layout)
@@ -1719,8 +1747,10 @@ class ServerWindow(QMainWindow):
             self.chart_range.setItemText(index, self.t(key))
         self.invitation_table.setHorizontalHeaderLabels([self.t(key) for key in ('Invitation', 'Expires', 'Uses left', 'Wrong guesses', 'Status', 'Actions')])
         self.admin_pending.setHorizontalHeaderLabels([self.t('Device'), self.t('Awaiting approval'), '', ''])
-        self.server_log.setHorizontalHeaderLabels([self.t(key) for key in ('Time', 'Event', 'Device')])
         self.server_log.setAccessibleName(self.t('Server log'))
+        self.events.setAccessibleName(self.t('Recent events'))
+        if getattr(self, '_admin_result', None) is not None:
+            self._render_server_log(self._admin_result.get('log') or [])
         self.fleet_group.setItemText(0, self.t('All groups'))
         locale = QLocale('vi_VN' if self.language == 'vi' else 'en_GB')
         self.setLocale(locale)
@@ -1731,7 +1761,6 @@ class ServerWindow(QMainWindow):
         if self._server_info:
             self.network_label.setText((self._server_info.get('organisation') or self._server_info['name']) + ' · ' + self.t('Local network'))
         self.local_server.setText(self.t('Local server: {name}', name=(self._server_info or {}).get('name', socket.gethostname())))
-        self.events.setHorizontalHeaderLabels([self.t(key) for key in ('Device ID', 'Event', 'Time')])
         if self._overview_result is not None:
             self._render_overview(self._overview_result)
         if self._configuration_result is not None:
@@ -1872,16 +1901,7 @@ class ServerWindow(QMainWindow):
                                             known=result['known_devices'], unknown=result['unknown_devices']))
         self.overview_health.setText(self.t('Service available · schema {version} · server time {time}',
                                             version=result['schema_version'], time=result['server_time']))
-        vertical, horizontal = self.events.verticalScrollBar().value(), self.events.horizontalScrollBar().value()
-        self.events.setRowCount(len(result['recent_events']))
-        for row, event in enumerate(result['recent_events']):
-            kind = self.t('Report received' if event['kind'] == 'report-received' else 'Waiting for approval')
-            for column, value in enumerate((event['device_id'], kind, event['time'])):
-                self.events.setItem(row, column, QTableWidgetItem(value))
-        self.events.verticalScrollBar().setValue(vertical)
-        self.events.horizontalScrollBar().setValue(horizontal)
-        if self._fleet_result is not None:
-            self._render_fleet_events(self._fleet_result['recent_events'])
+        self._render_fleet_events((self._fleet_result or result)['recent_events'])
 
     def _configuration_edited(self):
         self._configuration_dirty = True
@@ -1956,7 +1976,11 @@ class ServerWindow(QMainWindow):
                 return (not bool(problems(d)), secondary, name)
             all_rows.sort(key=key)
             metadata['matching'] = len(all_rows)
-            return all_rows[arguments['offset']:arguments['offset'] + arguments['limit']], metadata
+            page = all_rows[arguments['offset']:arguments['offset'] + arguments['limit']]
+            for device in page:
+                if device.get('status') == 'approved':
+                    device['presence'] = self._listed_presence(client, device['device_id'])
+            return page, metadata
         submitted = self._submit(work, lambda result, ok: self._devices_finished(result, ok, revision))
         if not submitted:
             self._list_busy = False
@@ -2040,7 +2064,8 @@ class ServerWindow(QMainWindow):
                 box.menu_requested.connect(self._device_menu)
                 self.table.setCellWidget(row_number, 0, box)
             box.set_device(device, self)
-            self.table.setRowHeight(row_number, max(178, box.sizeHint().height()))
+            # 178 px fits a card's usual lines; its row of hourly ticks needs 20 more (a card with a problem line was squeezed).
+            self.table.setRowHeight(row_number, max(178 + (20 if not box.presence.isHidden() else 0), box.sizeHint().height()))
         self.table.horizontalHeader().blockSignals(True)
         self.table.setSortingEnabled(False)
         self.table.horizontalHeader().blockSignals(False)
@@ -2154,11 +2179,30 @@ class ServerWindow(QMainWindow):
         self._submit(lambda: client.call('presence', device_id=device_id, limit=200),
                      lambda result, ok: self._render_presence(result if ok else None, revision), quiet=True)
 
+    def _listed_presence(self, client, device_id):
+        """Runs in the device list's worker thread. One small query per listed computer, at most once a minute each."""
+        cached = self._presence_cache.get(device_id)
+        if cached and time.monotonic() - cached[0] < 60:
+            return cached[1]
+        try:
+            rows = client.call('presence', device_id=device_id, limit=48)
+        except Exception:       # monitoring unavailable: the card simply shows no ticks
+            rows = None
+        self._presence_cache[device_id] = (time.monotonic(), rows)
+        return rows
+
     def _render_presence(self, rows, revision):
         """Hourly ticks for the last 24 hours from the monitoring presence history (online, offline, unknown); an hour
         with no record stays an outline. Hidden when monitoring has nothing for this computer."""
         if revision != self._detail_revision:
             return
+        ticks, summary = self.presence_ticks(rows)
+        self.presence_box.setVisible(bool(ticks))
+        self.presence_bar.set_ticks(ticks, summary)
+
+    def presence_ticks(self, rows):
+        """([(kind, tooltip)] for the last 24 hours, one per hour, and the sentence that sums them up); ([], '') when
+        monitoring has no record. Shared by the device detail and the cards in the device list."""
         now = dt.datetime.now(dt.timezone.utc)
         start = now - dt.timedelta(hours=24)
         kinds = {'online': 'good', 'offline': 'warning', 'unknown': 'neutral'}
@@ -2167,16 +2211,15 @@ class ServerWindow(QMainWindow):
             return dt.datetime.fromisoformat(stamp.replace('Z', '+00:00')) if stamp else None
         intervals = [(kinds.get(row.get('state'), 'neutral'), moment(row['start_at']), moment(row.get('end_at')))
                      for row in rows or [] if row.get('start_at')]
-        self.presence_box.setVisible(bool(intervals))
         if not intervals:
-            return self.presence_bar.set_ticks([])
+            return [], ''
         states = interval_ticks(intervals, start, now, 24)
         ticks = []
         for index, kind in enumerate(states):
             begin = (start + dt.timedelta(hours=index)).astimezone()
             ticks.append((kind, f"{begin.strftime('%H:%M')}–{(begin + dt.timedelta(hours=1)).strftime('%H:%M')} · {self.t(words[kind])}"))
         online = sum(kind == 'good' for kind in states)
-        self.presence_bar.set_ticks(ticks, self.t('Last 24 hours: online in {online} of 24 hours', online=online))
+        return ticks, self.t('Last 24 hours: online in {online} of 24 hours', online=online)
 
     def _detail_finished(self, result, success, revision, device_id):
         if revision != self._detail_revision or self.selected_device_ids() != [device_id]:
@@ -2824,8 +2867,6 @@ class ServerWindow(QMainWindow):
     def _render_fleet_events(self, events):
         # Recent means recent: the latest five fit the panel without a scrollbar; the full log lives in Administration.
         events = list(events)[:5]
-        self.events.setRowCount(len(events))
-        self.events.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         kinds = {'report-received': 'Synchronized', 'report-overdue': 'Went offline',
                  'enrollment-pending': 'Awaiting approval', 'revoked': 'Disconnected', 'invitation-used': 'Invitation used',
                  'command-pending': 'Command sent', 'command-delivered': 'Command delivered', 'command-done': 'Command finished',
@@ -2833,16 +2874,12 @@ class ServerWindow(QMainWindow):
                  'wake': 'Turn on sent'}
         chips = {'report-received': 'good', 'report-overdue': 'warning', 'enrollment-pending': 'info', 'command-failed': 'danger',
                  'revoked': 'neutral'}
-        for index, event in enumerate(events):
-            values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time'])[:5])   # HH:MM; the tooltip has the full stamp
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                item.setToolTip(event['time'] if column == 2 else value)
-                if column == 1:
-                    item.setData(VISUAL_ROLE, ('chip', chips.get(event['kind'], 'neutral')))
-                if column == 2:
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.events.setItem(index, column, item)
+        self.events.set_events([(chips.get(event['kind'], 'neutral'), self.t(kinds.get(event['kind'], 'Unknown')),
+                                 self._clock_text(event['time'])[:5], event.get('name') or event.get('device_id') or '')
+                                for event in events], self.t('Recent events'))      # HH:MM; the tooltip has the full stamps
+        self.events.setToolTip('\n'.join(f"{self._timestamp(event['time'])} · {event.get('name') or event.get('device_id') or ''}" for event in events))
+        self.events.setVisible(bool(events))
+        self.events_empty.setVisible(not events)
 
     @staticmethod
     def _clock_text(stamp):
@@ -2856,6 +2893,9 @@ class ServerWindow(QMainWindow):
             self._select_box(self._fleet_selected)
         else:   # on another page of the list or filtered out: narrow the list to it, then select
             self._open_after_load = self._fleet_selected
+            # A status, group or chip filter left on (e.g. by Review pending) would hide it: "No computers match".
+            self.group.setCurrentIndex(0)
+            self._set_chip('all')
             self.search.setText(self._fleet_selected)
 
     def _listed_device_ids(self):
@@ -2915,6 +2955,7 @@ class ServerWindow(QMainWindow):
             selections[table] = table.item(indexes[0].row(), 0).data(Qt.ItemDataRole.UserRole) if len(indexes) == 1 else None
             table.clearSelection()
         self.invitation_table.setRowCount(len(result['invitations']))
+        self._fit_rows(self.invitation_table, len(result['invitations']))
         self.invitation_previous.setEnabled(self._invitation_offset > 0)
         self.invitation_next.setEnabled(len(result['invitations']) == 100)
         for table in (self.admin_pending, self.invitation_table):
@@ -2924,6 +2965,7 @@ class ServerWindow(QMainWindow):
                     if wrapper:
                         wrapper.hide()
         self.admin_pending.setRowCount(len(result['pending']))
+        self._fit_rows(self.admin_pending, len(result['pending']))
         self.approvals_empty.setVisible(not result['pending'])
         self.admin_pending.setVisible(bool(result['pending']))
         self._admin_row_actions = []
@@ -2985,17 +3027,25 @@ class ServerWindow(QMainWindow):
                  else self.t(PROBLEM_TEXT.get(kind, 'Unknown')))
         return label + ' · ' + self._relative(problem.get('at'))
 
+    @staticmethod
+    def _fit_rows(table, rows, most=4):
+        """Tall enough for every row up to `most`, then it scrolls. A fixed height cut rows in half (Pending approvals
+        was 140 px for 56 px rows)."""
+        table.setFixedHeight(table.horizontalHeader().sizeHint().height() + 2 * table.frameWidth() + 2 +
+                             table.verticalHeader().defaultSectionSize() * min(most, max(1, rows)))
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded if rows > most else Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
     def _render_server_log(self, log):
-        self.server_log.setRowCount(len(log))
-        for index, entry in enumerate(log):
+        """The server log as an event rail, newest at the top: the event in words, then when and which computer."""
+        rows = []
+        for entry in log:
             event = self.t(LOG_TEXT.get((entry.get('kind'), entry.get('category')), 'Unknown'))
             if entry.get('count', 1) > 1:
                 event = self.t('{event} ({count} times)', event=event, count=entry['count'])
-            for column, value in enumerate((self._timestamp(entry.get('time')), event, entry.get('name') or entry.get('device_id') or '')):
-                item = QTableWidgetItem(value)
-                item.setToolTip(value)
-                self.server_log.setItem(index, column, item)
-        self.server_log.setVisible(bool(log))
+            rows.append((LOG_KIND.get(entry.get('kind'), 'neutral'), event, self._timestamp(entry.get('time')),
+                         entry.get('name') or entry.get('device_id') or ''))
+        self.server_log.set_events(rows, self.t('Server log'))
+        self.server_log_scroll.setVisible(bool(log))
         self.server_log_empty.setVisible(not log)
 
     def _certificate_text(self, certificate):

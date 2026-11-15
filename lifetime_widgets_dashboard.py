@@ -518,6 +518,7 @@ class InfoCard(Tile):
         box.addLayout(self.extra)
         box.addStretch(1)       # cards in one grid row share a height; spare room goes below the rows
         self.rows = 0
+        self.pairs = []
 
     def set_headline(self, text, tooltip=''):
         self.headline.setText(text or '')
@@ -540,7 +541,15 @@ class InfoCard(Tile):
         self.grid.addWidget(label, row * 2, column)
         self.grid.addWidget(value, row * 2 + 1, column)
         self.rows += 1
+        self.pairs.append((label, value))
         return label
+
+    def text(self):
+        """The card as plain lines, 'Key: value', then any notes below the rows (what a screen reader is given)."""
+        lines = [self.title.text()] + [f'{key.text()}: {value.text()}' for key, value in self.pairs if not value.isHidden()]
+        lines += [widget.text() for widget in self.findChildren(QLabel) if widget.parentWidget() is self
+                  and widget.text() and not widget.isHidden() and self.extra.indexOf(widget) >= 0]
+        return '\n'.join(line for line in lines if line)
 
 
 # ---- P10 health badge ----

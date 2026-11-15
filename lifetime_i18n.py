@@ -1538,6 +1538,19 @@ EN['Connection requests'] = 'Connection requests'
 VI['Connection requests'] = 'Yêu cầu kết nối'
 SERVER_DASHBOARD_VI['Connection requests'] = VI['Connection requests']
 
+_REPORT_SOURCES_VI = {
+    'Where the saved time comes from': 'Nguồn của thời gian đã lưu',
+    'Measured: {time}': 'Đo trực tiếp: {time}',
+    'OS logs: {time}': 'Nhật ký hệ điều hành: {time}',
+    'Manual baseline: {time}': 'Số giờ nền nhập tay: {time}',
+    'Server address': 'Địa chỉ máy chủ',
+    'Last report': 'Báo cáo gần nhất',
+    'Shared with the server': 'Đang chia sẻ với máy chủ',
+}
+for _key, _text in _REPORT_SOURCES_VI.items():
+    EN[_key] = _key
+    VI[_key] = _text
+
 _SWITCH_VI = {
     'Choose what Lifetime tracks and how it looks. Changes apply and save straight away.':
         'Chọn nội dung Lifetime theo dõi và giao diện. Thay đổi được áp dụng và lưu ngay.',
@@ -1651,6 +1664,10 @@ _TRUST_VI = {
     'Report conflicts with stored data': 'Báo cáo mâu thuẫn với dữ liệu đã lưu',
     'Server log': 'Nhật ký máy chủ',
     'No server events yet': 'Chưa có sự kiện máy chủ',
+    'No events yet': 'Chưa có sự kiện',
+    'No other account or group has a role yet.': 'Chưa có tài khoản hay nhóm nào khác được cấp vai trò.',
+    'No maintenance windows. Alerts open as usual.': 'Không có khoảng bảo trì. Cảnh báo được mở như bình thường.',
+    'No alert messages sent yet.': 'Chưa gửi tin nhắn cảnh báo nào.',
     'Recent server events: starts and stops, certificate renewals and refused requests. No report contents or codes are kept.':
         'Các sự kiện gần đây của máy chủ: khởi động và dừng, gia hạn chứng chỉ và các yêu cầu bị từ chối. Không lưu nội dung báo cáo hay mã.',
     '{event} ({count} times)': '{event} ({count} lần)',

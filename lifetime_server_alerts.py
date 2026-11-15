@@ -447,6 +447,8 @@ class AlertsUI:
         self.maintenance_table = self._table(5, 160)
         self.maintenance_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         content.addWidget(self.maintenance_table)
+        self.maintenance_empty = self._empty('No maintenance windows. Alerts open as usual.')
+        content.addWidget(self.maintenance_empty)
         add = ControlRow()
         add.setSpacing(8)
         self.window_scope = QComboBox()
@@ -529,6 +531,8 @@ class AlertsUI:
         self.delivery_table = self._table(5, 200)
         self.delivery_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         form.addRow(self.delivery_table)
+        self.delivery_empty = self._empty('No alert messages sent yet.')
+        form.addRow(self.delivery_empty)
         layout.addWidget(mail)
         self.checks_ui = ChecksUI(self)
         self.checks_ui.admin(layout)
@@ -566,6 +570,18 @@ class AlertsUI:
         if scope == 'group':
             return line.text().strip()
         return (picker.currentData() or '') if scope == 'device' else ''
+
+    def _empty(self, key):
+        """The sentence shown instead of a table with no rows (a blank table looks broken)."""
+        label = self.w.label(key)
+        label.setObjectName('muted')
+        label.hide()
+        return label
+
+    @staticmethod
+    def _show_rows(table, empty):
+        table.setVisible(table.rowCount() > 0)
+        empty.setVisible(table.rowCount() == 0)
 
     def _table(self, columns, height):
         table = QTableWidget(0, columns)
@@ -655,6 +671,7 @@ class AlertsUI:
             button.clicked.connect(lambda checked=False, identifier=window['id']:
                                    self._call('delete_maintenance', dict(window_id=identifier)))
             self.maintenance_table.setCellWidget(index, 4, table_action(button))
+        self._show_rows(self.maintenance_table, self.maintenance_empty)
         self.checks_ui.render(result)
         self.updates_ui.render(result)
         self.delivery_table.setRowCount(len(result['deliveries']))
@@ -668,6 +685,7 @@ class AlertsUI:
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
                 self.delivery_table.setItem(index, column, item)
+        self._show_rows(self.delivery_table, self.delivery_empty)
 
     def _scope_text(self, scope, key):
         if scope == 'default':

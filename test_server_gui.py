@@ -67,7 +67,7 @@ class FakeAdmin:
         if operation == 'devices':
             rows = copy.deepcopy(self.rows)
             rows = [row for row in rows if
-                    arguments.get('search', '').casefold() in str(row['identity']).casefold()
+                    arguments.get('search', '').casefold() in (row['device_id'] + str(row['identity'])).casefold()   # as the store
                     and (not arguments.get('group') or row['identity']['department'] == arguments['group'])
                     and (not arguments.get('status') or row['status'] == arguments['status'])]
             offset, limit = arguments.get('offset', 0), arguments.get('limit', 25)
@@ -362,8 +362,9 @@ class ServerGuiTests(unittest.TestCase):
         self.assertEqual(self.window.counts['All devices'].text(), '60')
         self.assertEqual(self.window.fleet_totals['Measured'].text(), '60.00')
         # The overview panel shows the five most recent events without a scrollbar; the full log is in Administration.
-        self.assertEqual(self.window.events.rowCount(), 5)
+        self.assertEqual(len(self.window.events.events), 5)       # an event rail: dot, words, then time and computer
         self.assertEqual(self.window.events.accessibleName(), 'Recent events')
+        self.assertEqual(self.window.events.height(), 5 * self.window.events.ROW)
         self.window.search.setText('Computer 059')
         self.wait_idle()
         self.assertEqual(self.window.table.rowCount(), 1)
@@ -905,10 +906,14 @@ class ServerGuiTests(unittest.TestCase):
                               device_id='d1', name='Lab PC', count=3),
                          dict(time='2026-11-15T00:00:00+00:00', kind='server-started', category=None, device_id=None, name=None, count=1)]
         self.window._render_server_info(result)
-        self.assertFalse(self.window.server_log.isHidden())
-        self.assertEqual(self.window.server_log.item(0, 1).text(), 'Từ chối báo cáo: dữ liệu không hợp lệ (3 lần)')
-        self.assertEqual(self.window.server_log.item(0, 2).text(), 'Lab PC')
-        self.assertEqual(self.window.server_log.item(1, 1).text(), 'Máy chủ đã khởi động')
+        self.assertFalse(self.window.server_log_scroll.isHidden())
+        self.assertTrue(self.window.server_log_empty.isHidden())
+        (kind, words, when, device), started = self.window.server_log.events
+        self.assertEqual((kind, words, device), ('warning', 'Từ chối báo cáo: dữ liệu không hợp lệ (3 lần)', 'Lab PC'))   # a refused request is amber
+        self.assertEqual(started[:2], ('good', 'Máy chủ đã khởi động'))
+        self.window.language_button.click()                        # the rail follows the language without a reload
+        self.assertEqual(self.window.server_log.events[1][1], 'Server started')
+        self.window.language_button.click()
         self.window.names_edit.setText('a.local, 192.0.2.5; b.local')
         self.window.names_button.click()
         self.wait_idle()
@@ -1321,6 +1326,65 @@ class ServerGuiTests(unittest.TestCase):
         self.wait_idle()
         self.assertTrue(self.window.presence_box.isHidden())     # no monitoring history: nothing drawn
 
+    def test_the_header_subtitle_elides_with_the_full_text_as_its_tooltip(self):
+        """QA click-through: 'Demo-Server · Mạng nội bộ' was cut mid-word to 'Mạng nộ' with no way to read the rest."""
+        self.load([device(0)])
+        self.window.language_button.click()
+        self.wait_idle()
+        label = self.window.network_label
+        self.assertEqual(label.text(), 'Demo-Server · Mạng nội bộ')
+        label.resize(90, label.height())
+        shown = super(type(label), label).text()
+        self.assertTrue(shown.endswith('…'), shown)
+        self.assertEqual(label.toolTip(), 'Demo-Server · Mạng nội bộ')
+        label.resize(400, label.height())
+        self.assertEqual(super(type(label), label).text(), 'Demo-Server · Mạng nội bộ')
+        self.assertEqual(label.toolTip(), '')
+        self.window.language_button.click()
+
+    def test_pending_approvals_show_whole_rows(self):
+        """QA click-through: the 140 px table cut the second request in half behind a scroll bar."""
+        rows = [device(i, status='pending') for i in range(2)]
+        for i, row in enumerate(rows):
+            row['pending_requests'] = [dict(request_id=f'r{i}')]
+        self.load(rows)
+        table = self.window.admin_pending
+        self.assertEqual(table.rowCount(), 2)
+        self.assertGreaterEqual(table.height(), table.horizontalHeader().sizeHint().height() + 2 * 56)
+        self.assertEqual(table.verticalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def test_open_device_from_overview_clears_a_filter_that_would_hide_it(self):
+        """QA click-through: after Review pending, Open device on an approved computer showed 'No computers match'."""
+        rows = [device(0), device(1, status='pending')]
+        self.load(rows)
+        self.window.review_pending()
+        self.wait_idle()
+        self.window.tabs.setCurrentIndex(0)
+        self.window._fleet_selected = rows[0]['device_id']
+        self.window.open_fleet_device()
+        self.wait_idle()
+        self.assertEqual(self.window.status_filter.currentData(), '')
+        self.assertEqual(self.window.selected_device_ids(), [rows[0]['device_id']])
+
+    def test_device_cards_show_24_hour_ticks_loaded_off_the_gui_thread(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        self.api.presence = [dict(state='online', reason='report', start_at=(now - dt.timedelta(hours=4.5)).isoformat(), end_at=None)]
+        self.load([device(0), device(1, status='pending')])
+        self.window.tabs.setCurrentIndex(1)
+        self.wait_idle()
+        boxes = {self.window.table.cellWidget(r, 0).device_id: self.window.table.cellWidget(r, 0) for r in range(self.window.table.rowCount())}
+        approved, pending = boxes[device(0)['device_id']], boxes[device(1)['device_id']]
+        self.assertEqual(len(approved.presence.ticks), 24)
+        self.assertEqual(approved.presence.ticks[-1][0], 'good')
+        self.assertFalse(approved.presence.isHidden())
+        self.assertIn('online in 5 of 24 hours', approved.accessibleName())
+        self.assertTrue(pending.presence.isHidden())         # not connected yet: no monitoring record to show
+        presence_calls = [c for c in self.api.calls if c[0] == 'presence']
+        self.assertEqual([c[1]['device_id'] for c in presence_calls], [device(0)['device_id']])   # the fake client fails on the GUI thread
+        self.window.refresh()
+        self.wait_idle()
+        self.assertEqual(len([c for c in self.api.calls if c[0] == 'presence']), 1)    # cached for a minute, not asked on every refresh
+
     def test_device_detail_shows_its_incident_history_and_monitoring_state(self):
         row = device(0)
         row['alerts'] = dict(incidents=[self.incident(state='acknowledged', acknowledged_by='Lan')],
@@ -1339,6 +1403,11 @@ class ServerGuiTests(unittest.TestCase):
         alerts = self.window.alerts
         box, threshold, minutes, version, label = alerts.rule_rows['disk_low']
         self.assertEqual(label.text(), 'Disk almost full')
+        # No windows and no messages yet: a sentence says so instead of a blank table.
+        self.assertTrue(alerts.maintenance_table.isHidden())
+        self.assertFalse(alerts.maintenance_empty.isHidden())
+        self.assertTrue(alerts.delivery_table.isHidden())
+        self.assertIn('No alert messages', alerts.delivery_empty.text())
         threshold.setValue(20)
         alerts.rule_rows['agent_outdated'][3].setText('1.2.0')
         alerts.save_rules()

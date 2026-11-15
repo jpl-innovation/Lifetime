@@ -80,6 +80,10 @@ class AccessUI:
         self.role_table = self._table(4, 180)
         self.role_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         content.addWidget(self.role_table)
+        self.roles_empty = w.label('No other account or group has a role yet.')     # not a blank table
+        self.roles_empty.setObjectName('muted')
+        self.roles_empty.hide()
+        content.addWidget(self.roles_empty)
         self.role_editor = QWidget()
         editor = QHBoxLayout(self.role_editor)
         editor.setContentsMargins(0, 0, 0, 0)
@@ -197,6 +201,8 @@ class AccessUI:
                 item.setToolTip(row['sid'] if column == 0 else value)
                 item.setData(Qt.ItemDataRole.UserRole, row['sid'])
                 self.role_table.setItem(index, column, item)
+        self.role_table.setVisible(bool(self.roles))
+        self.roles_empty.setVisible(not self.roles)
         self.audit_table.setRowCount(len(self.rows))
         for index, row in enumerate(self.rows):
             for column, value in enumerate((self.w._timestamp(row['at']), row['actor_name'], row['role'], row['action'],

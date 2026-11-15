@@ -203,6 +203,30 @@ class DashboardTests(unittest.TestCase):
             for card in self.window.cards.values():
                 self.assertEqual(card.effect.opacity(), 1)
 
+    def test_reports_page_shows_where_the_saved_time_comes_from(self):
+        ledger = dict(self.ledger, total_seconds=10 * 3600, baseline_seconds=3600, imported={'seconds': 4 * 3600})
+        self.window.display_ledger(ledger)
+        bar = self.window.sources_bar
+        self.assertEqual([(value, kind) for value, kind in bar.segments], [(6 * 3600, 'good'), (4 * 3600, 'info'), (3600, 'neutral')])
+        self.assertEqual(bar.total, 11 * 3600)
+        self.assertEqual([chip.kind for chip in self.window.source_chips.values()], ['good', 'info', 'neutral'])   # words beside every colour
+        self.assertTrue(self.window.source_chips['measured'].text().startswith('Measured: '))
+        self.assertIn('OS logs: ', bar.accessibleName())
+        self.window.display_ledger(self.ledger)                   # nothing recorded yet: no empty bar
+        self.assertTrue(self.window.sources_panel.isHidden())
+
+    def test_a_stat_tile_grows_instead_of_cutting_a_three_line_heading(self):
+        card = self.window.cards['average']
+        card.set_list_mode(False, False)
+        card.heading_label.setText('Hoạt động trung bình / ngày')        # Vietnamese at 1024 px wrapped to three lines
+        card.resize(140, card.height())
+        card._fit_height()
+        self.assertGreater(card.height(), 104)
+        card.heading_label.setText('Average')
+        card.resize(400, card.height())
+        card._fit_height()
+        self.assertEqual(card.height(), 104)
+
     def test_closing_the_window_stops_the_connect_status_poll(self):
         self.assertTrue(self.window.connect_page.timer.isActive())
         self.window.close()
