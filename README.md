@@ -12,6 +12,10 @@ Made by [JPL Innovation](https://github.com/jpl-innovation).
 
 ![Lifetime Server](docs/screenshots/server.png)
 
+![Selected demo computer](docs/screenshots/server-device.png)
+
+Devices shows shared Activity, Health and hardware details for a demo computer.
+
 
 ## Choose your edition
 
@@ -90,6 +94,15 @@ The installer needs Python 3 and PyQt6 and offers to install PyQt6 for you (no s
 - **Theme:** Auto (follows your system), Light or Dark. On the desktop it is at the bottom of the sidebar; on the server it is the round button in the header, and one click moves to the next choice.
 - **Language:** English or Tiếng Việt. On the server it is the small rounded button in the header.
 - **Style:** **Classic** (solid navy panels, the original look) or **Glass** (translucent panels over a soft blue-to-gold background, with a glass menu and a sliding pill that stretches towards the page you pick). The desktop starts in Classic and the server in Glass. Change it in Settings on the desktop, or on the **Administration** page of the server. All choices apply immediately and are remembered. Charts and numbers animate in once when a page opens, and everything respects the system "reduce motion" setting.
+
+| App | Classic | Glass |
+| --- | --- | --- |
+| Lifetime | ![Classic desktop](docs/screenshots/overview-classic.png) | ![Glass desktop](docs/screenshots/overview.png) |
+| Lifetime Server | ![Classic server](docs/screenshots/server-classic.png) | ![Glass server](docs/screenshots/server.png) |
+
+Glass also supports a light theme:
+
+![Glass light theme](docs/screenshots/overview-light.png)
 
 ## Privacy and consent
 

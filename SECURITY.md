@@ -109,7 +109,33 @@ only an authenticated socket moves to the separate long-lived pool (at most 1024
 Commands are chosen from a fixed list (sleep, restart, shutdown, refresh), stay behind the owner's remote power consent,
 carry the existing one minute on-screen warning, and are deduplicated by id on the computer. The server window uses a
 separate stream on 127.0.0.1 only, with the admin bearer token. The admin API also rejects any `Host` header that is not
-a loopback name, which blocks DNS rebinding. Nothing here changes what the server stores or who may read it.
+a loopback name, which blocks DNS rebinding. The live channel itself does not change who may read what the server stores;
+what a computer may share is described in the next section.
+
+## What a computer shares, and how the server treats it
+
+A connected computer sends only what its owner allowed, and only after approval. Two consent switches control everything
+beyond awake time, and turning one off stops that data at once:
+
+- **History** (on the Settings page and in Connect): the daily awake totals, plus the hour-of-day profile, the list of
+  recent sessions (start and length, at most 100), the boot count and the current and longest session.
+- **Readings** (computer performance): the specs and live readings, plus the hardware details shown on the System page
+  (processor clock and temperature where reported, cooling fans, network cards, memory modules, disk model and health,
+  motherboard and BIOS, graphics driver, displays, operating system build) and, with Health allowed, stability counts
+  (unexpected shutdowns and crashes), battery wear and cycles and sleep patterns. MAC addresses are part of the specs and
+  exist only so Wake-on-LAN can work.
+
+Not collected, ever: serial numbers, user names, file names, process or window lists, keystrokes or screen contents.
+Hardware details are read with the operating system's own read-only queries. Lifetime installs no kernel driver and
+bundles no third-party sensor library, so a value the system does not expose shows "Not available" with a reason
+instead of being guessed. Totals and charts measure computer uptime, not human activity.
+
+The server treats all of this as untrusted input. Every field is validated for type, numeric range, string length and
+list size before it is stored (`lifetime_protocol.py`), a report with any field outside the allowed list is refused as a
+whole, requests are size-limited, and what is stored per computer is bounded. A computer that has not shared history or readings simply shows an empty state.
+Reading the data requires the loopback-only administrator API with its bearer token, as before. Appearance choices
+(theme, language, style) are stored locally and are not sent anywhere. If you find a way to make the server accept or
+display data it should refuse, please report it as described below.
 
 ## Reporting a vulnerability
 
