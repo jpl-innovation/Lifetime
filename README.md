@@ -369,6 +369,13 @@ One simulated fleet of 50 computers ran against a test server on one Windows 11 
 ([docs/benchmarks](docs/benchmarks/README.md)). Supported size = tested size: larger fleets are not claimed until
 `tools/fleet_simulator.py` has been run at that size.
 
+### Pilots and roadmap status
+
+[docs/pilot](docs/pilot/site-checklist.md) has what a pilot site needs: a checklist, a consent and data policy template
+in English and Vietnamese, a support runbook, an evidence log, the side-by-side protocol with Zabbix and an interview
+script. [docs/ROADMAP_STATUS.md](docs/ROADMAP_STATUS.md) lists every roadmap item with what is implemented, what is
+tested only synthetically, what still needs real machines and what needs a decision.
+
 See [server protocol](docs/SERVER_PROTOCOL.md) and
 [server operations and deployment checks](docs/SERVER_OPERATIONS.md) for trust,
 administrator access, installation, firewall choices, retention, backups, restore,
