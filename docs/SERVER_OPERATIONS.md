@@ -316,7 +316,8 @@ The socket is 0660 with group `lifetime-console`. Membership of `lifetime-consol
 
 ```sh
 sudo usermod -a -G lifetime-console alice          # may reach the socket (takes effect at alice's next sign-in)
-sudo /opt/lifetime-server/LifetimeServerRuntime admin --directory /var/lib/lifetime-server --admin-port 8444     --operation set_role --arguments '{"principal": "alice", "role": "operator"}'
+sudo /opt/lifetime-server/LifetimeServerRuntime admin --directory /var/lib/lifetime-server --admin-port 8444 \
+    --operation set_role --arguments '{"principal": "alice", "role": "operator"}'
 ```
 
 Until the second step alice is disconnected unread, like anyone without a role. Members of `lifetime-admin` who should use the socket need `lifetime-console` too (the installer adds the existing `lifetime-admin` members when it first creates `lifetime-console`, so an upgrade keeps their access). Other group names: set `LIFETIME_CONSOLE_GROUP` / `LIFETIME_ADMIN_GROUP` in the service's environment (systemd: `sudo systemctl edit lifetime-server`, `[Service]` `Environment=LIFETIME_CONSOLE_GROUP=helpdesk`); without a console group the socket falls back to the admin group, as before. Principals for `set_role`: a user name, `group:NAME`, or `unix:uid:N` / `unix:gid:N`. Remote power still needs a named account (never the token), rate limits and the owner's consent.
