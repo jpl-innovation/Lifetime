@@ -156,6 +156,119 @@ class PersistenceTests(MonitorCase):
         self.assertEqual([row['end_at'] for row in self.monitor.presence(ID)], [None])
 
 
+class RuleTests(MonitorCase):
+    def states(self, rule=None):
+        return [(row['rule'], row['state']) for row in self.monitor.incidents()
+                if rule is None or row['rule'] == rule]
+
+    def metric(self, **values):
+        self.fleet.devices[ID]['metrics'].update(values)
+
+    def test_sustained_threshold_opens_once_and_hysteresis_holds_inside_the_band(self):
+        self.fleet.add()
+        self.metric(cpu_percent=99)
+        self.monitor.tick()
+        self.run_for(14)
+        self.assertEqual(self.states('cpu_high'), [('cpu_high', 'pending')])
+        self.run_for(1)
+        self.assertEqual(self.states('cpu_high'), [('cpu_high', 'open')])
+        self.metric(cpu_percent=90)         # below 95 but inside the 10-point band: still a problem
+        self.run_for(30)
+        self.assertEqual(self.states('cpu_high'), [('cpu_high', 'open')])
+        self.metric(cpu_percent=50)
+        self.run_for(5)
+        self.assertEqual(self.states('cpu_high'), [('cpu_high', 'open')])     # recovery needs five quiet minutes
+        self.run_for(1)
+        incident = self.monitor.incidents()[0]
+        self.assertEqual((incident['state'], incident['resolution']), ('resolved', 'recovered'))
+        self.assertEqual(incident['resolved_at'], monitoring._stamp(self.clock.now - dt.timedelta(minutes=5)))
+
+    def test_a_short_spike_never_becomes_an_incident(self):
+        self.fleet.add()
+        self.metric(cpu_percent=99)
+        self.run_for(10)
+        self.metric(cpu_percent=20)
+        self.run_for(1)
+        self.assertEqual(self.states(), [])
+
+    def test_missing_or_stale_data_never_fires_and_never_resolves(self):
+        self.fleet.add()
+        self.metric(disk_free_percent=None)
+        self.run_for(60)
+        self.assertEqual(self.states(), [])
+        self.assertIn('disk_low', self.monitor.status[ID]['missing'])
+        self.metric(disk_free_percent=3)
+        self.run_for(31)
+        self.assertEqual(self.states('disk_low'), [('disk_low', 'open')])
+        self.fleet.devices[ID]['metrics_fresh'] = False
+        self.run_for(60)
+        self.assertEqual(self.states('disk_low'), [('disk_low', 'open')])
+        self.assertEqual(self.monitor.status[ID]['missing'], ['disk_low', 'cpu_high', 'memory_high'])
+
+    def test_consent_off_means_no_rule_fires_on_that_data(self):
+        self.fleet.add(resources=False, health=False, crashes_30d=50,
+                       metrics=dict(cpu_percent=100, ram_percent=100, disk_free_percent=0, battery_health_percent=1,
+                                    temperature_c=120))
+        self.run_for(120, step=5)
+        self.assertEqual(self.states(), [])
+        self.assertEqual(self.monitor.status[ID]['missing'], [])
+        self.fleet.devices[ID].update(resources=True, health=True)
+        self.run_for(35, step=5)
+        self.assertEqual(sorted(rule for rule, state in self.states() if state == 'open'),
+                         ['battery_worn', 'cpu_high', 'crashes', 'disk_low', 'memory_high', 'temperature_high'])
+        self.fleet.devices[ID].update(resources=False)        # consent withdrawn: watched no longer, quietly closed
+        self.monitor.tick()
+        self.assertEqual(sorted(row['rule'] for row in self.monitor.incidents('active')), ['crashes'])
+        self.assertEqual({row['resolution'] for row in self.monitor.incidents('resolved')}, {'not-monitored'})
+
+    def test_no_sensor_or_no_battery_is_not_a_problem_and_not_missing(self):
+        self.fleet.add()
+        self.run_for(30)
+        self.assertEqual(self.states(), [])
+        self.assertEqual(self.monitor.status[ID]['missing'], [])
+
+    def test_offline_waits_its_minutes_and_reconnect_recovers(self):
+        self.fleet.add()
+        self.monitor.tick()
+        self.fleet.offline(self.clock.now)
+        self.run_for(14)
+        self.assertEqual(self.states('offline'), [('offline', 'pending')])
+        self.run_for(1)
+        self.assertEqual(self.states('offline'), [('offline', 'open')])
+        self.fleet.online(self.clock.now)
+        self.run_for(6)
+        self.assertEqual(self.states('offline'), [('offline', 'resolved')])
+
+    def test_agent_version_and_no_report_rules(self):
+        self.fleet.add(client_version='1.1.4', last_report=stamp(T0))
+        self.monitor.set_rule('agent_outdated', enabled=True, version='1.2')
+        self.monitor.set_rule('no_report', minutes=60)
+        self.run_for(59)
+        self.assertEqual(self.states(), [('agent_outdated', 'open')])
+        self.run_for(1)
+        self.assertEqual(sorted(self.states()), [('agent_outdated', 'open'), ('no_report', 'open')])
+        self.fleet.devices[ID].update(client_version='1.2.0', last_report=stamp(self.clock.now))
+        self.run_for(6)
+        self.assertEqual(sorted(self.states()), [('agent_outdated', 'resolved'), ('no_report', 'resolved')])
+
+    def test_rule_settings_are_validated_saved_and_a_disabled_rule_closes_its_incidents(self):
+        for arguments in (dict(rule='nope'), dict(rule='cpu_high', threshold=101), dict(rule='cpu_high', threshold='9'),
+                          dict(rule='cpu_high', minutes=-1), dict(rule='cpu_high', enabled='yes'),
+                          dict(rule='cpu_high', version='1.0'), dict(rule='agent_outdated', version='one')):
+            with self.assertRaises(monitoring.MonitorError, msg=arguments):
+                self.monitor.set_rule(**arguments)
+        self.monitor.set_rule('disk_low', threshold=20, minutes=0)
+        self.fleet.add()
+        self.metric(disk_free_percent=15)
+        self.monitor.tick()
+        self.assertEqual(self.states('disk_low'), [('disk_low', 'open')])
+        self.restart()
+        self.assertEqual(next(r for r in self.monitor.rules() if r['rule'] == 'disk_low')['threshold'], 20)
+        self.monitor.set_rule('disk_low', enabled=False)
+        self.monitor.tick()
+        self.assertEqual(self.monitor.incidents()[0]['resolution'], 'not-monitored')
+
+
 class SnapshotTests(unittest.TestCase):
     """Store.monitor_snapshot hands the rules only what each computer's policy shares."""
     def test_policy_filters_readings_and_health(self):
