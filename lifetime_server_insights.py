@@ -332,11 +332,12 @@ class InsightsUI:
         self.error.setVisible(not success)
         self.error.setText('' if success else self.t('Energy figures are unavailable. Showing the last data received, if any.'))
         if success:
-            first = self.result is None
+            first, same = self.result is None, result == self.result
             self.result = result
             if first:
                 self._fill_settings()
-            self.render()
+            if not same:
+                self.render()
         if self._again:
             self._again = False
             self.load()
@@ -456,6 +457,14 @@ class InsightsUI:
             self.render()
 
     def _fill(self, table, rows, numbers=True):
+        """Rows of text; unchanged rows cost nothing, and the column widths are measured once per fill, not once per
+        cell (fitting columns to their contents on every setItem cost ~100 ms for the whole page)."""
+        rows = [tuple(values) for values in rows]
+        if getattr(table, '_rows', None) == (rows, numbers):
+            return
+        table._rows = (rows, numbers)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         table.setRowCount(len(rows))
         for index, values in enumerate(rows):
             for column, value in enumerate(values):
@@ -464,6 +473,9 @@ class InsightsUI:
                 if numbers and column >= 2:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(index, column, item)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, table.columnCount()):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.w._fit_rows(table, len(rows), most=10)
         table.setVisible(bool(rows))
 
