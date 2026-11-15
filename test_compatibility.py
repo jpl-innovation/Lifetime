@@ -13,6 +13,9 @@ import lifetime_signals as s
 
 class LinuxTests(unittest.TestCase):
     def setUp(self):
+        real_which = s.shutil.which      # journal tests run on every OS: journalctl is present unless a test says not
+        self.enterContext(patch.object(s.shutil, 'which', side_effect=lambda name, *a, **k:
+                                       '/usr/bin/journalctl' if name == 'journalctl' else real_which(name, *a, **k)))
         self.fixture = json.loads((Path(__file__).parent/'fixtures/linux_signals.json').read_text())
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

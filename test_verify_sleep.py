@@ -13,6 +13,11 @@ def row(real, mono, kind):
 
 
 class SystemdSleepTests(unittest.TestCase):
+    def setUp(self):
+        real_which = s.shutil.which      # journal tests run on every OS: journalctl is present unless a test says not
+        self.enterContext(patch.object(s.shutil, 'which', side_effect=lambda name, *a, **k:
+                                       '/usr/bin/journalctl' if name == 'journalctl' else real_which(name, *a, **k)))
+
     def test_suspend_then_hibernate_counts_every_phase(self):
         text = '\n'.join([
             row(1000, 100, 'start'), row(1600, 102, 'end'),            # suspend: 600 s real, 2 s monotonic -> 598 asleep

@@ -712,8 +712,8 @@ class ServerGuiTests(unittest.TestCase):
         row['policy']['control'] = True
         self.assertNotIn('role', w._power_reason(row, 'restart'))
         self.signed_in('admin', channel='token')
-        self.assertIn('own Windows account', w._power_reason(row, 'restart'))
-        self.assertNotIn('own Windows account', w._power_reason(row, 'refresh'))     # refresh is not power
+        self.assertRegex(w._power_reason(row, 'restart'), 'own (Windows|Linux) account')     # Linux CI says Linux
+        self.assertNotRegex(w._power_reason(row, 'refresh'), 'own (Windows|Linux) account')  # refresh is not power
 
     def test_power_confirmation_names_the_exact_computer(self):
         row = device(3)
