@@ -120,6 +120,11 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(ledger, before_ledger)
         self.assertEqual(prefs, before_settings)
 
+    def test_report_font_is_a_text_font_not_the_emoji_fallback(self):
+        # Registering the emoji/symbol fallbacks first used to make Segoe UI Emoji the body font
+        # on offscreen Windows, and plain ASCII reports then embedded no outline font.
+        self.assertNotIn(reports.ensure_report_font().family(), ('Segoe UI Emoji', 'Segoe UI Symbol'))
+
     def test_output_failures_preserve_destination_and_clean_temporary(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory, 'report.csv')

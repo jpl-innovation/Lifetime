@@ -319,7 +319,11 @@ def ensure_report_font():
             candidate = fonts/filename
             if family not in QFontDatabase.families() and candidate.is_file():
                 QFontDatabase.addApplicationFont(str(candidate))
-    if not QFontDatabase.families():
+    preferred = ('Segoe UI', 'DejaVu Sans', 'Arial', 'Liberation Sans')
+    # The emoji/symbol fallbacks above make families() non-empty, so check for a text font,
+    # not for any font: otherwise Segoe UI Emoji becomes the body font and Qt embeds no
+    # outline font for plain text (no /FontFile in the PDF).
+    if not any(name in QFontDatabase.families() for name in preferred):
         if os.name == 'nt':
             fonts = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'Fonts'
             candidates = [fonts / name for name in ('segoeui.ttf', 'segoeuib.ttf', 'seguisym.ttf', 'seguiemj.ttf', 'arial.ttf')]
@@ -333,7 +337,7 @@ def ensure_report_font():
     families = QFontDatabase.families()
     if not families:
         raise OSError('No Unicode font is available. Install a Vietnamese-capable system font.')
-    family = next((name for name in ('Segoe UI', 'DejaVu Sans', 'Arial', 'Liberation Sans') if name in families), families[0])
+    family = next((name for name in preferred if name in families), families[0])
     return QFont(family, 10)
 
 
