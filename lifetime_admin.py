@@ -22,6 +22,14 @@ OPERATIONS = frozenset((
     'verify_backup', 'stage_restore'))
 
 
+class NotAllowed(ValueError):
+    """The server refused this operation for the caller's role (HTTP 403)."""
+
+
+def _failed(status):
+    return (NotAllowed if status == 403 else ValueError)('Administrative request failed (HTTP %s)' % status)
+
+
 class AdminClient:
     def __init__(self, directory, port, timeout=10):
         if type(port) is not int or not 1 <= port <= 65535:
@@ -46,8 +54,7 @@ class AdminClient:
             else:
                 reply = decode(raw)
                 if not isinstance(reply, dict) or reply.get('status') != 200 or 'result' not in reply:
-                    raise ValueError('Administrative request failed (HTTP %s)' % (
-                        reply.get('status') if isinstance(reply, dict) and type(reply.get('status')) is int else 500))
+                    raise _failed(reply.get('status') if isinstance(reply, dict) and type(reply.get('status')) is int else 500)
                 return reply['result']
         token = (self.directory / 'admin-token').read_text(encoding='ascii').strip()
         if not 32 <= len(token) <= 256 or any(ord(c) < 33 or ord(c) > 126 for c in token):
@@ -59,7 +66,7 @@ class AdminClient:
                 'Connection': 'close'})
             response = connection.getresponse()
             if response.status != 200:
-                raise ValueError('Administrative request failed (HTTP %s)' % response.status)
+                raise _failed(response.status)
             raw = response.read(MAX_BYTES + 1)
             return decode(raw)
         finally:

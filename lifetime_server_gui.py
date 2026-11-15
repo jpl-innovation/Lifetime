@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEd
                             QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget)
 
 from lifetime_admin import AdminClient
+from lifetime_server_access_ui import AccessUI
 import lifetime_i18n as catalog
 from lifetime_protocol import CLIENT_VERSION, IDENTITY_FIELDS, validate_identity
 from lifetime_theme import THEMES, stylesheet, server_surfaces, install, configure_high_dpi, T, tokens, set_theme, resolve_theme, active_theme, retint_all, CONTROL_RADIUS
@@ -60,7 +61,10 @@ LOG_TEXT = {('server-started', None): 'Server started', ('server-stopped', None)
             ('enrollment-refused', 'invalid'): 'Connection refused: invalid request',
             ('enrollment-refused', 'code'): 'Connection refused: wrong or used code',
             ('enrollment-refused', 'conflict'): 'Connection refused: conflicting request',
-            ('enrollment-refused', 'throttled'): 'Connection refused: too many attempts'}
+            ('enrollment-refused', 'throttled'): 'Connection refused: too many attempts',
+            ('admin-pipe-unavailable', None): 'Named administration channel unavailable (token only)',
+            ('restore-applied', None): 'Backup restored at start',
+            ('restore-failed', None): 'Staged backup refused at start (kept as restore-failed.zip)'}
 
 
 def _create_bundle(client, directory, address, ttl, uses):
@@ -99,7 +103,7 @@ class ServerWindow(QMainWindow):
         self.client = AdminClient(directory, admin_port)
         self.tasks = Tasks(self)
         self.tasks.completed.connect(lambda number, result: self._completed(number, result, True))
-        self.tasks.failed.connect(lambda number, error: self._completed(number, None, False))
+        self.tasks.failed.connect(lambda number, error: self._completed(number, None, False, error))
         self._jobs = {}
         self._quiet_jobs = set()
         self._closed = False
@@ -252,6 +256,7 @@ class ServerWindow(QMainWindow):
         self.setCentralWidget(body)
         self._kpi_alerts = set()
         self._open_after_load = None
+        self.access_ui = AccessUI(self)      # what the signed-in Windows account's role may do
         self._make_overview()
         self._make_devices()
         self.alerts = AlertsUI(self)        # the Incidents page, the header alert badge and the alert settings
@@ -1139,6 +1144,9 @@ class ServerWindow(QMainWindow):
     def _power_reason(self, device, action):
         if not device:
             return self.t('Select a computer first.')
+        refused = self.access_ui.power_reason(action)
+        if refused:
+            return refused
         if self._mutation_busy:
             return self.t('A request is in progress.')
         if action != 'refresh' and (device.get('policy') or {}).get('control') is not True:
@@ -1188,7 +1196,10 @@ class ServerWindow(QMainWindow):
                 menu.addSeparator()
                 menu.addAction(reason).setEnabled(False)
             menu.addSeparator()
-            menu.addAction(self.t('Remove computer')).triggered.connect(lambda checked=False: self.delete_device(device))
+            remove = menu.addAction(self.t('Remove computer'))
+            remove.setEnabled(self.access_ui.can('delete'))
+            remove.setToolTip('' if remove.isEnabled() else self.access_ui.reason())
+            remove.triggered.connect(lambda checked=False: self.delete_device(device))
             menu.setToolTipsVisible(True)
             self.device_menu = menu
             menu.popup(anchor.mapToGlobal(anchor.rect().bottomLeft()))
@@ -1197,9 +1208,12 @@ class ServerWindow(QMainWindow):
     def _device_command(self, device, action):
         if self._power_reason(device, action):
             return
-        name = (device.get('identity') or {}).get('display_name') or device['device_id']
+        identity = device.get('identity') or {}
         key = {'sleep': 'Sleep', 'restart': 'Restart', 'shutdown': 'Shut down', 'wake': 'Turn on', 'refresh': 'Refresh'}[action]
-        if not self._confirm(self.t('Confirm {action} for {name}?', action=self.t(key), name=name)):
+        # Names the exact computer: its name, group and ID, so two computers with the same name cannot be confused.
+        if not self._confirm(self.t('{action} this computer?\n\n{name}\nGroup: {group}\nID: {device_id}', action=self.t(key),
+                                    name=identity.get('display_name') or self.t('Unnamed computer'),
+                                    group=identity.get('department') or self.t('No group'), device_id=device['device_id'])):
             return
         arguments = dict(device_id=device['device_id'])
         if action != 'wake':
@@ -1293,7 +1307,10 @@ class ServerWindow(QMainWindow):
         title = self.label('Administration')
         title.setStyleSheet('font-size: 28px; font-weight: 600;')
         self.admin_layout.addWidget(title)
+        gate = self.access_ui.gate
+        self.access_ui.roles_section(self.admin_layout)
         approvals, approvals_layout = self._section('Pending approvals')
+        gate(approvals, 'approve')
         self.admin_pending = QTableWidget(0, 4)
         self.admin_pending.setObjectName('approvalTable')
         self._style_table(self.admin_pending)
@@ -1312,6 +1329,7 @@ class ServerWindow(QMainWindow):
         approvals_layout.addWidget(self.approvals_empty)
         self.admin_layout.addWidget(approvals)
         invitations, invitation_layout = self._section('Invitations')
+        gate(invitations, 'invitation')
         self.invitation_button = self.button('Add device', self.add_device)
         self.invitation_button.setObjectName('primary')
         options = ControlRow()
@@ -1364,11 +1382,11 @@ class ServerWindow(QMainWindow):
         self.certificate_expiry.setWordWrap(True)
         self.certificate_expiry.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         form.addRow(self.label('Certificate expires'), self.certificate_expiry)
-        self.names_edit = QLineEdit()
+        self.names_edit = gate(QLineEdit(), 'names')
         self.names_edit.setMaxLength(2000)
         names_row = QHBoxLayout()
         names_row.addWidget(self.names_edit, 1)
-        self.names_button = self.button('Save names', self.save_names)
+        self.names_button = gate(self.button('Save names', self.save_names), 'names')
         names_row.addWidget(self.names_button)
         form.addRow(self.label('Other server names and IPs'), names_row)
         names_note = self.label('Separate them with commas. Lifetime renews the certificate with the same key, so connected computers keep working without a new code.')
@@ -1376,12 +1394,12 @@ class ServerWindow(QMainWindow):
         form.addRow(names_note)
         self.server_name = QLabel()
         form.addRow(self.label('Server name'), self.server_name)
-        self.organisation_edit = QLineEdit()
+        self.organisation_edit = gate(QLineEdit(), 'organisation')
         self.organisation_edit.setMaxLength(120)
         self.organisation_edit.setAccessibleName(self.t('Organisation'))
         organisation_row = QHBoxLayout()
         organisation_row.addWidget(self.organisation_edit, 1)
-        organisation_row.addWidget(self.button('Save organisation', lambda: self._mutate('organisation', dict(name=self.organisation_edit.text()))))
+        organisation_row.addWidget(gate(self.button('Save organisation', lambda: self._mutate('organisation', dict(name=self.organisation_edit.text()))), 'organisation'))
         form.addRow(self.label('Organisation'), organisation_row)
         self.admin_layout.addWidget(server)
         log_panel, log_layout = self._section('Server log')
@@ -1403,8 +1421,10 @@ class ServerWindow(QMainWindow):
         log_layout.addWidget(self.server_log_empty)
         self.server_log.hide()
         self.admin_layout.addWidget(log_panel)
+        self.access_ui.audit_section(self.admin_layout)
         self.alerts.admin(self.admin_layout)
         retention, form = self._form_section('Data retention')
+        gate(retention, 'retain')
         self.retention_boundary = QLabel()
         self.retention_boundary.setWordWrap(True)
         form.addRow(self.retention_boundary)
@@ -1430,6 +1450,7 @@ class ServerWindow(QMainWindow):
         about_layout.addLayout(credit)
         self.admin_layout.addWidget(about)
         access, access_layout = self._section('Device access')
+        gate(access, 'revoke')
         access_layout.addWidget(self.button('Choose device', lambda: self.tabs.setCurrentIndex(1)), 0, Qt.AlignmentFlag.AlignLeft)
         self.admin_selected = QLabel(self.t('Select a device in Devices.'))
         self.admin_selected.setWordWrap(True)
@@ -1445,6 +1466,7 @@ class ServerWindow(QMainWindow):
         access_layout.addWidget(note)
         self.admin_layout.addWidget(access)
         configuration, form = self._form_section('Configuration')
+        gate(configuration, 'set_configuration')
         self.interval = QSpinBox()
         self.interval.setMaximumWidth(150)
         self.interval.setRange(5, 3600)
@@ -1492,14 +1514,19 @@ class ServerWindow(QMainWindow):
         style_layout.addWidget(self.style_control, 0, Qt.AlignmentFlag.AlignLeft)
         self.admin_layout.addWidget(style_panel)
         backups, layout = self._section('Backup and restore')
+        gate(backups, 'backup_archive')
         self.backup_button = self.button('Save backup', self.backup)
+        self.verify_backup_button = self.button('Verify backup', self.verify_backup)
         self.restore_button = self.button('Restore backup', self.restore)
-        layout.addWidget(self.backup_button, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(self.restore_button, 0, Qt.AlignmentFlag.AlignLeft)
-        note = self.label('After restoring, computers need a new code and approval to connect again.')
+        backup_row = QHBoxLayout()
+        for button in (self.backup_button, self.verify_backup_button, self.restore_button):
+            backup_row.addWidget(button)
+        backup_row.addStretch()
+        layout.addLayout(backup_row)
+        note = self.label('A backup is one protected .zip archive with a .sha256 file beside it: the databases (computers, monitoring, roles and the audit trail), the server key and certificate, and the configuration. It holds the private key, so keep it where only administrators can read it. The mail password, webhook address and administrator token are not included.')
         note.setWordWrap(True)
         layout.addWidget(note)
-        note = self.label('Monitoring history and alert settings are saved beside the backup as a second file (name.monitoring.sqlite) and restored with it when that file is there. The mail password and webhook address are not included: enter them again after restoring on another server.')
+        note = self.label('Restore checks the archive and applies it the next time the server starts (restart it with restart_server_windows.ps1). Computers then need a new code and approval to connect again; the current roles and audit trail are kept.')
         note.setObjectName('muted')
         layout.addWidget(note)
         self.admin_layout.addWidget(backups)
@@ -1509,15 +1536,19 @@ class ServerWindow(QMainWindow):
         self.admin_layout.addWidget(usage_panel)
         self.admin_layout.addWidget(self.button('Export fleet', lambda: self.export_requested.emit(None)), 0, Qt.AlignmentFlag.AlignRight)
         self.admin_layout.addStretch()
+        self.access_ui.retranslate()
 
     def _set_device_actions(self, enabled):
         enabled = enabled and not self._mutation_busy
-        for widget in (*self.identity_fields.values(), self.save_identity_button, self.revoke_button, self.delete_button,
-                       self.request_refresh_button):
-            widget.setEnabled(enabled)
+        can = self.access_ui.can
+        for widget, operation in ([(field, 'identity') for field in self.identity_fields.values()]
+                                  + [(self.save_identity_button, 'identity'), (self.revoke_button, 'revoke'),
+                                     (self.delete_button, 'delete'), (self.request_refresh_button, 'refresh')]):
+            widget.setEnabled(enabled and can(operation))
+            widget.setToolTip('' if can(operation) else self.access_ui.reason())
         self.request_refresh_button.setEnabled(bool(enabled and not self._power_reason(self._detail, 'refresh')))
         self.export_button.setEnabled(bool(self.selected_device_ids()) if hasattr(self, 'export_button') else False)
-        pending = enabled and self.pending_requests.count() > 0
+        pending = enabled and self.pending_requests.count() > 0 and can('approve')
         self.approve_button.setEnabled(pending)
         self.deny_button.setEnabled(pending)
         if hasattr(self, 'admin_revoke'):
@@ -1631,6 +1662,7 @@ class ServerWindow(QMainWindow):
         for index, key in enumerate(('Overview', 'Devices', 'Incidents', 'Administration', 'This Server')):
             self.tabs.setTabText(index, self.t(key))
         self.alerts.retranslate()
+        self.access_ui.retranslate()
         for index, key in enumerate(('All statuses', 'Pending approval', 'Approved', 'Denied', 'Disconnected', 'Connected', 'Offline', 'Unavailable')):
             self.status_filter.setItemText(index, self.t(key))
         self.table.setHorizontalHeaderLabels([self.t(key) for key in
@@ -1706,7 +1738,7 @@ class ServerWindow(QMainWindow):
         self._update_busy()
         return True
 
-    def _completed(self, number, result, success):
+    def _completed(self, number, result, success, error=None):
         callback, button = self._jobs.pop(number)
         quiet = number in self._quiet_jobs
         self._quiet_jobs.discard(number)
@@ -1717,7 +1749,12 @@ class ServerWindow(QMainWindow):
             return
         if button is not None:
             button.setEnabled(True)
-        if not success:
+        if error == 'NotAllowed':        # the server refused this for the signed-in role (HTTP 403)
+            self.status_label.setText(self.t('Your role does not allow this.'))
+        elif error == 'PermissionError':
+            self._status_failure = True
+            self.status_label.setText(self.t('This Windows account has no Lifetime Server role. Ask an administrator for one, or open the dashboard as administrator.'))
+        elif not success:
             self._status_failure = True
             self.status_label.setText(self.t(
                 "Can't reach the Lifetime server. Make sure it is running."))
@@ -1736,6 +1773,7 @@ class ServerWindow(QMainWindow):
         self._load_fleet()
         self._load_server_info()
         self.alerts.load()
+        self.access_ui.load()
 
     def _load_overview(self):
         if self._closed:
@@ -2305,6 +2343,11 @@ class ServerWindow(QMainWindow):
             if operation == 'backup' and isinstance(result, dict) and result.get('monitoring'):
                 self.status_label.setText(self.t('Backup saved. Monitoring history is in {name} beside it: keep both files together.',
                                                  name=Path(result['monitoring']).name))
+            elif operation in ('backup_archive', 'verify_backup', 'stage_restore'):
+                # Nothing on screen changed, so no reload: it would replace this message with "Ready".
+                self.status_label.setText(self.access_ui.backup_message(operation, result) or self.t('Changes saved.'))
+                self._set_device_actions(bool(self._detail))
+                return
             elif operation == 'restore' and isinstance(result, dict):
                 self.status_label.setText(self.t(
                     'Restored, including monitoring history and alert settings.' if result.get('monitoring') == 'restored' else
@@ -2353,16 +2396,20 @@ class ServerWindow(QMainWindow):
             self._mutate('retain', dict(before=before), self.retain_button)
 
     def backup(self):
-        path, _ = QFileDialog.getSaveFileName(self, self.t('Save backup'), 'lifetime-backup.sqlite',
-                                             self.t('SQLite backups (*.sqlite *.db);;All files (*)'))
+        path, _ = QFileDialog.getSaveFileName(self, self.t('Save backup'), 'lifetime-server-backup.zip',
+                                             self.t('Backup archives (*.zip)'))
         if path:
-            self._mutate('backup', dict(path=path), self.backup_button)
+            self._mutate('backup_archive', dict(path=path if path.lower().endswith('.zip') else path + '.zip'), self.backup_button)
+
+    def verify_backup(self):
+        path, _ = QFileDialog.getOpenFileName(self, self.t('Verify backup'), '', self.t('Backup archives (*.zip)'))
+        if path:
+            self._mutate('verify_backup', dict(path=path), self.verify_backup_button)
 
     def restore(self):
-        path, _ = QFileDialog.getOpenFileName(self, self.t('Restore backup'), '',
-                                             self.t('SQLite backups (*.sqlite *.db);;All files (*)'))
-        if path and self._confirm('After restoring, computers need a new code and approval to connect again.'):
-            self._mutate('restore', dict(path=path), self.restore_button)
+        path, _ = QFileDialog.getOpenFileName(self, self.t('Restore backup'), '', self.t('Backup archives (*.zip)'))
+        if path and self._confirm('Restore this backup when the server next starts? Computers will need a new code and approval to connect again.'):
+            self._mutate('stage_restore', dict(path=path), self.restore_button)
 
     def export_selection(self):
         selected = self.selected_device_ids()

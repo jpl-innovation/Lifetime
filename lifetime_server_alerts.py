@@ -280,7 +280,9 @@ class AlertsUI:
         for delivery in incident.get('deliveries') or []:
             text += '<p style="margin:2px 0">' + e(self._delivery_line(delivery)) + '</p>'
         self.detail.setText(text)
-        self.acknowledge_button.setEnabled(incident['state'] == 'open')
+        allowed = self.w.access_ui.can('acknowledge')
+        self.acknowledge_button.setEnabled(incident['state'] == 'open' and allowed)
+        self.acknowledge_button.setToolTip('' if allowed else self.w.access_ui.reason())
 
     def _delivery_line(self, delivery):
         line = f"{self.t('Email' if delivery['channel'] == 'email' else 'Webhook')}: {self.t(DELIVERY_TEXT[delivery['kind']])} · {self.t(DELIVERY_STATUS[delivery['status']])}"
@@ -328,6 +330,7 @@ class AlertsUI:
     def admin(self, layout):
         w = self.w
         rules, content = w._section('Alert rules')
+        w.access_ui.gate(rules, 'set_alert_rule')
         note = w.label('A problem must last the whole duration before an incident opens, and stay away five minutes before it resolves. Rules use only what each computer shares.')
         note.setObjectName('muted')
         content.addWidget(note)
@@ -340,6 +343,7 @@ class AlertsUI:
         layout.addWidget(rules)
 
         schedules, content = w._section('Expected online hours')
+        w.access_ui.gate(schedules, 'set_schedule')
         note = w.label('Offline alerts count only inside these hours. Automatic expects desktops always and laptops never, so a sleeping laptop raises nothing.')
         note.setObjectName('muted')
         content.addWidget(note)
@@ -403,6 +407,7 @@ class AlertsUI:
         layout.addWidget(schedules)
 
         windows, content = w._section('Maintenance windows')
+        w.access_ui.gate(windows, 'add_maintenance')
         note = w.label('No alert opens during a window. A problem still there when it ends opens then; one that clears is closed quietly.')
         note.setObjectName('muted')
         content.addWidget(note)
@@ -433,6 +438,7 @@ class AlertsUI:
         layout.addWidget(windows)
 
         mail, form = w._form_section('Notifications')
+        w.access_ui.gate(mail, 'set_notifications')
         self.email_enabled = QCheckBox()
         self.smtp_host, self.smtp_port = QLineEdit(), QSpinBox()
         self.smtp_port.setRange(1, 65535)

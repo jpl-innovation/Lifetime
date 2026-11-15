@@ -33,6 +33,7 @@ class ChecksUI:
     def admin(self, layout):
         w = self.w
         panel, content = w._section('Network checks')
+        w.access_ui.gate(panel, 'save_check')
         note = w.label(NOTE)
         note.setObjectName('muted')
         content.addWidget(note)

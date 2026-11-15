@@ -19,6 +19,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QLabel, QPushButton, QComboBox
 
 import lifetime_server_gui as gui
+import lifetime_server_access_ui as gui_access
 from qt_test_support import qt_app
 
 
@@ -47,6 +48,8 @@ class FakeAdmin:
         self.alerts = None
         self.iana = True
         self.checks = []
+        self.whoami = None          # None: an older server without roles (whoami is unknown)
+        self.roles, self.audit = [], []
         self.gui_thread = threading.get_ident()
         self.lock = threading.Lock()
 
@@ -138,6 +141,24 @@ class FakeAdmin:
             return {'deleted': 1}
         if operation in ('backup', 'restore', 'refresh', 'send_command', 'wake', 'names'):
             return dict(arguments)
+        if operation == 'whoami' and self.whoami:
+            return copy.deepcopy(self.whoami)
+        if operation == 'roles':
+            return copy.deepcopy(self.roles)
+        if operation == 'set_role':
+            self.roles.append(dict(sid='S-1-5-21-1-2-3-1500', name=arguments['principal'], kind='user',
+                                   role=arguments['role'], granted_by='LAB\\boss', granted_at='2026-11-15T00:00:00+00:00'))
+            return copy.deepcopy(self.roles)
+        if operation == 'audit':
+            return [row for row in copy.deepcopy(self.audit) if 'before' not in arguments or row['seq'] < arguments['before']][:arguments['limit']]
+        if operation == 'verify_audit':
+            return dict(ok=False, checked=2, first_broken=3, reason='edited', archived_through=0)
+        if operation == 'backup_archive':
+            return dict(path=arguments['path'], sha256='0' * 64, files=[])
+        if operation == 'verify_backup':
+            return dict(ok=False, problem='checksum')
+        if operation == 'stage_restore':
+            return dict(ok=True, staged=True, restart_required=True)
         if operation == 'code':
             return dict(code='secret-pairing-code', expires_at='2026-11-07T12:10:00Z', uses=arguments['uses'])
         if operation == 'incidents':
@@ -564,19 +585,106 @@ class ServerGuiTests(unittest.TestCase):
             self.window.retain_button.click()
         self.wait_idle()
         self.assertEqual(self.arguments('retain'), [{'before': '2026-01-02T00:00:00+00:00'}])
-        with patch.object(gui.QFileDialog, 'getSaveFileName', return_value=('backup.sqlite', '')):
+        with patch.object(gui.QFileDialog, 'getSaveFileName', return_value=('backup', '')):
             self.window.backup_button.click()
         self.wait_idle()
-        self.assertEqual(self.arguments('backup'), [{'path': 'backup.sqlite'}])
-        with patch.object(gui.QFileDialog, 'getOpenFileName', return_value=('backup.sqlite', '')), \
+        self.assertEqual(self.arguments('backup_archive'), [{'path': 'backup.zip'}])
+        self.assertIn('.sha256', self.window.status_label.text())
+        with patch.object(gui.QFileDialog, 'getOpenFileName', return_value=('backup.zip', '')):
+            self.window.verify_backup_button.click()
+        self.wait_idle()
+        self.assertEqual(self.window.status_label.text(), 'The archive does not match its .sha256 file.')
+        with patch.object(gui.QFileDialog, 'getOpenFileName', return_value=('backup.zip', '')), \
                 patch.object(self.window, '_confirm', return_value=True) as confirm:
             self.window.restore_button.click()
         self.wait_idle()
-        self.assertIn('computers need a new code and approval', confirm.call_args.args[0])
-        self.assertEqual(self.arguments('restore'), [{'path': 'backup.sqlite'}])
+        self.assertIn('need a new code and approval', confirm.call_args.args[0])
+        self.assertEqual(self.arguments('stage_restore'), [{'path': 'backup.zip'}])
+        self.assertIn('next time the server starts', self.window.status_label.text())
         with patch.object(gui.QFileDialog, 'getOpenFileName', return_value=('', '')):
             self.window.restore_button.click()
-        self.assertEqual(len(self.arguments('restore')), 1)
+        self.assertEqual(len(self.arguments('stage_restore')), 1)
+
+    def signed_in(self, role, channel='pipe'):
+        import lifetime_access as access
+        self.api.whoami = dict(name='LAB\\' + role, sid='S-1-5-21-1-2-3-1100', channel=channel, roles=[role], role=role,
+                               builtin=False, operations=sorted(access.PERMISSIONS[role]))
+        self.window.access_ui.load()
+        self.wait_idle()
+
+    def test_viewer_sees_everything_but_can_change_nothing_and_is_told_why(self):
+        self.load([device(0)])
+        self.signed_in('viewer')
+        w = self.window
+        self.assertIn('LAB\\viewer', w.access_ui.signed_in.text())
+        self.assertIn('Viewer', w.access_ui.signed_in.text())
+        for widget in (w.backup_button, w.restore_button, w.retain_button, w.interval_button, w.names_button,
+                       w.invitation_button, w.admin_revoke, w.alerts.rules_button, w.alerts.window_add,
+                       w.alerts.notifications_button, w.access_ui.role_add):
+            self.assertFalse(widget.isEnabled(), widget.text())
+        self.assertIn('Viewer', w.access_ui.reason())
+        self.assertTrue(w.access_ui.audit_panel.isHidden())
+        self.assertTrue(w.access_ui.role_table.isHidden())
+        row = device(0)
+        row['policy']['control'] = True
+        self.assertEqual(w._power_reason(row, 'restart'), 'Your role (Viewer) cannot do this.')
+        self.assertEqual(w._power_reason(row, 'refresh'), 'Your role (Viewer) cannot do this.')
+        w._detail = row
+        w._set_device_actions(True)
+        self.assertFalse(w.delete_button.isEnabled())
+        self.assertFalse(w.save_identity_button.isEnabled())
+        self.assertEqual(w.delete_button.toolTip(), 'Your role (Viewer) cannot do this.')
+
+    def test_operator_may_act_on_incidents_and_power_but_not_settings(self):
+        self.signed_in('operator')
+        w = self.window
+        self.assertTrue(w.alerts.window_add.isEnabled())               # maintenance windows suppress alerts
+        self.assertFalse(w.alerts.rules_button.isEnabled())
+        self.assertFalse(w.backup_button.isEnabled())
+        row = device(0)
+        row['policy']['control'] = True
+        self.assertNotIn('role', w._power_reason(row, 'restart'))
+        self.signed_in('admin', channel='token')
+        self.assertIn('own Windows account', w._power_reason(row, 'restart'))
+        self.assertNotIn('own Windows account', w._power_reason(row, 'refresh'))     # refresh is not power
+
+    def test_power_confirmation_names_the_exact_computer(self):
+        row = device(3)
+        row['policy']['control'] = True
+        with patch.object(self.window, '_power_reason', return_value=''), \
+                patch.object(self.window, '_confirm', return_value=False) as confirm:
+            self.window._device_command(row, 'shutdown')
+        message = confirm.call_args.args[0]
+        for part in ('Shut down', 'Computer 003', 'Support', row['device_id']):
+            self.assertIn(part, message)
+        self.assertEqual(self.arguments('send_command'), [])
+
+    def test_auditor_reads_verifies_and_exports_the_audit_trail_and_admin_assigns_roles(self):
+        self.api.audit = [dict(seq=n, at='2026-11-15T00:00:00+00:00', actor_sid=None, actor_name='=admin', role='admin',
+                               action='set_configuration', target='', result='ok', correlation_id=str(n),
+                               prev_hash='0' * 64, hash='1' * 64) for n in range(1500, 0, -1)]
+        self.signed_in('auditor')
+        w = self.window
+        self.assertFalse(w.access_ui.audit_panel.isHidden())
+        self.assertEqual(w.access_ui.audit_table.rowCount(), 100)
+        w.access_ui.verify_button.click()
+        self.wait_idle()
+        self.assertEqual(w.access_ui.audit_result.text(), 'The audit trail is broken at entry 3: an entry was changed.')
+        target = self.root / 'audit'
+        with patch.object(gui_access.QFileDialog, 'getSaveFileName', return_value=(str(target), '')):
+            w.access_ui.export_button.click()
+        self.wait_idle()
+        lines = (self.root / 'audit.csv').read_text(encoding='utf-8-sig').splitlines()
+        self.assertEqual(len(lines), 1501)
+        self.assertIn("'=admin", lines[1])
+        self.assertFalse(w.access_ui.role_add.isEnabled())
+        self.signed_in('admin')
+        w.access_ui.principal.setText('LAB\\helpdesk')
+        w.access_ui.role_choice.setCurrentIndex(w.access_ui.role_choice.findData('operator'))
+        w.access_ui.role_add.click()
+        self.wait_idle()
+        self.assertEqual(self.arguments('set_role'), [dict(principal='LAB\\helpdesk', role='operator')])
+        self.assertEqual(w.access_ui.role_table.item(0, 2).text(), 'Operator')
 
     def test_enrollment_certificate_read_and_bundle_creation_in_worker(self):
         reads = []
