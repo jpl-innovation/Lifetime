@@ -78,14 +78,22 @@ The installer needs Python 3 and PyQt6 and offers to install PyQt6 for you (no s
 
 - **Overview** – awake time ticking live to the second, with separate measured, reconstructed and manual-baseline amounts. **Earliest known date** names its source (OS installation, system-file timestamp, recovered log, first observation or unknown), not a claim of true first use. A **Verify** button cross-checks the current boot against the operating system's own records (the Windows event log or the Linux journal). Coverage stays unknown unless specific missing evidence supports a partial status.
 - **Activity** – calendar heatmap, daily hours with a 7-day average, cumulative lifetime hours, hour-of-day and weekday profiles, and a session-length histogram, for 30 days, 90 days, a year or everything. **Show data** reveals the numbers behind every chart.
-- **System** – live power and battery, network and Wi-Fi, graphics, CPU, memory and disks, each with a small five-minute trend next to its reading.
+- **System** – live power and battery, network and Wi-Fi, graphics, CPU, memory and disks, each with a small five-minute trend next to its reading. A hardware section lists the computer's details in plain groups: processor (clock speed, and temperature where the computer reports it), cooling fans (count and speed where the firmware exposes them, otherwise it says so), network cards (name, Wi-Fi, Ethernet or virtual, link speed), memory modules, disks (model, SSD or HDD, health), motherboard and BIOS, graphics driver, displays and the operating system build. Anything a computer does not report shows "Not available" with a short reason; nothing is guessed. Serial numbers and user names are never collected.
+- **Health** – stability (unexpected shutdowns and crashes), battery wear and cycles, and sleep patterns, when you allow Health.
 - **Reports** – export a PDF or CSV report, edit the device identity, review coverage.
-- **Connect** ? connect to a Lifetime Server with one code and manage sharing.
-- **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list with details, daily totals and recent events.
+- **Connect** – connect to a Lifetime Server with one code and manage sharing.
+- **Settings** – a page inside the app (not a pop-up window): language, appearance, what to track, adding earlier usage, start at login and deleting history. Every option is a sliding switch, green when on.
+- **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts.
+
+### Appearance
+
+- **Theme:** Auto (follows your system), Light or Dark. On the desktop it is at the bottom of the sidebar; on the server it is the round button in the header, and one click moves to the next choice.
+- **Language:** English or Tiếng Việt. On the server it is the small rounded button in the header.
+- **Style:** **Classic** (solid navy panels, the original look) or **Glass** (translucent panels over a soft blue-to-gold background, with a glass menu and a sliding pill that stretches towards the page you pick). The desktop starts in Classic and the server in Glass. Change it in Settings on the desktop, or on the **Administration** page of the server. All choices apply immediately and are remembered. Charts and numbers animate in once when a page opens, and everything respects the system "reduce motion" setting.
 
 ## Privacy and consent
 
-On first run Lifetime asks, one question at a time, what you want to track. Awake time is the only required item; battery, network, Wi-Fi name, graphics and resource readings are each opt-in, and anything you turn off is never read. Everything stays on your computer; nothing is uploaded. You can change choices, switch language, or delete collected history in **Settings**.
+On first run Lifetime asks, one question at a time, what you want to track. Awake time is the only required item; battery, network, Wi-Fi name, graphics and resource readings are each opt-in, and anything you turn off is never read. Everything stays on your computer; nothing is uploaded. You can change choices, switch language, theme and style, or delete collected history on the **Settings** page at any time. Hardware, health and activity details are sent to a Lifetime Server only if you connected the computer and allowed history or readings; turning a choice off stops it at once.
 
 **Why admin on Windows?** Adding your earlier usage (the time before you installed Lifetime) reads the full System event log and registering the login task works best with administrator rights. If you decline the prompt, Lifetime installs for your user only and history rebuild may be limited. The installer never installs files into the administrator's profile.
 
@@ -292,7 +300,7 @@ No Windows Server version is claimed as tested.
 
 ## Project layout
 
-- `lifetime_*.py`: the application modules (desktop, Linux, server, agent, protocol, live channel).
+- `lifetime_*.py`: the application modules. Main groups: desktop (`lifetime_gui.py`, `lifetime_shell.py`, `lifetime_setup.py` for the Settings page, `lifetime_charts.py`, `lifetime_health*.py`, `lifetime_system*.py` for the System page, shared by the desktop and the server), shared look (`lifetime_theme.py`, `lifetime_glass.py` for the Glass and Classic styles, `lifetime_reveal.py` for the entrance animations), server (`lifetime_server*.py`), agent and protocol (`lifetime_agent.py`, `lifetime_protocol.py`), and the live channel (`lifetime_ws*.py`, `lifetime_live.py`).
 - `test_*.py`: unit and GUI tests. Run `python -m unittest discover -p "test_*.py"` with `QT_QPA_PLATFORM=offscreen`.
 - `render_*.py`: scripts that render the screens with synthetic data for design review. They never read real data.
 - `install_*`, `build_*`, `uninstall_*`: Windows and Linux installers and build scripts.
