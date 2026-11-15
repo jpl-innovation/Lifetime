@@ -4,6 +4,8 @@ Everything comes from the admin ``insights`` call (lifetime_insights on the serv
 the window's panels, tables, buttons and translations, so Glass/Classic, light/dark and English/Vietnamese follow it.
 Estimated figures always say so; a computer that does not share its awake history is counted as unknown, never zero.
 """
+import math
+
 from PyQt6.QtCore import QTime, Qt
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
                              QLineEdit, QSizePolicy, QTableWidget, QTableWidgetItem, QTimeEdit, QWidget)
@@ -179,8 +181,7 @@ class InsightsUI:
             spin.setSuffix(suffix)
         for key, spin in (('Replace battery below', self.battery_level), ('Act when disk free below', self.disk_level),
                           ('Battery price', self.battery_price), ('Disk price', self.disk_price)):
-            lifecycle.addWidget(w.label(key))
-            lifecycle.addWidget(spin)
+            lifecycle.addLayout(self._pair(w.label(key), spin))
             spin.setAccessibleName(self.t(key))
         self.save_lifecycle = w.button('Save', self._save_lifecycle)
         lifecycle.addWidget(self.save_lifecycle)
@@ -192,8 +193,7 @@ class InsightsUI:
         self.opens, self.closes = QTimeEdit(QTime(8, 0)), QTimeEdit(QTime(18, 0))
         for control, key in ((self.opens, 'Opens'), (self.closes, 'Closes')):
             control.setDisplayFormat('HH:mm')
-            hours.addWidget(w.label(key))
-            hours.addWidget(control)
+            hours.addLayout(self._pair(w.label(key), control))
         self.weekday_boxes = []
         for day in range(7):
             box = QCheckBox()
@@ -205,6 +205,15 @@ class InsightsUI:
         form.addLayout(hours)
         layout.addWidget(settings)
         layout.addStretch()
+
+    @staticmethod
+    def _pair(label, control):
+        """A label and its field wrap together (at 1024 px 'Battery price' ended one line and its box began the next)."""
+        pair = QHBoxLayout()
+        pair.setSpacing(8)
+        pair.addWidget(label)
+        pair.addWidget(control)
+        return pair
 
     def _make_health(self, layout):
         w = self.w
@@ -632,8 +641,10 @@ class InsightsUI:
             if row[1] is None:
                 return t('Unknown')
             value = row[2]
-            shown = (t('{count} in 30 days', count=value) if key == 'stability' else f'{value:.0f}%' if key in ('battery', 'disk')
-                     else f'{value:.0f} °C' if key == 'temperature' else t('up to date') if value else t('older'))
+            # Whole numbers rounded down, like the thresholds (79.6 % is 'needs a look', so it must not read 80 %).
+            whole = math.floor(value) if key in ('battery', 'disk', 'temperature') else value
+            shown = (t('{count} in 30 days', count=value) if key == 'stability' else f'{whole}%' if key in ('battery', 'disk')
+                     else f'{whole} °C' if key == 'temperature' else t('up to date') if value else t('older'))
             return f'{words[row[1]]} · {shown}'
         computers = [c for c in result['computers'] if chosen is None or c['group'] == chosen]
         computers.sort(key=lambda c: (c['health']['score'] is None, c['health']['score'] or 0, c['name'] or ''))

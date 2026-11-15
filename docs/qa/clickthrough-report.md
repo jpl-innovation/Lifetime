@@ -129,3 +129,52 @@ test_reveal, test_gui_startup. After the QA fixes: test_dashboard (15 OK), test_
 test_widgets_dashboard (18 OK), test_server_gui (65 OK), test_server_fleet (13 OK), test_switches (19 OK),
 test_i18n (8 OK), test_redesign (27 OK), test_server_access (20 OK), test_gui_startup (1 OK), test_theme_modes (8 OK).
 Not run: the full suite (memory rule). Not verified on a second machine or with real computers connected.
+
+## New features: energy and cost, after hours, replacement plan, health score
+
+Date: 2026-11-15. Code: `latest-main` after 9db3633, b2b92c5, c56b1be, aee5368, 697198f, c4f0fe7.
+
+**Scope:** only the new screens. Server: the Energy page (Energy and cost, After hours with the Sleep after hours
+control, Replacement plan, Health score, and the settings forms for price and currency, typical laptop/desktop power,
+power per group or computer, battery/disk replacement levels and unit prices, office hours). Desktop: Reports (Energy and
+cost panel with the after-hours sentence and its price/power form) and Health (badge and Replacement forecast panel).
+Same explorer as above, limited to those pages, with `render_server.populate_monitoring` (disk and battery trends) on the
+server and 60 days of hourly ledger buckets, on-battery readings, a disk trend and a battery history on the desktop.
+Every control clicked in Glass-dark English and Classic-light Vietnamese; screenshots at every scroll step (not only
+top/middle/bottom) at 1600x1000 and 1024x700, read by hand; the server also in Glass-light English. The server now
+opens in light: the explorer writes the theme preference (`write_theme_preference`) and calls `set_theme` before
+`ServerWindow` is built, as `lifetime_server_gui.main` does (the earlier pass only wrote the style).
+
+**Automatic checks:** 25 server controls x 2 combinations and the desktop pages: no exceptions, no Qt warnings, no action
+over 100 ms, no clipped text, no untranslated strings, no empty table without a message.
+
+### Found and fixed
+
+| Severity | Where | Finding | Fix |
+|---|---|---|---|
+| Wrong label | Server, computer actions (VI) | The power button and menu item Sleep read **Giấc ngủ** (the Health page's noun) instead of **Ngủ**: the server's `text()` takes the shared catalogue first, where `'Sleep'` is the Health noun. | Own key `power.sleep` (EN Sleep, VI Ngủ) for the button, the menu and the confirmation. Test: `test_i18n.CatalogueTests.test_server_sleep_action_is_the_verb_not_the_health_noun`. |
+| Misleading number | Server and desktop after-hours chart | Weeks before a computer's first hourly record were drawn as 0 h, so a new install looked like eight weeks with nothing on after hours. | `lifetime_insights.weekly` leaves out weeks before the first recorded day (unknown, not zero). Test: `test_insights` (after-hours week series). |
+| Misleading number | Server health table | A part was printed rounded (79.6 % as "80%") but classed on the raw value, so it read "Needs a look · 80%" against an "80 % or more is good" rule. | Battery, disk and temperature are shown rounded down, like the thresholds. Test: `test_server_gui.test_health_part_values_round_down_like_their_thresholds`. |
+| Raw number | Replacement plan "When" | "now (79.3333 %, limit 80 %)". | Whole percent, as the Why column already did. Test: `test_insights.test_reached_text_shows_a_whole_percent`. |
+| Wrong translation | Replacement plan "Why" (VI) | "Độ chai pin hiện 79 %" says the battery is 79 % worn; the number is its health. | "Sức khỏe pin hiện 79 %…". |
+| Layout | Server settings at 1024 px | The lifecycle and hours rows wrapped between a label and its field ("Giá pin" at the end of one line, its box on the next). | Each label and its field wrap together. |
+
+### Seen and left
+
+- Disk health in the plan shows the status Windows reports, untranslated ("ổ đĩa báo Warning"). It is the device's own
+  word, like a model name; translating Warning/Unhealthy would need the value translated in three places.
+- Money uses `1,234 VND` (English grouping) in Vietnamese, and the server price box shows `2500,00` while the desktop
+  shows `2500.00` (Qt locale). Cosmetic.
+- The after-hours chart's first week can be partial (history starts mid-week) and then looks low.
+- The kWh headlines carry no "est." mark themselves; the line under them says how many computers are measured and the
+  table's power column says "measured on battery" or "estimated: typical …". Even "measured" applies an on-battery draw
+  to plugged-in time, which the note states.
+- Server header at 1600 px logical with the alert badge in Vietnamese: the tab strip scrolls ("Quản tr…"). Not new.
+- Once, a desktop Reports capture at 1600 px (Vietnamese) caught the Energy panel mid-layout (squashed); it did not repeat
+  in two later runs.
+- Battery and disk unit prices have no currency suffix in the form.
+
+### Tests run (one module at a time)
+
+test_i18n (9 OK), test_insights (26 OK), test_server_insights (5 OK), test_server_reports (8 OK), test_server_gui (70 OK).
+Not verified with real computers (real on-battery readings, real hourly ledgers or a real Sleep after hours night).

@@ -1422,7 +1422,7 @@ SERVER_P2_VI = {
     'Uptime': 'Thời gian hoạt động', 'Last seen': 'Kết nối cuối',
     'CPU usage': 'Mức sử dụng CPU', 'Memory used': 'Bộ nhớ đã dùng',
     'Database size': 'Kích thước cơ sở dữ liệu', 'Just now': 'Vừa xong',
-    'Sleep': 'Ngủ', 'Restart': 'Khởi động lại', 'Shut down': 'Tắt máy', 'Turn on': 'Bật máy',
+    'power.sleep': 'Ngủ', 'Restart': 'Khởi động lại', 'Shut down': 'Tắt máy', 'Turn on': 'Bật máy',
     'command.pending': 'Đang chờ', 'command.delivered': 'Đã gửi',
     'command.done': 'Đã chấp nhận thực thi', 'command.failed': 'Thất bại',
     'command.expired': 'Đã hết hạn', 'command.cancelled': 'Đã hủy',
@@ -1432,7 +1432,8 @@ for _key, _text in SERVER_P2_VI.items():
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
 
-EN.update({'command.pending': 'Pending', 'command.delivered': 'Delivered', 'command.done': 'Accepted for execution', 'command.failed': 'Failed', 'command.expired': 'Expired', 'command.cancelled': 'Cancelled'})
+# The power action, not the Health page's noun 'Sleep' (Giấc ngủ): its own key so it always reads Ngủ.
+EN.update({'power.sleep': 'Sleep', 'command.pending': 'Pending', 'command.delivered': 'Delivered', 'command.done': 'Accepted for execution', 'command.failed': 'Failed', 'command.expired': 'Expired', 'command.cancelled': 'Cancelled'})
 
 # P4 connection flow: English keys are shared by desktop and server.
 CONNECT_VI = {
@@ -2212,7 +2213,7 @@ _FORECAST_VI = {
     'not within ten years ({points} readings over {days} days)': 'không trong vòng mười năm ({points} lần đo trong {days} ngày)',
     'not enough data ({points} readings over {days} days)': 'chưa đủ dữ liệu ({points} lần đo trong {days} ngày)',
     'Disk {model} reports {health}': 'Ổ đĩa {model} báo {health}',
-    'Battery health {latest} % now, replace below {threshold} %': 'Độ chai pin hiện {latest} %, thay khi dưới {threshold} %',
+    'Battery health {latest} % now, replace below {threshold} %': 'Sức khỏe pin hiện {latest} %, thay khi dưới {threshold} %',
     'System disk {latest} % free now, act below {threshold} %': 'Ổ đĩa hệ thống hiện trống {latest} %, xử lý khi dưới {threshold} %',
     'Battery forecast': 'Dự báo pin',
     'System disk forecast': 'Dự báo ổ đĩa hệ thống',

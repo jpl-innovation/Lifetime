@@ -1183,6 +1183,15 @@ class ServerGuiTests(unittest.TestCase):
                          ['Silent PC', 'Unknown', 'Unknown', 'Unknown', 'Unknown'])
         self.assertEqual(ui.health_table.item(0, 3).text(), 'Does not apply')     # a desktop has no battery
 
+    def test_health_part_values_round_down_like_their_thresholds(self):
+        # QA: 79.6 % is below the 80 % line, so it must read 79 %, not 'Needs a look · 80%'.
+        self.api.insight_items = [dict(device_id='c', name='Worn PC', group='Lab', kind='laptop', health=dict(battery_health=79.6))]
+        self.load([device(0)])
+        ui = self.window.insights
+        self.window.tabs.setCurrentIndex(ui.index)
+        self.wait_idle()
+        self.assertEqual(ui.health_table.item(0, 3).text(), 'Needs a look · 79%')
+
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget
         self.assertIsInstance(self.window.tabs, QStackedWidget)

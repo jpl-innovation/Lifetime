@@ -152,7 +152,8 @@ def after_hours(dated_hourly, hours):
 
 
 def weekly(daily, today, weeks=8):
-    """[(Monday 'YYYY-MM-DD', seconds)] for the last ``weeks`` calendar weeks, this one last."""
+    """[(Monday 'YYYY-MM-DD', seconds)] for the last ``weeks`` calendar weeks, this one last. Weeks before the first
+    recorded day are left out: no history is unknown, not zero hours (a chart of zeros looked measured)."""
     monday = today - dt.timedelta(days=today.weekday())
     starts = [monday - dt.timedelta(weeks=index) for index in range(weeks - 1, -1, -1)]
     totals = {start.isoformat(): 0.0 for start in starts}
@@ -161,7 +162,9 @@ def weekly(daily, today, weeks=8):
         start = (date - dt.timedelta(days=date.weekday())).isoformat()
         if start in totals:
             totals[start] += seconds
-    return list(totals.items())
+    first = min(((dt.date.fromisoformat(key) - dt.timedelta(days=dt.date.fromisoformat(key).weekday())).isoformat()
+                 for key in daily), default=monday.isoformat())
+    return [(start, total) for start, total in totals.items() if start >= first]
 
 
 def discharge_readings(values):
@@ -371,7 +374,7 @@ def when_text(part):
     if part['status'] == 'expected':
         return '{date} (from {points} readings over {days} days)', dict(data, date=part['date'])
     if part['status'] == 'reached':
-        return 'now ({latest} %, limit {threshold} %)', dict(latest=f"{part['latest']:g}", threshold=part['threshold'])
+        return 'now ({latest} %, limit {threshold} %)', dict(latest=f"{part['latest']:.0f}", threshold=part['threshold'])
     if part['status'] == 'not-declining':
         return 'not falling ({points} readings over {days} days)', data
     if part['status'] == 'beyond':

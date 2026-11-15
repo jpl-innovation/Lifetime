@@ -767,7 +767,7 @@ class ServerWindow(QMainWindow):
         self.control_reason.setObjectName('muted')
         self.power_buttons = {}
         self.power_grid = power_grid = QGridLayout()
-        for i, (action, key) in enumerate((('sleep', 'Sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
+        for i, (action, key) in enumerate((('sleep', 'power.sleep'), ('restart', 'Restart'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh'))):
             button = self.button(key, lambda checked=False, a=action: self._device_command(self._detail, a))
             self.power_buttons[action] = button
             power_grid.addWidget(button, i // 3, i % 3)
@@ -1240,7 +1240,7 @@ class ServerWindow(QMainWindow):
             if not success or sip.isdeleted(anchor) or not anchor.isVisible() or anchor.parentWidget().device_id != device_id:
                 return
             menu = QMenu(self)
-            for action, key in (('restart', 'Restart'), ('sleep', 'Sleep'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh')):
+            for action, key in (('restart', 'Restart'), ('sleep', 'power.sleep'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh')):
                 item = menu.addAction(self.t(key))
                 reason = self._power_reason(device, action)
                 item.setEnabled(not bool(reason))
@@ -1264,7 +1264,7 @@ class ServerWindow(QMainWindow):
         if self._power_reason(device, action):
             return
         identity = device.get('identity') or {}
-        key = {'sleep': 'Sleep', 'restart': 'Restart', 'shutdown': 'Shut down', 'wake': 'Turn on', 'refresh': 'Refresh'}[action]
+        key = {'sleep': 'power.sleep', 'restart': 'Restart', 'shutdown': 'Shut down', 'wake': 'Turn on', 'refresh': 'Refresh'}[action]
         # Names the exact computer: its name, group and ID, so two computers with the same name cannot be confused.
         if not self._confirm(self.t('{action} this computer?\n\n{name}\nGroup: {group}\nID: {device_id}', action=self.t(key),
                                     name=identity.get('display_name') or self.t('Unnamed computer'),

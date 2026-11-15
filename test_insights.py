@@ -119,7 +119,8 @@ class AfterHoursTests(unittest.TestCase):
         result = insights.after_week(history, None, 50, config, dt.date(2026, 11, 18))
         self.assertEqual(result['source'], 'office-hours')
         self.assertEqual(result['week'], dict(hours=6.0, kwh=0.3, cost=600.0))   # last 7 days 12-18 Nov: 6 h x 50 W
-        self.assertEqual(result['weeks'][-2:], [('2026-11-09', 2.0), ('2026-11-16', 4.0)])
+        # QA: weeks before the first recorded day are unknown, so they are left out instead of drawn as 0 h.
+        self.assertEqual(result['weeks'], [('2026-11-09', 2.0), ('2026-11-16', 4.0)])
         schedule = dict(kind='business', start='07:00', end='22:00', weekdays=[0, 1, 2, 3, 4], holidays=[], timezone='local')
         own = insights.after_week(history, schedule, 50, config, dt.date(2026, 11, 18))
         self.assertEqual((own['source'], own['week']['hours']), ('schedule', 2.0))   # only Mon 22-24 is after 22:00
@@ -169,6 +170,12 @@ class ForecastTests(unittest.TestCase):
         # -0.001 % a day from 95 % reaches 80 % in 15,000 days: more than ten years away.
         slow = insights.forecast(self.points((0, 95), (30, 94.97), (60, 94.94), (90, 94.91)), 80, today)
         self.assertEqual((slow['status'], slow['date']), ('beyond', None))
+
+    def test_reached_text_shows_a_whole_percent(self):
+        # QA: the plan showed 'now (79.3333 %, limit 80 %)'; the reason column already said 79 %.
+        part = dict(part='battery', status='reached', latest=79.3333, threshold=80, points=5, span_days=60)
+        self.assertEqual(insights.when_text(part)[1]['latest'], '79')
+        self.assertEqual(insights.reason_text(part)[1]['latest'], '79')
 
     def test_battery_history_disk_trend_health_warning_and_plan(self):
         today = dt.date(2026, 11, 16)

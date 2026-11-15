@@ -22,6 +22,16 @@ class CatalogueTests(unittest.TestCase):
             self.assertEqual(i18n.EN[key], key)
             self.assertEqual(i18n.VI[key], translation)
 
+    def test_server_sleep_action_is_the_verb_not_the_health_noun(self):
+        # 'Sleep' is the Health page's noun (Giấc ngủ); the server's power action must read Ngủ in Vietnamese.
+        import lifetime_server_gui as server_gui
+        self.assertEqual(server_gui.text('power.sleep', 'vi'), 'Ngủ')
+        self.assertEqual(server_gui.text('power.sleep', 'en'), 'Sleep')
+        self.assertEqual(i18n.VI['Sleep'], 'Giấc ngủ')
+        source = Path(server_gui.__file__).read_text(encoding='utf-8')
+        self.assertNotIn("('sleep', 'Sleep')", source)
+        self.assertNotIn("'sleep': 'Sleep'", source)
+
     def tearDown(self):
         i18n.set_language('en')
 
