@@ -257,6 +257,9 @@ _ADMIN = {
     'maintenance': ('monitor.maintenance', (), ('include_past',)),
     'add_maintenance': ('monitor.add_maintenance', ('scope', 'start', 'end'), ('key', 'note')),
     'delete_maintenance': ('monitor.delete_maintenance', ('window_id',), ()),
+    'incident': ('monitor.incident', ('incident_id',), ()),
+    'acknowledge': ('monitor.acknowledge', ('incident_id', 'by'), ()),
+    'alert_summary': ('monitor.summary', (), ()),
 }
 
 
@@ -399,6 +402,10 @@ class _Handler(BaseHTTPRequestHandler):
                     result = getattr(runtime._store, method)(**value)
                     if operation == 'delete':
                         runtime.monitor.forget(value['device_id'])
+                    elif operation == 'overview':      # alert badges ride along with the counters
+                        result = dict(result, alerts=runtime.monitor.summary())
+                    elif operation == 'device':
+                        result = dict(result, alerts=runtime.monitor.device_alerts(value['device_id']))
                     if operation == 'restore':
                         runtime._renew_certificate()    # the restored names may differ
             elif self.path == '/v1/enroll':

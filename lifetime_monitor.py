@@ -613,6 +613,56 @@ class Monitor:
                 self._event(db, row['id'], 'opened', now)
                 self._notify(db, row['id'], 'open', now)
 
+    def acknowledge(self, incident_id, by):
+        """Someone has seen an open incident: it stays until the problem clears, and says who and when."""
+        if type(incident_id) is not int:
+            raise MonitorError('Invalid incident')
+        if not isinstance(by, str) or not 1 <= len(by.strip()) <= 64 or any(ord(c) < 32 for c in by):
+            raise MonitorError('Say who acknowledges')
+        now = self.clock()
+        with self._transaction() as db:
+            row = db.execute('SELECT state FROM incidents WHERE id=?', (incident_id,)).fetchone()
+            if not row:
+                raise MonitorError('Unknown incident')
+            if row['state'] == 'open':
+                db.execute("UPDATE incidents SET state='acknowledged',acknowledged_by=?,acknowledged_at=?,updated_at=? WHERE id=?",
+                           (by.strip(), _stamp(now), _stamp(now), incident_id))
+                self._event(db, incident_id, 'acknowledged', now, by.strip())
+            elif row['state'] != 'acknowledged':
+                raise MonitorError('Only an open incident can be acknowledged')
+        return self.incident(incident_id)
+
+    def incident(self, incident_id):
+        if type(incident_id) is not int:
+            raise MonitorError('Invalid incident')
+        with self._lock:
+            row = self._db.execute('SELECT * FROM incidents WHERE id=?', (incident_id,)).fetchone()
+            if not row:
+                raise MonitorError('Unknown incident')
+            result = dict(row)
+            result['timeline'] = [dict(event) for event in self._db.execute(
+                'SELECT time,kind,detail FROM timeline WHERE incident_id=? ORDER BY id LIMIT 200', (incident_id,))]
+            result['deliveries'] = [dict(item) for item in self._db.execute(
+                '''SELECT kind,channel,status,attempts,error,updated_at FROM deliveries WHERE incident_id=?
+                   ORDER BY id LIMIT 50''', (incident_id,))]
+            return result
+
+    def summary(self):
+        """Counts for the header and Overview badges."""
+        with self._lock:
+            counts = dict.fromkeys(ACTIVE, 0)
+            counts.update({row[0]: row[1] for row in self._db.execute(
+                f'SELECT state,COUNT(*) FROM incidents WHERE state IN {ACTIVE} GROUP BY state')})    # nosec B608
+            paused = sum(1 for item in self.status.values() if item.get('paused'))
+            missing = sum(1 for item in self.status.values() if item.get('missing'))
+        return dict(counts, active=counts['open'] + counts['acknowledged'], paused=paused, telemetry_missing=missing)
+
+    def device_alerts(self, device_id):
+        """The device detail's incident history and current monitoring state."""
+        with self._lock:
+            status = dict(self.status.get(str(device_id)) or {})
+        return dict(incidents=self.incidents(device_id=str(device_id), limit=20), status=status or None)
+
     def incidents(self, state='', device_id='', limit=100, offset=0):
         """Newest first. ``state`` is one state, 'active' (everything not resolved) or '' for all."""
         if state not in ('', 'active', *ACTIVE, 'resolved') or not isinstance(device_id, str) or len(device_id) > 64:

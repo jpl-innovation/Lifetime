@@ -371,6 +371,63 @@ class CalendarTests(MonitorCase):
         self.assertEqual(self.monitor.maintenance(), [])
 
 
+class IncidentTests(MonitorCase):
+    def open_offline(self):
+        self.fleet.add()
+        self.monitor.tick()
+        self.fleet.offline(self.clock.now)
+        self.run_for(15)
+        return self.monitor.incidents('active')[0]
+
+    def test_acknowledge_records_who_and_when_and_recovery_still_resolves(self):
+        incident = self.open_offline()
+        for arguments in (dict(incident_id='1', by='Lan'), dict(incident_id=incident['id'], by=''),
+                          dict(incident_id=incident['id'], by='x\n'), dict(incident_id=999, by='Lan')):
+            with self.assertRaises(monitoring.MonitorError, msg=arguments):
+                self.monitor.acknowledge(**arguments)
+        self.clock.advance(minutes=2)
+        detail = self.monitor.acknowledge(incident['id'], 'Lan Nguyen')
+        self.assertEqual((detail['state'], detail['acknowledged_by'], detail['acknowledged_at']),
+                         ('acknowledged', 'Lan Nguyen', monitoring._stamp(self.clock.now)))
+        self.assertEqual(self.monitor.acknowledge(incident['id'], 'Minh')['acknowledged_by'], 'Lan Nguyen')
+        self.assertEqual(self.monitor.summary()['acknowledged'], 1)
+        self.fleet.online(self.clock.now)
+        self.run_for(6)
+        detail = self.monitor.incident(incident['id'])
+        self.assertEqual(detail['state'], 'resolved')
+        self.assertEqual([event['kind'] for event in detail['timeline']], ['pending', 'opened', 'acknowledged', 'resolved'])
+        with self.assertRaises(monitoring.MonitorError):
+            self.monitor.acknowledge(incident['id'], 'Lan')
+        self.assertEqual(self.monitor.summary()['active'], 0)
+
+    def test_one_incident_per_problem_across_restarts(self):
+        incident = self.open_offline()
+        for gap in (0, 3, 30):
+            self.restart(gap_minutes=gap)
+            self.run_for(20)        # through the start-up grace and beyond: the same problem, the same incident
+            self.assertEqual([row['id'] for row in self.monitor.incidents()], [incident['id']])
+            self.assertEqual(self.monitor.incidents()[0]['state'], 'open')
+        with self.assertRaises(sqlite3.IntegrityError):     # the database itself refuses a second active copy
+            with self.monitor._transaction() as db:
+                db.execute("INSERT INTO incidents(device_id,rule,cause,state,started_at,updated_at) VALUES (?,?,?,'open',?,?)",
+                           (ID, 'offline', 'offline', stamp(T0), stamp(T0)))
+        self.fleet.online(self.clock.now)
+        self.run_for(6)
+        self.assertEqual(self.monitor.incident(incident['id'])['state'], 'resolved')
+
+    def test_device_alerts_and_summary_for_badges(self):
+        self.open_offline()
+        alerts = self.monitor.device_alerts(ID)
+        self.assertEqual([row['rule'] for row in alerts['incidents']], ['offline'])
+        self.assertEqual(alerts['status']['presence'], 'offline')
+        summary = self.monitor.summary()
+        self.assertEqual((summary['open'], summary['active'], summary['paused']), (1, 1, 0))
+        self.assertEqual(self.monitor.device_alerts(str(uuid.UUID(int=5))), dict(incidents=[], status=None))
+        for arguments in (dict(state='bogus'), dict(limit=0), dict(offset=-1)):
+            with self.assertRaises(monitoring.MonitorError):
+                self.monitor.incidents(**arguments)
+
+
 class SnapshotTests(unittest.TestCase):
     """Store.monitor_snapshot hands the rules only what each computer's policy shares."""
     def test_policy_filters_readings_and_health(self):
