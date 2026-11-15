@@ -2,7 +2,7 @@
 import copy
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFormLayout, QVBoxLayout, QSizePolicy, QWidget, QToolButton, QLayout
+from PyQt6.QtWidgets import QFormLayout, QVBoxLayout, QSizePolicy, QWidget, QToolButton, QLayout, QProgressBar
 from lifetime_i18n_qt import QFrame, QLabel
 from lifetime_i18n import tr, on_language_change, language
 from lifetime_glass import glass
@@ -50,6 +50,7 @@ class HardwarePanel(QFrame):
         label = QLabel(value)
         label.setMinimumWidth(0)
         label.setWordWrap(True)
+        label.setMinimumHeight(label.fontMetrics().height() + 4)
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         if muted:
@@ -96,6 +97,7 @@ class HardwarePanel(QFrame):
             body_box = QVBoxLayout(body)
             body_box.setContentsMargins(0, 10, 0, 0)
             body_box.setSpacing(0)
+            body_box.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
             box.addWidget(body)
             def expand(checked, body=body, button=title, key=key):
                 self._expanded[key] = checked
@@ -104,6 +106,23 @@ class HardwarePanel(QFrame):
             title.toggled.connect(expand)
             expand(title.isChecked())
             box = body_box
+            slot_meter = False
+            if index == 1:
+                memory = data.get('memory') or {}
+                used, total = memory.get('slots_used'), memory.get('slots_total')
+                if type(used) is int and type(total) is int and 0 <= used <= total and total > 0:
+                    meter = QProgressBar()
+                    meter.setObjectName('memorySlotMeter')
+                    meter.setRange(0, total)
+                    meter.setValue(used)
+                    caption = tr('{used} of {total} memory slots occupied', used=used, total=total)
+                    meter.setFormat(caption)
+                    meter.setAccessibleName(caption)
+                    meter.setTextVisible(False)
+                    box.addWidget(self.text(caption, True))
+                    box.addWidget(meter)
+                    box.addSpacing(10)
+                    slot_meter = True
             reasons = []
             for group_index, (name, entries) in enumerate(groups):
                 if group_index:
@@ -121,6 +140,8 @@ class HardwarePanel(QFrame):
                 form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
                 self.forms.append(form)
                 for key, value, reason in entries:
+                    if slot_meter and key in (tr('Slots used'), tr('Total slots')):
+                        continue
                     label, text = self.text(key, True), self.text(value, bool(reason))
                     label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
                     label.setMaximumWidth(156)
@@ -150,6 +171,15 @@ class HardwarePanel(QFrame):
         for label, _ in self.fields:
             label.setMinimumWidth(0 if narrow else 156)
             label.setMaximumWidth(16777215 if narrow else 156)
+        # QFormLayout changes its height-for-width when rows stack. Propagate
+        # that height through the section widgets so a scroll area cannot clip
+        # the bottom of each section after resizing or changing language.
+        for body in {form.parentWidget() for form in self.forms}:
+            layout = body.layout()
+            layout.invalidate()
+            needed = layout.totalHeightForWidth(max(1, body.width()))
+            body.setMinimumHeight(max(layout.minimumSize().height(), needed))
+            body.updateGeometry()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

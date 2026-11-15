@@ -317,6 +317,9 @@ class SystemDashboard(QWidget):
 
     def show_data(self, checked):
         self.sparklines.setVisible(checked and any(self.settings.values()))
+        if checked and not self.sparklines.isVisible():
+            # Also prepare an explicitly opened table before the page itself is shown.
+            self.sparklines.refresh_tables()
 
     def set_settings(self, settings):
         self.settings = settings

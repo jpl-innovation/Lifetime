@@ -258,6 +258,7 @@ class ConnectPage(QWidget):
         self.directory, self.machine_root, self.language = directory, machine_root, language
         self._busy = False
         self._operation = None
+        self._cancel_requested = False
         self.bundle = None
         self._origin = None
         self._line_code = None
@@ -352,6 +353,9 @@ class ConnectPage(QWidget):
             row.addWidget(text, 1)
             f.addLayout(row)
             self.stage_rows.append((mark, text))
+        self.waiting_cancel = self.button(f, 'Cancel connection', self.cancel_waiting)
+        self.waiting_cancel.setObjectName('quietAction')
+        self.waiting_cancel.hide()
         self.stage = 1
         self._report_started = None
         f = self.forms[4]
@@ -483,6 +487,8 @@ class ConnectPage(QWidget):
     def set_stage(self, stage):
         """1 connecting, 2 approval, 3 sending. Every row always names its own state in words."""
         self.stage = stage
+        self.waiting_cancel.setVisible(stage in (1, 2))
+        self.waiting_cancel.setEnabled(not self._cancel_requested)
         titles = {1: 'Connecting securely', 2: 'Waiting for approval', 3: "Sending this computer's details"}
         self.loading_title.setText(self.t(titles[stage]))
         for index, (mark, text) in enumerate(self.stage_rows):
@@ -526,6 +532,7 @@ class ConnectPage(QWidget):
         self._busy, self._operation = True, operation
         self.finish_button.setEnabled(False)
         self.cancel_button.setEnabled(False)    # a running step cannot be cancelled, so do not offer it
+        self.waiting_cancel.setEnabled(operation == 'status' and not self._cancel_requested)
         self.tasks.submit(function)
 
     def connect_server(self):
@@ -573,6 +580,19 @@ class ConnectPage(QWidget):
         self.review_address.setText(self.server_address)
         self.show_step(3)
 
+    def cancel_waiting(self):
+        if self.step != 4 or self.stage not in (1, 2) or self._cancel_requested:
+            return
+        if self._busy and self._operation != 'status':
+            return
+        self._cancel_requested = True
+        self.waiting_cancel.setEnabled(False)
+        if not self._busy:
+            self._cancel_waiting()
+
+    def _cancel_waiting(self):
+        self.submit('cancel-waiting', lambda: run_agent('disconnect', {}, directory=self.machine_root))
+
     def disconnect(self):
         if self._busy:
             return
@@ -589,6 +609,9 @@ class ConnectPage(QWidget):
         self.finish_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
         self.format_input()
+        if operation == 'status' and self._cancel_requested:
+            self._cancel_waiting()
+            return
         if operation == 'find':
             from lifetime_tls import decode_bundle
             from urllib.parse import urlsplit
@@ -599,9 +622,14 @@ class ConnectPage(QWidget):
             self.review_title.setText(self.t('Found {server}', server=self.server_name))      # found, not connected yet
             self.review_address.setText(self.server_address)
             self.show_step(3)
-        elif operation == 'disconnect':
+        elif operation in ('disconnect', 'cancel-waiting'):
+            self._cancel_requested = False
             self.status = {}
             self.bundle = None
+            self._report_started = None
+            self.editing = False
+            self.code.clear()
+            self.code_error.hide()
             self.show_step(1)
         elif operation in ('status', 'finish', 'policy'):
             self.status = result or {}
@@ -614,8 +642,21 @@ class ConnectPage(QWidget):
                 state = self.status.get('status')
                 if state in ('denied', 'revoked', 'invitation-used', 'invalid-code'):
                     self._code_rejected(state)
-                elif self.status.get('phase') in ('pending', 'enrolling') or state in ('pending', 'enrolling'):
-                    self.waiting_text.setText(self.t('{server} needs to approve this computer.', server=self.server_name))
+                elif self.status.get('phase') == 'enrolling' or state == 'enrolling':
+                    # An enrollment attempt is not an acknowledged server request.
+                    # In particular an unreachable old address has no approval
+                    # to show on the currently running server.
+                    message = ("Can't reach the server right now. Lifetime will keep trying."
+                               if state in ('unreachable', 'offline', 'error', 'retrying', 'backoff')
+                               else 'Connecting securely')
+                    self.waiting_text.setText(self.server_address + '\n' + self.t(message))
+                    self.set_stage(1)
+                    self.show_step(4)
+                elif self.status.get('phase') == 'pending' or state == 'pending':
+                    message = (self.t("Can't reach the server right now. Lifetime will keep trying.")
+                               if state in ('unreachable', 'offline', 'error', 'retrying', 'backoff')
+                               else self.t('{server} needs to approve this computer.', server=self.server_name))
+                    self.waiting_text.setText(self.server_address + '\n' + message)
                     self.set_stage(2)
                     self.show_step(4)
                 elif self.step == 4 and state == 'connected' and not self.status.get('reported') and not self._report_timed_out():
@@ -678,6 +719,15 @@ class ConnectPage(QWidget):
         self.finish_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
         self.format_input()
+        if operation == 'status' and self._cancel_requested:
+            self._cancel_waiting()
+            return
+        if operation == 'cancel-waiting':
+            self._cancel_requested = False
+            self.waiting_cancel.setEnabled(True)
+            self.waiting_text.setText(self.t(PERMISSION if error == 'PermissionError' else
+                                           'Could not cancel the connection. Try again.'))
+            return
         if operation == 'find':
             self.show_step(1)
             self.code_error.setText(self.t(NO_SERVER))
