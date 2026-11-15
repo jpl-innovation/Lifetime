@@ -666,8 +666,29 @@ class ConnectPage(QWidget):
             return str(stamp)
         return str(datetime_text(moment))
 
+    REASONS = {
+        'certificate': "The server's security certificate has changed. Connect again with a new code from the server.",
+        'tls': 'The secure connection to the server failed.',
+        'name': "The server's name could not be found on this network.",
+        'refused': 'The server computer answered, but Lifetime Server is not running on it.',
+        'timeout': 'No answer from the server. It may be switched off, or a firewall may be blocking it.',
+        'dropped': 'The connection to the server was interrupted.',
+        'network': 'This computer has no network path to the server.',
+        'protocol': 'The server sent a reply this version does not understand. Update Lifetime on both computers.',
+        'internal': 'Lifetime hit an internal error while reporting. It will keep trying.',
+    }
+
+    def _reason(self):
+        """Why the last attempt failed, in plain words; only a category is ever stored, never the raw error."""
+        kind = self.status.get('error')
+        if isinstance(kind, str) and kind.startswith('http-') and kind[5:].isdigit():
+            return self.t('The server refused the report (error {code}).', code=kind[5:])
+        return self.t(self.REASONS[kind]) if kind in self.REASONS else ''
+
     def _set_reachable(self, reachable):
         """The title and dot must agree with the line below them: never 'Connected' beside 'Can't reach the server'."""
+        reason = '' if reachable else self._reason()
+        self.unreachable.setText(self.t("Can't reach the server right now. Lifetime will keep trying.") + ('\n' + reason if reason else ''))
         self.unreachable.setVisible(not reachable)
         self.connected_title.setText(self.t('Connected' if reachable else 'Not connected right now'))
         self.connected_title.dot.set_active(reachable)

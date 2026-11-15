@@ -25,6 +25,34 @@ class ResponseError(ValueError):
     """Untrusted or incompatible response (never includes response/secret values)."""
 
 
+def error_kind(error):
+    """A short, secret-free category for a failed exchange, so people see why instead of a bare 'unreachable'.
+
+    Only the category is stored and shown; the exception text can contain addresses and is never published."""
+    import socket
+    import ssl
+    status = getattr(error, 'status', None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        return f'http-{status}'
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return 'certificate'            # a different or replaced server identity: never accepted silently
+    if isinstance(error, ssl.SSLError):
+        return 'tls'
+    if isinstance(error, socket.gaierror):
+        return 'name'                   # the server's name could not be found
+    if isinstance(error, ConnectionRefusedError):
+        return 'refused'                # the computer answered, but nothing listens on the port
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return 'timeout'                # no answer: switched off, asleep or blocked by a firewall
+    if isinstance(error, (ConnectionResetError, ConnectionAbortedError, http.client.HTTPException)):
+        return 'dropped'
+    if isinstance(error, OSError):
+        return 'network'                # no route, network down, adapter off
+    if isinstance(error, ValueError):
+        return 'protocol'               # a reply this version does not understand (often a version mismatch)
+    return 'internal'
+
+
 def _fields(value, allowed, required):
     if (not isinstance(value, dict) or set(value)-set(allowed)
             or set(required)-set(value)):
@@ -217,7 +245,8 @@ class SyncClient:
                         if 'readings' in message or not current['policy'].get('resources'):
                             current['reported'] = True
                         current.update(last_sync=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now)),
-                                       status='connected', enrollment=None, enrollment_sent=True)
+                                       status='connected', enrollment=None, enrollment_sent=True,
+                                       last_error=None, last_error_at=None)
                         current['bundle']['code'] = 'enrolled'
                         if 'reporting_interval' in response:
                             current['interval'] = response['reporting_interval']
@@ -247,7 +276,8 @@ class SyncClient:
                 with self.agent._transaction() as current:
                     current['failures'] = min(current['failures']+1, 20)
                     delay = min(MAX_BACKOFF, 2**(current['failures']-1))
-                    current.update(next_attempt=now+delay, status='unreachable')
+                    current.update(next_attempt=now+delay, status='unreachable',
+                                   last_error=error_kind(error), last_error_at=int(now))
                     status = getattr(error, 'status', None)
                     if status in (401, 403) and state['phase'] in ('enrolling', 'pending'):
                         current.update(status='invalid-code', phase='disabled', enabled=False,

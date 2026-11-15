@@ -363,7 +363,8 @@ class MachineAgent:
                         status=state['status'], last_sync=state['last_sync'],
                         pending=self._db.execute('SELECT count(*) FROM outbox').fetchone()[0],
                         dropped=state['dropped'], policy=dict(state['policy']),
-                        server_name=state.get('server_name'), phase=state['phase'])
+                        server_name=state.get('server_name'), phase=state['phase'],
+                        error=state.get('last_error'), error_at=state.get('last_error_at'))
 
     def write_status(self):
         with self._lock:
@@ -732,7 +733,13 @@ class MachineAgent:
                         if state.get('command_result'):
                             client.step(force=True)
                     except Exception:
-                        pass
+                        # Keep running, but never silently: record that something inside Lifetime failed.
+                        try:
+                            with self._transaction() as current:
+                                current.update(last_error='internal', last_error_at=int(time.time()))
+                            self.write_status()
+                        except Exception:
+                            pass
                     wake.wait(1)
             sync_thread = threading.Thread(target=synchronize, name='lifetime-sync', daemon=True)
             sync_thread.start()

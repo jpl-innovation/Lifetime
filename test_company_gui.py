@@ -131,6 +131,10 @@ class ConnectTests(unittest.TestCase):
         self.page.completed(0, dict(up, status='unreachable'))
         self.assertEqual(self.page.connected_title.text(), 'Not connected right now')
         self.assertFalse(self.page.unreachable.isHidden())
+        self.page.completed(0, dict(up, status='unreachable', error='timeout'))      # and it says why
+        self.assertIn('firewall', self.page.unreachable.text())
+        self.page.completed(0, dict(up, status='unreachable', error='http-503'))
+        self.assertIn('503', self.page.unreachable.text())
         self.page.completed(0, up)                                 # and it recovers by itself
         self.assertEqual(self.page.connected_title.text(), 'Connected')
         self.assertTrue(self.page.unreachable.isHidden())

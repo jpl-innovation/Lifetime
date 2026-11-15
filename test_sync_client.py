@@ -139,6 +139,24 @@ class SyncTests(SyncFixture):
         self.assertEqual(detail['totals']['measured_seconds'], 120)
         self.assertEqual(self.store._db.execute('SELECT count(*) FROM records').fetchone()[0], 2)
 
+    def test_failed_sync_says_why_with_a_category_only_and_success_clears_it(self):
+        import socket
+        from lifetime_client import error_kind
+        self.pair()
+        self.sample(100)
+        for error, kind in ((ConnectionRefusedError(), 'refused'), (TimeoutError(), 'timeout'),
+                            (socket.gaierror(11001, 'secret-host.internal not found'), 'name'),
+                            (ssl.SSLCertVerificationError('fingerprint mismatch'), 'certificate'),
+                            (OSError('no route'), 'network'), (ValueError('bad reply'), 'protocol')):
+            self.transport.side_effect = error
+            status = self.client.step(force=True)
+            self.assertEqual((status['status'], status['error']), ('unreachable', kind))
+            self.assertNotIn('secret-host', json.dumps(status))       # the raw message is never published
+        self.assertEqual(error_kind(tls.HTTPSRequestError(500)), 'http-500')
+        self.transport.side_effect = self.exchange
+        status = self.client.step(force=True)
+        self.assertEqual((status['status'], status['error']), ('connected', None))
+
     def test_offline_capture_backoff_survives_restart_and_is_bounded(self):
         self.pair()
         self.transport.side_effect = OSError('offline')
