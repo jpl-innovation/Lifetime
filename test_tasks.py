@@ -24,6 +24,16 @@ class TaskTests(unittest.TestCase):
         sip.delete(task.signals)
         task.run()      # must not raise
 
+    def test_submit_to_a_deleted_owner_runs_nothing(self):
+        """A late timer (lifetime_reveal.later) may submit after the window was deleted; connect() would raise."""
+        from PyQt6 import sip
+        qt_app()
+        tasks, ran = Tasks(), []
+        sip.delete(tasks)
+        self.assertIsNone(tasks.submit(lambda: ran.append(1)))
+        time.sleep(0.05)
+        self.assertEqual(ran, [])
+
     def test_worker_and_result_thread(self):
         app = qt_app()
         owner = threading.get_ident()

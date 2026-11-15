@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QAbstractAnimation, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDialog
 from qt_test_support import qt_app
@@ -97,6 +97,12 @@ class DashboardShellTests(unittest.TestCase):
         self.assertAlmostEqual(self.w.sidebar.indicator_animation.startValue(), position)
         self.w.select_page(1)
         QTest.qWait(300)
+        for _ in range(60):     # a loaded CI runner may finish the page fade late: wait up to 3 s more
+            moving = self.w.sidebar.indicator_animation
+            if self.w.pages.currentWidget().graphicsEffect() is None and (
+                    moving is None or moving.state() == QAbstractAnimation.State.Stopped):
+                break
+            QTest.qWait(50)
         self.assertEqual(self.w.pages.currentIndex(), 1)
         self.assertAlmostEqual(self.w.sidebar.indicator_y, self.w.navigation.group.button(1).y())
         self.assertIsNone(self.w.pages.currentWidget().graphicsEffect())

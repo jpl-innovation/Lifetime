@@ -54,7 +54,10 @@ if __name__ == '__main__' and '--child' in sys.argv:
         legacy = gui.BarChart()
         legacy.show()
         assert legacy.entrance.duration() == 750
-        QTest.qWait(800)
+        for _ in range(60):      # 750 ms, but a loaded CI runner may be late: wait up to 3 s
+            QTest.qWait(50)
+            if legacy.progress == 1:
+                break
         assert legacy.progress == 1
         animation = legacy.entrance
         legacy.hide()

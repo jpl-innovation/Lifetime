@@ -1,4 +1,5 @@
 """Small Qt worker bridge: blocking I/O stays outside the interface thread."""
+from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, Qt, pyqtSignal, pyqtSlot
 
 
@@ -35,6 +36,8 @@ class Tasks(QObject):
         self._pending = {}
 
     def submit(self, function):
+        if sip.isdeleted(self):
+            return None     # a late timer after the owner's window was deleted: connecting would abort the process
         self._number += 1
         number = self._number
         task = _Task(number, function)

@@ -236,7 +236,7 @@ class DashboardTests(unittest.TestCase):
         card = self.window.cards['average']
         card.set_list_mode(False, False)
         card.heading_label.setText('Hoạt động trung bình / ngày')        # Vietnamese at 1024 px wrapped to three lines
-        card.resize(140, card.height())
+        card.resize(100, card.height())     # narrower than needed so it wraps to 3+ lines with any system font
         card._fit_height()
         self.assertGreater(card.height(), 104)
         card.heading_label.setText('Average')
