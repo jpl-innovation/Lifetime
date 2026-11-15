@@ -1328,7 +1328,9 @@ class ServerGuiTests(unittest.TestCase):
         self.window.table.cellWidget(0, 0).menu_button.click()
         self.wait_idle()
         self.assertTrue(self.window.device_menu.isVisible())
-        self.assertFalse(self.window.device_menu.actions()[0].isEnabled())
+        actions = {action.text(): action for action in self.window.device_menu.actions()}
+        self.assertTrue(actions['Edit details…'].isEnabled())
+        self.assertFalse(actions['Restart'].isEnabled())
         self.window.device_menu.close()
 
     def test_live_updates_200_cards_in_place_and_preserves_selection(self):
@@ -1771,6 +1773,72 @@ class AddComputerSheetTests(unittest.TestCase):
         self.assertEqual(self.sheet.message.text(), 'Office PC connected')
         self.assertFalse(self.sheet.decisions.isVisible())
         self.assertFalse(self.sheet.timer.isActive())
+
+    def test_group_chosen_at_approval_keeps_the_rest_of_the_identity(self):
+        self.sheet.poll()
+        self.sheet.tasks.resolve([dict(request_id='r1', device_id='d1', name='Office PC')])
+        self.sheet.group_choice.setEditText('  Lab A ')
+        self.sheet.approve.click()
+        replies = {'approve': dict(request_id='r1', device_id='d1', status='approved'),
+                   'device': dict(device_id='d1', identity=dict(display_name='Office PC', location='Room 2'))}
+        self.client.call.side_effect = lambda operation, **_: replies.get(operation, {})
+        result = self.sheet.tasks.jobs[-1]()
+        self.client.call.assert_called_with('identity', device_id='d1',
+                                            identity=dict(display_name='Office PC', location='Room 2', department='Lab A'))
+        self.sheet.tasks.resolve(result)
+        self.assertEqual(self.sheet.message.text(), 'Office PC connected\nGroup: Lab A')
+
+    def test_group_field_offers_existing_groups_and_reads_like_a_text_field(self):
+        from lifetime_server_widgets import GroupField
+        field = GroupField()
+        self.addCleanup(field.deleteLater)
+        field.setText('Sales')
+        field.set_groups(['Lab A', 'Sales'])
+        self.assertEqual([field.itemText(i) for i in range(field.count())], ['Lab A', 'Sales'])
+        self.assertEqual(field.text(), 'Sales')
+        field.clear()
+        self.assertEqual((field.text(), field.count()), ('', 2))
+
+    def test_edit_details_saves_all_fields_and_keeps_unknown_ones(self):
+        from lifetime_server_widgets import DeviceDetailsDialog
+        from lifetime_i18n import tr
+        dialog = DeviceDetailsDialog(dict(display_name='PC 1', department='Lab A'), ['Lab A', 'Sales'], tr)
+        self.addCleanup(dialog.deleteLater)
+        dialog.fields['department'].setText('Sales')
+        dialog.fields['location'].setText('Room 2')
+        dialog.fields['deployment_date'].setText('16/11/2026')
+        dialog._save()
+        self.assertTrue(dialog.error.isVisibleTo(dialog))
+        self.assertNotEqual(dialog.result(), dialog.DialogCode.Accepted)
+        dialog.fields['deployment_date'].setText('2026-11-16')
+        dialog._save()
+        self.assertEqual(dialog.result(), dialog.DialogCode.Accepted)
+        self.assertEqual(dialog.identity(), dict(display_name='PC 1', asset_tag='', department='Sales',
+                                                 location='Room 2', deployment_date='2026-11-16'))
+
+    def test_groups_dialog_adds_lists_and_only_removes_empty_groups(self):
+        from lifetime_server_widgets import GroupsDialog
+        from lifetime_i18n import tr
+        calls, groups = [], [dict(name='Lab A', computers=2, created=True)]
+
+        def run(operation, arguments, done):
+            calls.append((operation, arguments))
+            if operation == 'add_group':
+                groups.append(dict(name=arguments['name'], computers=0, created=True))
+            done(list(groups), True)
+        dialog = GroupsDialog(tr, run)
+        self.addCleanup(dialog.deleteLater)
+        self.assertEqual(dialog.list.item(0).text(), 'Lab A  ·  2 computers')
+        dialog.list.setCurrentRow(0)
+        self.assertFalse(dialog.remove_button.isEnabled())        # computers are still in it
+        dialog.new_name.setText(' Sales ')
+        dialog.add_button.click()
+        self.assertEqual(calls[-1], ('add_group', dict(name='Sales')))
+        self.assertTrue(dialog.changed)
+        dialog.list.setCurrentRow(1)
+        self.assertTrue(dialog.remove_button.isEnabled())
+        dialog.remove_button.click()
+        self.assertEqual(calls[-1], ('remove_group', dict(name='Sales')))
 
     def test_admin_failure_is_visible(self):
         self.sheet.poll()

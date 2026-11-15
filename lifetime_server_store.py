@@ -22,7 +22,7 @@ import uuid
 
 from lifetime_protocol import ProtocolError, number, validate_identity, validate_problem, validate_sync, validate_performance
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 APPLICATION_ID = 0x4C544D45
 MAX_BYTES = 1024 * 1024
 MAX_CODES = 1000
@@ -271,6 +271,11 @@ def _migrate(db):
             db.execute('''CREATE TABLE IF NOT EXISTS server_log (event_id INTEGER PRIMARY KEY, time TEXT NOT NULL,
                 kind TEXT NOT NULL, category TEXT, device_id TEXT, count INTEGER NOT NULL DEFAULT 1 CHECK(count >= 1))''')
             db.execute('PRAGMA user_version=9')
+        if version < 10:
+            # Groups an administrator creates ahead of time, so they can be picked before any computer is in them.
+            db.execute('''CREATE TABLE IF NOT EXISTS named_groups (name TEXT PRIMARY KEY COLLATE NOCASE,
+                created_at TEXT NOT NULL)''')
+            db.execute('PRAGMA user_version=10')
         db.commit()
     except BaseException:
         db.rollback()
@@ -1009,6 +1014,52 @@ class Store:
                        (_json(identity), *_identity_columns(device_id, identity), device_id))
             return self._public_device(db, self._device_row(db, device_id), detail=True)
 
+    @staticmethod
+    def _group_name(name):
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120 or any(ord(c) < 32 for c in name):
+            raise StoreError('Invalid group name')
+        return name.strip()
+
+    def list_groups(self):
+        """Every group: the ones created here plus any a computer is already in, with how many computers each has."""
+        with self._transaction() as db:
+            groups = {row[0].casefold(): dict(name=row[0], computers=0, created=True)
+                      for row in db.execute('SELECT name FROM named_groups')}
+            for (identity,) in db.execute('SELECT identity FROM devices'):
+                name = json.loads(identity).get('department', '')
+                if name:
+                    entry = groups.setdefault(name.casefold(), dict(name=name, computers=0, created=False))
+                    entry['computers'] += 1
+        return sorted(groups.values(), key=lambda group: group['name'].casefold())
+
+    def add_group(self, name):
+        name = self._group_name(name)
+        with self._transaction() as db:
+            db.execute('INSERT OR IGNORE INTO named_groups (name,created_at) VALUES (?,?)', (name, _stamp(_now())))
+        return self.list_groups()
+
+    def remove_group(self, name):
+        """Forget a created group. Computers already in it keep it, so it stays listed while any computer uses it."""
+        name = self._group_name(name)
+        with self._transaction() as db:
+            db.execute('DELETE FROM named_groups WHERE name=?', (name,))
+        return self.list_groups()
+
+    def rename_group(self, name, new_name):
+        """Rename a group everywhere: the created entry and every computer in it."""
+        name, new_name = self._group_name(name), self._group_name(new_name)
+        with self._transaction() as db:
+            if db.execute('SELECT 1 FROM named_groups WHERE name=?', (name,)).fetchone():
+                db.execute('DELETE FROM named_groups WHERE name=?', (name,))
+                db.execute('INSERT OR IGNORE INTO named_groups (name,created_at) VALUES (?,?)', (new_name, _stamp(_now())))
+            for device_id, identity in db.execute('SELECT device_id,identity FROM devices').fetchall():
+                identity = json.loads(identity)
+                if identity.get('department', '').casefold() == name.casefold():
+                    identity = validate_identity(dict(identity, department=new_name))
+                    db.execute('UPDATE devices SET identity=?,search_text=?,group_name=? WHERE device_id=?',
+                               (_json(identity), *_identity_columns(device_id, identity), device_id))
+        return self.list_groups()
+
     def leave(self, device_id, credential):
         """The computer's own Disconnect: same effect as an administrator revoking it, proven by its credential."""
         device_id = _identifier(device_id)
@@ -1401,6 +1452,7 @@ class Store:
             interval = db.execute('SELECT reporting_interval FROM settings WHERE singleton=1').fetchone()[0]
             threshold = max(OVERDUE_SECONDS, interval * 3)
             counts['pending'] = db.execute("SELECT COUNT(*) FROM requests WHERE status='pending'").fetchone()[0]
+            groups.update(row[0] for row in db.execute('SELECT name FROM named_groups'))
             for row in db.execute('SELECT * FROM devices'):
                 received = self._last_seen(row)
                 identity, policy = json.loads(row['identity']), json.loads(row['policy'])
@@ -1463,7 +1515,8 @@ class Store:
         for event in events[:20]:
             event['name'] = names.get(event['device_id'], '')
         return dict(counts=counts, daily=list(daily.values()), today=daily[selected.isoformat()],
-                    rows=ordered[offset:offset+limit], matching=len(rows), groups=sorted(groups, key=str.casefold),
+                    rows=ordered[offset:offset+limit], matching=len(rows),
+                    groups=sorted({group.casefold(): group for group in sorted(groups)}.values(), key=str.casefold),
                     recent_events=events[:20], updated_at=_stamp(_now()), date=selected.isoformat())
 
     def monitor_snapshot(self):

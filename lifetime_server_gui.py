@@ -32,7 +32,7 @@ from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_insights import InsightsUI
 from lifetime_server_alerts import AlertsUI
-from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, table_action
+from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, GroupField, DeviceDetailsDialog, GroupsDialog, local_expiry, reduced_motion, table_action
 from lifetime_reveal import RollLabel, fade_in, later, warm_pages
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
@@ -678,7 +678,8 @@ class ServerWindow(QMainWindow):
             self.device_chips[code] = button
             chips.addWidget(button)
         chips.addStretch()
-        for widget in (self.search, self.group, self.status_filter):
+        self.manage_groups_button = self.button('Manage groups', self.manage_groups)
+        for widget in (self.search, self.group, self.manage_groups_button, self.status_filter):
             chips.addWidget(widget)
         self.device_order = QComboBox()
         for code, key in (('problem', 'Sort by problem'), ('name', 'Sort by name'), ('last', 'Sort by last seen')):
@@ -902,8 +903,8 @@ class ServerWindow(QMainWindow):
         identity_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         identity_form.setSpacing(10)
         self.identity_fields = {}
-        for field, key in (('display_name', 'Display name'), ('asset_tag', 'Asset tag'), ('department', 'Department'), ('location', 'Location'), ('deployment_date', 'Deployment date')):
-            edit = QLineEdit()
+        for field, key in (('display_name', 'Display name'), ('asset_tag', 'Asset tag'), ('department', 'Group (department)'), ('location', 'Location'), ('deployment_date', 'Deployment date')):
+            edit = GroupField() if field == 'department' else QLineEdit()
             edit.setMinimumWidth(120)
             edit.setMaxLength(4096)
             label = self.label(key)
@@ -1241,6 +1242,11 @@ class ServerWindow(QMainWindow):
             if not success or sip.isdeleted(anchor) or not anchor.isVisible() or anchor.parentWidget().device_id != device_id:
                 return
             menu = QMenu(self)
+            edit = menu.addAction(self.t('Edit details…'))
+            edit.setEnabled(self.access_ui.can('identity'))
+            edit.setToolTip('' if edit.isEnabled() else self.access_ui.reason())
+            edit.triggered.connect(lambda checked=False: self.edit_details(device))
+            menu.addSeparator()
             for action, key in (('restart', 'Restart'), ('sleep', 'power.sleep'), ('shutdown', 'Shut down'), ('wake', 'Turn on'), ('refresh', 'Refresh')):
                 item = menu.addAction(self.t(key))
                 reason = self._power_reason(device, action)
@@ -1771,7 +1777,7 @@ class ServerWindow(QMainWindow):
             self._render_configuration(self._configuration_result)
         if self._bundle_expiry:
             self.code_expiry.setText(local_expiry(self._bundle_expiry, self.t) if self._bundle_expiry else '')
-        for field, key in (('display_name', 'Display name'), ('asset_tag', 'Asset tag'), ('department', 'Department'), ('location', 'Location'), ('deployment_date', 'Deployment date')):
+        for field, key in (('display_name', 'Display name'), ('asset_tag', 'Asset tag'), ('department', 'Group (department)'), ('location', 'Location'), ('deployment_date', 'Deployment date')):
             self.identity_fields[field].setAccessibleName(self.t(key))
         self._describe_switches()
         for segment, key in zip(self.style_control.group.buttons(), ('Glass', 'Classic')):
@@ -2002,6 +2008,7 @@ class ServerWindow(QMainWindow):
             self.group.addItem(self.t('All groups'), '')
             for group in metadata['groups']:
                 self.group.addItem(group, group)
+            self.identity_fields['department'].set_groups(metadata['groups'])
             self.group.setCurrentIndex(max(0, self.group.findData(chosen)))
             self.group.blockSignals(False)
             self._rows = rows
@@ -2427,6 +2434,27 @@ class ServerWindow(QMainWindow):
             self.status_label.setText(self.t('Identity is invalid. Use an optional YYYY-MM-DD deployment date.'))
             return
         self._mutate('identity', dict(device_id=self._detail['device_id'], identity=identity))
+
+    def _known_groups(self):
+        return [self.group.itemData(index) for index in range(self.group.count()) if self.group.itemData(index)]
+
+    def edit_details(self, device):
+        dialog = DeviceDetailsDialog(device.get('identity') or {}, self._known_groups(), self.t, self)
+        if dialog.exec():
+            self._mutate('identity', dict(device_id=device['device_id'], identity=dialog.identity()))
+
+    def manage_groups(self):
+        client = self.client
+
+        def run(operation, arguments, done):
+            if not self._submit(lambda: client.call(operation, **arguments), done):
+                done(None, False)
+        dialog = GroupsDialog(self.t, run, self, can_edit=self.access_ui.can('add_group'))
+        dialog.exec()
+        if dialog.changed:
+            self._revision += 1
+            self._load_devices()
+            self._load_fleet()
 
     def revoke(self):
         if self._detail and self._confirm('Disconnect this computer? Connecting again needs approval.'):
@@ -3102,7 +3130,9 @@ class ServerWindow(QMainWindow):
         self._issuing_invitation = False
         self.invitation_button.setEnabled(True)
         if success:
-            self.add_device_sheet = AddDeviceSheet(result['issued'], result['info']['address'], self.t, self, client=self.client)
+            groups = self._known_groups()
+            self.add_device_sheet = AddDeviceSheet(result['issued'], result['info']['address'], self.t, self, client=self.client,
+                                                   groups=groups)
             self.add_device_sheet.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             self.add_device_sheet.show()
             self._invitation_offset = 0

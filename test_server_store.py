@@ -523,6 +523,26 @@ class StoreTests(unittest.TestCase):
             with self.subTest(identity=str(identity)[:80]), self.assertRaises(ProtocolError):
                 self.store.update_identity(device, identity)
 
+    def test_groups_can_exist_before_any_computer_and_rename_moves_computers(self):
+        self.store.add_group('  Lab A ')
+        self.store.add_group('lab a')                       # same name, any case: not a second group
+        self.assertEqual(self.store.list_groups(), [dict(name='Lab A', computers=0, created=True)])
+        self.assertEqual(self.store.fleet()['groups'], ['Lab A'])
+        request, _credential = self.pair()
+        device = request['device_id']
+        self.store.update_identity(device, {'display_name': 'PC 1', 'department': 'Lab A', 'location': 'Room 2'})
+        self.assertEqual(self.store.list_groups(), [dict(name='Lab A', computers=1, created=True)])
+        groups = self.store.rename_group('Lab A', 'Lab B')
+        self.assertEqual(groups, [dict(name='Lab B', computers=1, created=True)])
+        identity = self.store.get_device(device)['identity']
+        self.assertEqual((identity['department'], identity['location']), ('Lab B', 'Room 2'))
+        self.assertEqual([row['device_id'] for row in self.store.list_devices(group='lab b')], [device])
+        self.store.remove_group('Lab B')                     # still used by a computer, so it stays listed
+        self.assertEqual(self.store.list_groups(), [dict(name='Lab B', computers=1, created=False)])
+        for bad in ('', '   ', 'x' * 121, 'a\nb', None):
+            with self.subTest(bad=bad), self.assertRaises(StoreError):
+                self.store.add_group(bad)
+
     def test_reporting_status_uses_receipt_time_not_client_clock(self):
         request, credential = self.pair()
         device = request['device_id']
