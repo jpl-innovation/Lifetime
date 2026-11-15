@@ -6,8 +6,9 @@ operation must appear in exactly one class below; an operation that is in none i
 (default deny), and the tests fail until it is classified.
 
 Identity comes from Windows (lifetime_pipe): SYSTEM and accounts whose Administrators group is enabled (elevated) are
-always Admin, so nobody can lock the server out of its own administrators. Other accounts and groups get a role only by
-assignment. The loopback HTTP channel with ``admin-token`` cannot tell who is calling: whoever can read the token is
+always Admin, so nobody can lock the server out of its own administrators. On Linux identity comes from the admin
+socket's SO_PEERCRED (lifetime_unix_admin): root and members of the ``lifetime-admin`` group are always Admin. Other
+accounts and groups get a role only by assignment. The loopback HTTP channel with ``admin-token`` cannot tell who is calling: whoever can read the token is
 treated as Admin and recorded as ``admin-token``.
 
 The audit trail is an append-only table in ``access.sqlite``: every state-changing action and every remote command,
@@ -30,6 +31,8 @@ import lifetime_permissions as permissions
 
 ROLES = ('admin', 'operator', 'auditor', 'viewer')
 SYSTEM, ADMINISTRATORS = 'S-1-5-18', 'S-1-5-32-544'
+UNIX_USER, UNIX_GROUP = 'unix:uid:', 'unix:gid:'      # Linux principals (lifetime_unix_admin)
+UNIX_ROOT = UNIX_USER + '0'
 TOKEN_ACTOR = dict(sid=None, name='admin-token', groups=[], channel='token')
 
 READ = frozenset({
@@ -66,7 +69,32 @@ def state_changing(operation):
 
 
 def builtin_admin(identity):
-    return identity.get('sid') == SYSTEM or ADMINISTRATORS in identity.get('groups', ())
+    sid = identity.get('sid')
+    if isinstance(sid, str) and sid.startswith(UNIX_USER):
+        return unix_builtin_admin(identity)
+    return sid == SYSTEM or ADMINISTRATORS in identity.get('groups', ())
+
+
+def unix_builtin_admin(identity):
+    """Linux: root and members of the admin group (lifetime-admin, or LIFETIME_ADMIN_GROUP) are always Admin, like
+    SYSTEM and elevated Administrators on Windows. Every other account needs an assigned role."""
+    from lifetime_unix_admin import admin_group, group_id
+    if identity.get('sid') == UNIX_ROOT:
+        return True
+    gid = group_id(admin_group())
+    return gid is not None and f'{UNIX_GROUP}{gid}' in identity.get('groups', ())
+
+
+def valid_principal(sid):
+    """A Windows SID, or on Linux ``unix:uid:N`` / ``unix:gid:N``."""
+    if not isinstance(sid, str):
+        return False
+    if sid.startswith('S-1-'):
+        return True
+    for prefix in (UNIX_USER, UNIX_GROUP):
+        if sid.startswith(prefix) and sid[len(prefix):].isdigit() and len(sid) <= 32:
+            return True
+    return False
 
 
 def operations(roles):
@@ -173,9 +201,9 @@ class Access:
         return {row['role'] for row in self.roles() if row['sid'] in sids}
 
     def set_role(self, sid, name, kind, role, granted_by):
-        if role not in ROLES or kind not in ('user', 'group') or not isinstance(sid, str) or not sid.startswith('S-1-'):
+        if role not in ROLES or kind not in ('user', 'group') or not valid_principal(sid):
             raise AccessError('Invalid role assignment')
-        if sid in (SYSTEM, ADMINISTRATORS):
+        if sid in (SYSTEM, ADMINISTRATORS, UNIX_ROOT):
             raise AccessError('SYSTEM and Administrators are always Admin')
         with self._transaction() as db:
             previous = db.execute('SELECT role FROM roles WHERE sid=?', (sid,)).fetchone()
@@ -290,7 +318,7 @@ class Access:
                         or db.execute('PRAGMA integrity_check').fetchall()[0][0] != 'ok'):
                     raise AccessError('Invalid access database')
                 for row in db.execute('SELECT * FROM roles'):
-                    if row['role'] not in ROLES or not row['sid'].startswith('S-1-'):
+                    if row['role'] not in ROLES or not valid_principal(row['sid']):
                         raise AccessError('Invalid role assignment')
                 return Access._verify(db)
         except (sqlite3.Error, KeyError, TypeError, json.JSONDecodeError) as error:

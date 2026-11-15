@@ -3158,8 +3158,11 @@ def _write_ui(directory, key, value):
         data = {}
     data[key] = value
     temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(data), encoding='utf-8')
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(json.dumps(data), encoding='utf-8')
+        os.replace(temporary, path)
+    except OSError:
+        pass        # a dashboard without write access to the data folder (a Linux lifetime-admin member) forgets it
 
 
 def create_application(argv=None):

@@ -1,0 +1,25 @@
+#!/sbin/openrc-run
+# Lifetime Server for OpenRC (Gentoo, Artix, Devuan with OpenRC). Installed as /etc/init.d/lifetime-server.
+name="Lifetime Server"
+description="Lifetime HTTPS reporting and local administration"
+command=/opt/lifetime-server/LifetimeServerRuntime
+command_user="lifetime:lifetime"
+supervisor=supervise-daemon
+respawn_delay=5
+respawn_max=0
+umask=077
+output_log=/var/log/lifetime-server.log
+error_log=/var/log/lifetime-server.log
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    . /etc/lifetime-server/server.conf
+    command_args="console --directory /var/lib/lifetime-server --address ${LIFETIME_ADDRESS} --host ${LIFETIME_HOST} --port ${LIFETIME_PORT} --admin-port ${LIFETIME_ADMIN_PORT}"
+    checkpath -d -m 0755 -o lifetime:lifetime /run/lifetime-server
+    checkpath -d -m 0700 -o lifetime:lifetime /var/lib/lifetime-server
+    checkpath -f -m 0640 -o lifetime:lifetime /var/log/lifetime-server.log
+}

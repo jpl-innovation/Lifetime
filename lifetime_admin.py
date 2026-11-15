@@ -1,8 +1,9 @@
 """Explicit loopback administration client; never discovers or contacts LAN hosts.
 
 On Windows it first uses the server's identity-bound named pipe (the server reads this Windows account from the pipe
-and applies its role). Without that pipe (an older server, or Linux), or when this account has no role on it, it uses
-the loopback HTTP channel with ``admin-token``, whose holder the server treats as Admin.
+and applies its role); on Linux the identity-bound Unix socket (lifetime_unix_admin, SO_PEERCRED). Without that channel
+(an older server), or when this account has no role on it, it uses the loopback HTTP channel with ``admin-token``,
+whose holder the server treats as Admin.
 """
 import http.client
 from pathlib import Path
@@ -45,11 +46,16 @@ class AdminClient:
         body = canonical(arguments)
         if len(body) > MAX_BYTES:
             raise ValueError('Admin request too large')
-        if sys.platform == 'win32':
-            import lifetime_pipe
+        if sys.platform == 'win32' or sys.platform.startswith('linux'):
+            request = canonical(dict(operation=operation, arguments=arguments))
             try:
-                raw = lifetime_pipe.call(lifetime_pipe.pipe_name(self.port),
-                                         canonical(dict(operation=operation, arguments=arguments)), self.timeout)
+                if sys.platform == 'win32':
+                    import lifetime_pipe
+                    raw = lifetime_pipe.call(lifetime_pipe.pipe_name(self.port), request, self.timeout)
+                else:
+                    import lifetime_unix_admin
+                    raw = lifetime_unix_admin.call(lifetime_unix_admin.socket_path(self.directory, self.port),
+                                                   request, self.timeout)
             except (FileNotFoundError, PermissionError):
                 pass        # no pipe, or no role on it: the token channel decides
             else:

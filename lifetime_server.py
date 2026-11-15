@@ -778,10 +778,14 @@ class ServerRuntime:
     def set_role(self, identity, principal, role):
         """Give a Windows account or group a role (resolved to its SID here, never trusted from the dashboard).
         Lowering or removing a role that allowed remote power cancels every power command still waiting."""
-        if sys.platform != 'win32':
-            raise ProtocolError('Roles are for Windows accounts')
-        import lifetime_pipe
-        sid, name, kind = lifetime_pipe.lookup_account(principal)
+        if sys.platform == 'win32':
+            import lifetime_pipe
+            sid, name, kind = lifetime_pipe.lookup_account(principal)
+        elif sys.platform.startswith('linux'):
+            import lifetime_unix_admin
+            sid, name, kind = lifetime_unix_admin.lookup_account(principal)
+        else:
+            raise ProtocolError('Roles are for Windows and Linux accounts')
         previous = self.access.set_role(sid, name, kind, role, identity.get('name') or 'unknown')
         if previous in ('admin', 'operator') and role not in ('admin', 'operator'):
             self._store.cancel_power_commands()
@@ -792,10 +796,10 @@ class ServerRuntime:
             self._store.cancel_power_commands()
         return self.access.roles()
 
-    def _pipe_request(self, identity, raw):
-        """A request on the Windows pipe: {operation, arguments} -> {status, result}. The identity is the one Windows
-        reported for the pipe's client; nothing in the request can change it."""
-        identity = dict(identity, channel='pipe')
+    def _pipe_request(self, identity, raw, channel='pipe'):
+        """A request on the Windows pipe (or the Linux socket): {operation, arguments} -> {status, result}. The identity
+        is the one the operating system reported for the client; nothing in the request can change it."""
+        identity = dict(identity, channel=channel)
         try:
             request = decode(raw)
             if (not isinstance(request, dict) or set(request) != {'operation', 'arguments'}
@@ -861,6 +865,8 @@ class ServerRuntime:
                 self._validate_certificate(context, bundle)
                 if sys.platform == 'win32':
                     self._start_pipe(admin.server_port)
+                elif sys.platform.startswith('linux'):
+                    self._start_socket(admin.server_port)
                 for server in self._servers:
                     thread = threading.Thread(target=server.serve_forever,
                                               kwargs={'poll_interval': 0.05},
@@ -898,6 +904,18 @@ class ServerRuntime:
             own = lifetime_pipe.current_identity()['sid']
             self._pipe = lifetime_pipe.PipeServer(lifetime_pipe.pipe_name(port), self._pipe_request,
                                                   lambda: self.access.pipe_descriptor(own)).start()
+        except OSError:
+            self._pipe = None
+            self._store.log_event('admin-pipe-unavailable')
+
+    def _start_socket(self, port):
+        """Linux: the identity-bound admin channel is a Unix socket (SO_PEERCRED). Same fallback as the pipe."""
+        import lifetime_unix_admin
+        try:
+            self._pipe = lifetime_unix_admin.SocketServer(
+                lifetime_unix_admin.socket_path(self.directory, port),
+                lambda identity, raw: self._pipe_request(identity, raw, 'socket'),
+                lambda identity: bool(self.access.roles_for(identity))).start()
         except OSError:
             self._pipe = None
             self._store.log_event('admin-pipe-unavailable')
@@ -1114,11 +1132,36 @@ def _offline(args):
     return 0 if report.get('ok') else 1
 
 
+def _admin(args):
+    """One administration request to the running server through lifetime_admin (the identity-bound pipe or socket
+    first, then the token), so roles, validation and the audit trail apply exactly as for the dashboard."""
+    import json
+    from lifetime_admin import AdminClient
+    try:
+        arguments = json.loads(args.arguments or '{}')
+        if not isinstance(arguments, dict) or not args.operation:
+            raise ValueError('Give --operation and a JSON object in --arguments')
+        result = AdminClient(args.directory, args.admin_port).call(args.operation, **arguments)
+    except (OSError, ValueError) as error:
+        print(f'Lifetime Server admin: {type(error).__name__}: {error}', file=sys.stderr)
+        return 1
+    if args.field:
+        item = result[0] if isinstance(result, list) and result else result
+        value = item.get(args.field) if isinstance(item, dict) else None
+        print(value if isinstance(value, str) else json.dumps(value), flush=True)
+        return 0 if value is not None else 1
+    print(json.dumps(result, indent=1, ensure_ascii=False), flush=True)
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Lifetime Server console runtime and offline maintenance')
-    parser.add_argument('mode', nargs='?', choices=('console', 'restore', 'verify-backup', 'verify-audit'),
+    parser.add_argument('mode', nargs='?', choices=('console', 'restore', 'verify-backup', 'verify-audit', 'admin'),
                         default='console', help='restore stages an archive for the next start; verify-backup and '
-                        'verify-audit only read')
+                        'verify-audit only read; admin sends one request to the running server')
+    parser.add_argument('--operation', help='admin: the operation, for example invitation, pending_enrollments')
+    parser.add_argument('--arguments', help='admin: its arguments as a JSON object')
+    parser.add_argument('--field', help='admin: print only this field of the result (of its first item for a list)')
     parser.add_argument('--directory', required=True)
     parser.add_argument('--archive', help='backup archive (.zip) for restore and verify-backup')
     parser.add_argument('--address', default='https://localhost:8443')
@@ -1126,11 +1169,13 @@ def main(argv=None):
     parser.add_argument('--port', type=int, default=8443)
     parser.add_argument('--admin-port', type=int, default=0)
     args = parser.parse_args(argv)
+    if args.mode == 'admin':
+        return _admin(args)
     if args.mode != 'console':
         return _offline(args)
     configuration = vars(args)
-    configuration.pop('mode')
-    configuration.pop('archive')
+    for key in ('mode', 'archive', 'operation', 'arguments', 'field'):
+        configuration.pop(key)
     stopped = threading.Event()
     previous = {}
     for number in (signal.SIGINT, signal.SIGTERM):

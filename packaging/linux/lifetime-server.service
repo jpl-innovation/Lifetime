@@ -1,0 +1,33 @@
+[Unit]
+Description=Lifetime Server (HTTPS reporting and local administration)
+Documentation=file:///opt/lifetime-server/docs/SERVER_OPERATIONS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lifetime
+Group=lifetime
+EnvironmentFile=/etc/lifetime-server/server.conf
+ExecStart=/opt/lifetime-server/LifetimeServerRuntime console --directory /var/lib/lifetime-server --address ${LIFETIME_ADDRESS} --host ${LIFETIME_HOST} --port ${LIFETIME_PORT} --admin-port ${LIFETIME_ADMIN_PORT}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+# /run/lifetime-server holds the admin socket (0660, group lifetime-admin); the directory itself is searchable.
+RuntimeDirectory=lifetime-server
+RuntimeDirectoryMode=0755
+StateDirectory=lifetime-server
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

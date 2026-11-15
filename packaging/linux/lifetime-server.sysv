@@ -1,0 +1,88 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          lifetime-server
+# Required-Start:    $network $remote_fs
+# Required-Stop:     $network $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Lifetime Server
+# Description:       Lifetime HTTPS reporting and local administration
+### END INIT INFO
+# chkconfig: 2345 90 10
+# Lifetime Server for SysV init (and any system without systemd or OpenRC). Installed as /etc/init.d/lifetime-server.
+# It does not restart a crashed server by itself (systemd and OpenRC do); see docs/SERVER_OPERATIONS.md.
+CONF=/etc/lifetime-server/server.conf
+BIN=/opt/lifetime-server/LifetimeServerRuntime
+DATA=/var/lib/lifetime-server
+RUN=/run/lifetime-server
+PIDFILE=$RUN/server.pid
+LOG=/var/log/lifetime-server.log
+ACCOUNT=lifetime
+
+running() {
+    [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+start() {
+    if running; then
+        echo "Lifetime Server is already running."
+        return 0
+    fi
+    . "$CONF"
+    mkdir -p "$RUN" "$DATA"
+    chown "$ACCOUNT:$ACCOUNT" "$RUN" "$DATA"
+    chmod 0755 "$RUN"
+    chmod 0700 "$DATA"
+    touch "$LOG"
+    chown "$ACCOUNT:$ACCOUNT" "$LOG"
+    chmod 0640 "$LOG"
+    # setpriv replaces itself with the server (the PID file names the server); runuser forwards stop signals to it.
+    if command -v setpriv >/dev/null 2>&1; then
+        drop="setpriv --reuid=$ACCOUNT --regid=$ACCOUNT --init-groups --"
+    else
+        drop="runuser -u $ACCOUNT --"
+    fi
+    (
+        umask 077
+        # shellcheck disable=SC2086
+        nohup $drop "$BIN" console --directory "$DATA" --address "$LIFETIME_ADDRESS" --host "$LIFETIME_HOST" \
+            --port "$LIFETIME_PORT" --admin-port "$LIFETIME_ADMIN_PORT" >>"$LOG" 2>&1 </dev/null &
+        echo $! > "$PIDFILE"
+    )
+    sleep 2
+    if running; then
+        echo "Lifetime Server started."
+    else
+        echo "Lifetime Server did not start; see $LOG."
+        return 1
+    fi
+}
+
+stop() {
+    if ! running; then
+        rm -f "$PIDFILE"
+        echo "Lifetime Server is not running."
+        return 0
+    fi
+    pid="$(cat "$PIDFILE")"
+    kill "$pid"
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Lifetime Server did not stop within 30 seconds."
+        return 1
+    fi
+    rm -f "$PIDFILE"
+    echo "Lifetime Server stopped."
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop && start ;;
+    status)
+        if running; then echo "Lifetime Server is running (pid $(cat "$PIDFILE"))."; else echo "Lifetime Server is not running."; exit 3; fi ;;
+    *) echo "Usage: $0 {start|stop|restart|status}"; exit 2 ;;
+esac

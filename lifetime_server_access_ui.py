@@ -5,11 +5,15 @@ The server decides (every request is checked there); this only disables what the
 Everything goes through the window's AdminClient in background Tasks and reuses its panels, tables and translations,
 so Glass/Classic, light/dark and English/Vietnamese follow the window.
 """
+import sys
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                              QTableWidget, QTableWidgetItem, QWidget)
 
 import lifetime_access as access
+
+LINUX = sys.platform.startswith('linux')
 
 ROLE_TEXT = {'admin': 'Admin', 'operator': 'Operator', 'auditor': 'Auditor', 'viewer': 'Viewer', 'none': 'No role'}
 BREAK_TEXT = {'edited': 'an entry was changed', 'missing': 'an entry was removed', 'link': 'entries were reordered',
@@ -59,7 +63,9 @@ class AccessUI:
         if not self.can(operation):
             return self.reason()
         if action in POWER and self.me and self.me.get('channel') == 'token':
-            return self.t('Remote power needs your own Windows account. The shared administrator token cannot be used for it.')
+            return self.t('Remote power needs your own Linux account. The shared administrator token cannot be used for it.'
+                          if LINUX else
+                          'Remote power needs your own Windows account. The shared administrator token cannot be used for it.')
         return ''
 
     # ---- Administration sections ----
@@ -71,10 +77,14 @@ class AccessUI:
         self.signed_in.setWordWrap(True)
         self.signed_in.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         content.addWidget(self.signed_in)
-        note = w.label('Administrators (running as administrator) and SYSTEM are always Admin. Give other Windows accounts '
-                       'or groups a role: Operator (acknowledge incidents, maintenance windows, refresh, and remote power '
-                       'for one computer where its owner allowed it), Auditor (view and audit trail) or Viewer (view only). '
-                       'Anyone who can read the administrator token file is also Admin.')
+        note = w.label(('root and members of the lifetime-admin group are always Admin. Give other Linux accounts or '
+                        'groups a role: Operator (acknowledge incidents, maintenance windows, refresh, and remote power '
+                        'for one computer where its owner allowed it), Auditor (view and audit trail) or Viewer (view '
+                        'only). Anyone who can read the administrator token file is also Admin.') if LINUX else
+                       ('Administrators (running as administrator) and SYSTEM are always Admin. Give other Windows accounts '
+                        'or groups a role: Operator (acknowledge incidents, maintenance windows, refresh, and remote power '
+                        'for one computer where its owner allowed it), Auditor (view and audit trail) or Viewer (view only). '
+                        'Anyone who can read the administrator token file is also Admin.'))
         note.setObjectName('muted')
         content.addWidget(note)
         self.role_table = self._table(4, 180)
@@ -142,8 +152,12 @@ class AccessUI:
         self.audit_table.setHorizontalHeaderLabels([self.t(k) for k in ('Time', 'Account', 'Role', 'Action', 'Target', 'Result')])
         for index in range(self.role_choice.count()):
             self.role_choice.setItemText(index, self.t(ROLE_TEXT[self.role_choice.itemData(index)]))
-        self.principal.setPlaceholderText(self.t('Windows account or group, e.g. SCHOOL\\helpdesk'))
-        self.principal.setAccessibleName(self.t('Windows account or group'))
+        if LINUX:
+            self.principal.setPlaceholderText(self.t('Linux user or group, e.g. alice or group:helpdesk'))
+            self.principal.setAccessibleName(self.t('Linux user or group'))
+        else:
+            self.principal.setPlaceholderText(self.t('Windows account or group, e.g. SCHOOL\\helpdesk'))
+            self.principal.setAccessibleName(self.t('Windows account or group'))
         self.role_choice.setAccessibleName(self.t('Role'))
         self.apply()
 
