@@ -88,7 +88,9 @@ class ReportTests(unittest.TestCase):
     def test_device_and_fleet_reports_state_the_method_and_the_period_energy(self):
         config = insights.settings(dict(price=2000))
         energy = dict(settings=config, computers={
-            'a': dict(power=dict(watts=20.0, method='estimated', source='typical-laptop', readings=0), energy={}),
+            'a': dict(power=dict(watts=20.0, method='estimated', source='typical-laptop', readings=0), energy={},
+                      after=dict(source='office-hours', hours=insights.settings()['hours'],
+                                 week=dict(hours=3.0, kwh=0.06, cost=120.0))),
             'b': dict(power=dict(watts=50.0, method='measured', source='battery', readings=12), energy={})})
         report = reports.device_report(self.device(), '2026-11-10', '2026-11-10', insights=energy)
         rows = {title: value for section, title, value in report['extra_rows'] if section == 'energy'}
@@ -96,10 +98,13 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(rows['Energy in the period (kWh)'], 0.2)                # 10 h x 20 W
         self.assertEqual(rows['Cost in the period'], '400 VND')
         self.assertIn(insights.ENERGY_NOTE, report['notes'])
+        self.assertEqual((rows['Awake after hours, last 7 days (hours)'], rows['Cost after hours, last 7 days'],
+                          rows['Hours used']), (3.0, '120 VND', 'office hours 08:00–18:00'))
         fleet = reports.fleet_report([self.device('a'), self.device('b'), self.device('c')], '2026-11-10', '2026-11-10',
                                      insights=energy)
         rows = {title: value for section, title, value in fleet['extra_rows'] if section == 'energy'}
         self.assertEqual(rows['Energy in the period (kWh)'], 0.7)               # 0.2 + 10 h x 50 W
+        self.assertEqual((rows['Awake after hours, last 7 days (hours)'], rows['Without hourly history (unknown)']), (3.0, 2))
         self.assertEqual((rows['Measured on battery'], rows['Estimated from typical power'],
                           rows['Without shared awake history (unknown)']), (1, 1, 1))
         vi = reports.device_report(self.device(), '2026-11-10', '2026-11-10', language='vi', insights=energy)
@@ -110,6 +115,7 @@ class AdminTests(unittest.TestCase):
     _base = test_server_runtime.RuntimeTests
     setUp, public, enrollment, claim, message = _base.setUp, _base.public, _base.enrollment, _base.claim, _base.message
     call, people = test_server_access.AccessTests.call, test_server_access.AccessTests.people
+    admin_raw, wire = _base.admin_raw, _base.wire
 
     def test_everyone_reads_only_admins_change_and_values_are_checked(self):
         people = self.people()
@@ -122,6 +128,57 @@ class AdminTests(unittest.TestCase):
         self.assertEqual((status, saved['price'], saved['group_watts']), (200, 3000.0, {'lab': 60.0}))
         self.assertEqual(self.admin.call('insights')['settings']['price'], 3000.0)
         self.assertEqual(self.runtime.access.audit(limit=1)[0]['action'], 'set_insight_settings')
+
+
+    def computer(self, control=True, cpu=None, group='Lab'):
+        """An approved computer reporting now, in ``group``, with or without remote-power consent."""
+        request = self.enrollment()
+        request['identity'] = dict(display_name='PC', department=group)
+        request['policy'] = dict(history=False, resources=cpu is not None, control=control)
+        self.public('enroll', request)
+        self.admin.call('approve', request_id=request['request_id'])
+        credential = self.claim(request)['credential']
+        message = self.message(request)
+        if cpu is not None:
+            message['readings'] = dict(observed_at=dt.datetime.now(dt.timezone.utc).isoformat(), specs={},
+                                       performance=dict(cpu_percent=cpu))
+        self.public('sync', message, credential)
+        return request['device_id']
+
+    def test_sleep_after_hours_needs_an_account_role_and_sends_single_audited_commands(self):
+        people = self.people()
+        idle, busy, refused, other = self.computer(), self.computer(cpu=80), self.computer(control=False), self.computer(group='Office')
+        # The shared token and an administrator by group membership only cannot turn it on; an assigned Admin can.
+        self.assertEqual(self.admin_raw('/v1/set_sleep_policy', {'group': 'Lab', 'enabled': True})[0], 403)
+        builtin = dict(sid=test_server_access.DOMAIN + '9', name=r'LAB\local-admin', groups=['S-1-5-32-544'], channel='pipe')
+        self.assertEqual(self.call(builtin, 'set_sleep_policy', group='Lab', enabled=True)[0], 403)
+        self.assertEqual(self.call(people['operator'], 'set_sleep_policy', group='Lab', enabled=True)[0], 403)
+        self.assertEqual(self.call(people['admin'], 'set_sleep_policy', group='Lab', enabled=True)[0], 200)
+        self.assertEqual(self.admin.call('insights')['sleep_policies']['lab']['name'], people['admin']['name'])
+        local = dt.datetime.now().astimezone().tzinfo
+        working = dt.datetime(2026, 11, 17, 10, 0, tzinfo=local)        # Tuesday 10:00: open
+        self.assertEqual(self.runtime.sleep_after_hours(working), [])
+        just_closed = dt.datetime(2026, 11, 17, 18, 20, tzinfo=local)   # 20 minutes after closing: grace
+        self.assertEqual(self.runtime.sleep_after_hours(just_closed), [])
+        night = dt.datetime(2026, 11, 17, 23, 0, tzinfo=local)
+        self.assertEqual(self.runtime.sleep_after_hours(night), [idle])      # not busy, not refused, not Office
+        commands = self.runtime._store.get_device(idle)['commands']
+        self.assertEqual([(c['action'], c['status']) for c in commands], [('sleep', 'pending')])
+        row = self.runtime.access.audit(limit=1)[0]
+        self.assertEqual((row['action'], row['actor_sid'], row['actor_name'], row['target']),
+                         ('send_command', people['admin']['sid'], people['admin']['name'] + ' (after-hours policy)',
+                          f'device_id={idle}'))
+        for device in (busy, refused, other):
+            self.assertEqual(self.runtime._store.get_device(device)['commands'], [])
+        self.runtime._store.cancel_command(commands[0]['command_id'])      # e.g. it was woken again: not sent twice
+        self.assertEqual(self.runtime.sleep_after_hours(night + dt.timedelta(hours=1)), [])
+        # Removing the account's role stops the policy at once.
+        self.runtime._sleep_tried.clear()
+        with patch.object(self.runtime._store, 'sleep_candidates', return_value=[dict(
+                device_id=idle, group='lab', online=True, busy=False, waiting=False, last_sleep=None)]):
+            self.runtime.access.delete_role(people['admin']['sid'])
+            self.assertEqual(self.runtime.sleep_after_hours(night), [])
+        self.assertEqual(self.call(people['viewer'], 'set_sleep_policy', group='Lab', enabled=False)[0], 403)
 
 
 if __name__ == '__main__':

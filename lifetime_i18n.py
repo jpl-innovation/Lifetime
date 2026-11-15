@@ -2136,3 +2136,49 @@ for _key, _text in _INSIGHTS_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+
+# Unique features: after hours and the sleep-after-hours policy.
+_AFTER_HOURS_VI = {
+    'After hours': 'Ngoài giờ',
+    'Hours on after hours per week (all computers)': 'Số giờ bật ngoài giờ mỗi tuần (tất cả máy)',
+    'Most on after hours, last 7 days': 'Bật ngoài giờ nhiều nhất, 7 ngày qua',
+    'By group, last 7 days': 'Theo nhóm, 7 ngày qua',
+    'By room, last 7 days': 'Theo phòng, 7 ngày qua',
+    'Sleep after hours for': 'Cho ngủ sau giờ làm việc với',
+    'Turn on for this group': 'Bật cho nhóm này',
+    'Turn off for this group': 'Tắt cho nhóm này',
+    'Sleep after hours sends the ordinary single-computer Sleep command, as the account that turned it on, to each computer of the group whose owner allows remote power: once a night, 30 minutes after its hours close, within the usual rate limits, and recorded in the audit trail. It skips a computer that is offline, already has a command waiting or looks busy (Lifetime cannot see a keyboard or mouse, so busy means the processor is working), and does not try again that night if the computer is woken or its owner declines. Turning it on needs an Admin or Operator role given to your own account.':
+        'Cho ngủ sau giờ làm việc gửi lệnh Ngủ thông thường cho từng máy, dưới tên tài khoản đã bật, tới mỗi máy trong nhóm mà chủ máy cho phép điều khiển nguồn từ xa: mỗi đêm một lần, 30 phút sau khi hết giờ, trong giới hạn tần suất thông thường, và được ghi vào nhật ký kiểm toán. Máy đang ngoại tuyến, đã có lệnh đang chờ hoặc có vẻ đang bận (Lifetime không thấy bàn phím hay chuột, nên bận nghĩa là bộ xử lý đang làm việc) sẽ được bỏ qua, và đêm đó không thử lại nếu máy được đánh thức hoặc chủ máy từ chối. Muốn bật cần vai trò Quản trị hoặc Vận hành được cấp cho chính tài khoản của bạn.',
+    'its own business hours': 'giờ làm việc riêng của máy',
+    'office hours': 'giờ hành chính',
+    'Office hours (for computers without business hours of their own)': 'Giờ hành chính (cho máy không có giờ làm việc riêng)',
+    'Opens': 'Mở',
+    'Closes': 'Đóng',
+    'Save hours': 'Lưu giờ',
+    'Sleep after hours needs an Admin or Operator role given to your own Windows account.': 'Cho ngủ sau giờ làm việc cần vai trò Quản trị hoặc Vận hành được cấp cho chính tài khoản Windows của bạn.',
+    'Hours used': 'Khung giờ áp dụng',
+    'Estimated saving per month': 'Tiết kiệm ước tính mỗi tháng',
+    'Sleep after hours': 'Ngủ sau giờ làm việc',
+    'Room': 'Phòng',
+    'Last 7 days: {hours} h awake outside hours on {known} computers, {kwh} kWh, {cost}. {unknown} do not share their hourly history.':
+        '7 ngày qua: {hours} giờ thức ngoài giờ trên {known} máy, {kwh} kWh, {cost}. {unknown} máy không chia sẻ lịch sử theo giờ.',
+    'No shared hourly history yet': 'Chưa có lịch sử theo giờ được chia sẻ',
+    '{cost} (est., {allowed} allow remote power)': '{cost} (ước tính, {allowed} máy cho phép điều khiển nguồn)',
+    '{group}: on since {since}, sent as {name}': '{group}: bật từ {since}, gửi dưới tên {name}',
+    'Sleep after hours is off for every group.': 'Cho ngủ sau giờ làm việc đang tắt với mọi nhóm.',
+    'office hours {start}–{end}, {days}': 'giờ hành chính {start}–{end}, {days}',
+    'This computer was on {hours} h after hours in the last 7 days ({span}): about {kwh} kWh, {cost}.':
+        'Máy này đã bật {hours} giờ ngoài giờ trong 7 ngày qua ({span}): khoảng {kwh} kWh, {cost}.',
+    'Not on after hours in the last 7 days ({span}).': 'Không bật ngoài giờ trong 7 ngày qua ({span}).',
+    'Awake after hours, last 7 days (hours)': 'Thức ngoài giờ, 7 ngày qua (giờ)',
+    'Energy after hours, last 7 days (kWh)': 'Điện năng ngoài giờ, 7 ngày qua (kWh)',
+    'Cost after hours, last 7 days': 'Chi phí ngoài giờ, 7 ngày qua',
+    'Without hourly history (unknown)': 'Không có lịch sử theo giờ (không rõ)',
+    'Expected a time as HH:MM': 'Cần giờ dạng HH:MM',
+    'Opening and closing times must differ': 'Giờ mở và giờ đóng phải khác nhau',
+}
+for _key, _text in _AFTER_HOURS_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

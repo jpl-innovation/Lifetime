@@ -47,6 +47,8 @@ DATABASES = ('server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm',
 POWER_WINDOW = 600          # seconds over which remote power requests are counted
 POWER_PER_DEVICE = 3        # power commands (and Turn on) per computer in that window
 POWER_PER_ACTOR = 10        # per named administrator or operator in that window
+SLEEP_GRACE = dt.timedelta(minutes=30)     # after closing time before the after-hours policy sends a sleep
+SLEEP_AGAIN = dt.timedelta(hours=12)       # one sleep per computer and night, whatever its result
 
 
 def monitoring_backup(path):
@@ -307,6 +309,7 @@ _ADMIN = {
     # Energy and lifecycle (lifetime_insights): computed from what each computer shares; settings live in monitoring.
     'insights': (None, (), ()),
     'set_insight_settings': ('monitor.set_insight_settings', ('values',), ()),
+    'set_sleep_policy': (None, ('group', 'enabled'), ()),
 }
 
 
@@ -512,6 +515,7 @@ class ServerRuntime:
         self._pipe = None
         self._access_lock = threading.Lock()     # role changes and power commands: a revocation is never overtaken
         self._power_log = []                     # (monotonic time, device, actor SID) of recent power requests
+        self._sleep_tried = {}                   # device -> when the after-hours policy last tried to sleep it
         self.directory = Path(directory).absolute()
         self.address, self._hostname, _ = tls._address(address)
         for number in (port, admin_port):
@@ -647,6 +651,8 @@ class ServerRuntime:
             return self.server_info()
         if operation == 'insights':
             return self.insights()
+        if operation == 'set_sleep_policy':
+            return self.set_sleep_policy(identity, **value)
         if operation in ('backup', 'restore'):
             return getattr(self, operation)(value['path'])
         if operation == 'names':
@@ -688,9 +694,76 @@ class ServerRuntime:
         return result
 
     def insights(self, today=None):
-        """Energy and cost per computer, group and fleet (lifetime_insights), from what each computer shares."""
-        return insights.fleet(self._store.insight_inputs(), self.monitor.insight_settings(),
-                              today or self.clock().astimezone().date())
+        """Energy and cost, after-hours time, per computer, room, group and fleet (lifetime_insights), from what each
+        computer shares, with the groups whose computers are put to sleep after hours."""
+        items = self._store.insight_inputs()
+        schedules = self.monitor.resolved_schedules(items)
+        for item in items:
+            item['schedule'] = schedules[item['device_id']]
+        result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date())
+        result['sleep_policies'] = {key: dict(group=value['group'], name=value['name'], since=value['since'])
+                                    for key, value in self.monitor.sleep_policies().items()}
+        return result
+
+    def set_sleep_policy(self, identity, group, enabled):
+        """Turn the after-hours sleep policy of one group on or off. Only a named Windows account with an Admin or
+        Operator role assigned to the account itself can turn it on: every command goes out, rate-limited and audited,
+        as that account, and the role is checked again before each one. Membership of Administrators or of a group
+        with a role is not enough, because the server cannot check it again while that person is not connected;
+        removing the account's role stops the policy at once."""
+        own = dict(sid=identity.get('sid'), name=identity.get('name') or 'unknown', groups=[], channel='policy')
+        if enabled and (not own['sid'] or 'send_command' not in access.operations(self.access.roles_for(own))):
+            raise _HTTPError(403)
+        return self.monitor.set_sleep_policy(group, enabled, own)
+
+    def sleep_after_hours(self, now=None):
+        """One pass of the after-hours sleep policy: at most one ordinary single-computer sleep command per computer
+        and night, through the same gate as a person's (named account, role now, owner's consent, rate limits, audit).
+
+        A computer is left alone while its hours are open or less than SLEEP_GRACE after closing, while it is offline,
+        possibly in use (processor busy), or already has a command waiting, and for SLEEP_AGAIN after a sleep was sent
+        or tried: if it is woken again, or its owner declines (switches remote power off), the policy does not insist.
+        Returns the computers a sleep was sent to."""
+        policies = self.monitor.sleep_policies()
+        if not policies:
+            return []
+        now = now or self.clock()
+        config = self.monitor.insight_settings()
+        candidates = self._store.sleep_candidates(set(policies))
+        schedules = self.monitor.resolved_schedules([dict(device_id=c['device_id'], group=c['group']) for c in candidates])
+        sent = []
+        for candidate in candidates:
+            device = candidate['device_id']
+            tried = self._sleep_tried.get(device)
+            last = candidate['last_sleep'] and dt.datetime.fromisoformat(candidate['last_sleep'])
+            if (not candidate['online'] or candidate['busy'] or candidate['waiting']
+                    or (tried and now - tried < SLEEP_AGAIN) or (last and now - last < SLEEP_AGAIN)):
+                continue
+            schedule = schedules[device]
+            if schedule.get('kind') == 'business':
+                from lifetime_monitor import schedule_zone
+                zone = schedule_zone(schedule)[0]
+                hours = insights.office_hours({key: schedule[key] for key in ('start', 'end', 'weekdays', 'holidays')})
+            else:
+                zone, hours = None, config['hours']
+            local = now.astimezone(zone) if zone else now.astimezone()
+            if insights.open_at(hours, local) or insights.open_at(hours, local - SLEEP_GRACE):
+                continue
+            policy = policies[candidate['group']]
+            identity = dict(sid=policy['sid'], name=(policy['name'] + ' (after-hours policy)')[:256], groups=[],
+                            channel='policy')
+            if 'send_command' not in access.operations(self.access.roles_for(identity)):
+                continue        # the account lost the role: nothing is sent (the dashboard still shows the policy)
+            try:
+                self.admin_call('send_command', dict(device_id=device, action='sleep'), identity)
+            except ThrottledError:
+                continue        # over the per-computer or per-account limit: try again on a later pass
+            except Exception:
+                self._sleep_tried[device] = now
+                continue
+            self._sleep_tried[device] = now
+            sent.append(device)
+        return sent
 
     def whoami(self, identity):
         roles = self.access.roles_for(identity)
@@ -903,6 +976,8 @@ class ServerRuntime:
         while not self._maintenance_stop.wait(MONITOR_TICK):
             with contextlib.suppress(Exception):    # a failing pass is retried at the next tick
                 self.monitor.tick()
+            with contextlib.suppress(Exception):
+                self.sleep_after_hours()
             with contextlib.suppress(Exception):
                 self.monitor.deliver()
 

@@ -70,6 +70,78 @@ class EnergyTests(unittest.TestCase):
         self.assertEqual(insights.money(12.5, 'USD'), '12.50 USD')
 
 
+def hours(*pairs):
+    """24 hourly buckets with the given (hour, seconds)."""
+    buckets = [0.0] * 24
+    for hour, seconds in pairs:
+        buckets[hour] = float(seconds)
+    return buckets
+
+
+class AfterHoursTests(unittest.TestCase):
+    OFFICE = insights.office_hours(dict(start='08:00', end='18:00', weekdays=[0, 1, 2, 3, 4]))
+
+    def test_a_night_across_midnight_is_split_between_its_two_dates(self):
+        # Monday 16 Nov 2026: at work 09-17 (inside), then on from 22:00 to 02:00 Tuesday.
+        dated = {'2026-11-16': hours(*[(h, 3600) for h in range(9, 17)], (22, 3600), (23, 3600)),
+                 '2026-11-17': hours((0, 3600), (1, 3600))}
+        self.assertEqual(insights.after_hours(dated, self.OFFICE), {'2026-11-16': 7200.0, '2026-11-17': 7200.0})
+
+    def test_daylight_saving_days_follow_the_wall_clock(self):
+        every_day = insights.office_hours(dict(start='08:00', end='18:00', weekdays=list(range(7))))
+        # Clocks go back on Sunday 1 Nov 2026 (US): 01:00-02:00 happens twice, so that bucket holds 7200 s, all of it
+        # after hours; 09:00 is inside. Clocks go forward on 8 Mar 2026: there is no 02:00 bucket at all.
+        dated = {'2026-11-01': hours((1, 7200), (9, 3600)), '2026-03-08': hours((1, 3600), (3, 3600), (8, 1800))}
+        self.assertEqual(insights.after_hours(dated, every_day), {'2026-11-01': 7200.0, '2026-03-08': 7200.0})
+
+    def test_hours_cut_by_the_opening_and_closing_time_are_shared_by_minutes(self):
+        office = insights.office_hours(dict(start='08:30', end='17:15', weekdays=[0, 1, 2, 3, 4]))
+        dated = {'2026-11-16': hours((8, 3600), (12, 3600), (17, 3600))}
+        self.assertEqual(insights.after_hours(dated, office), {'2026-11-16': 1800.0 + 2700.0})   # 30 + 45 minutes
+
+    def test_hours_over_midnight_weekends_and_holidays(self):
+        night = insights.office_hours(dict(start='22:00', end='06:00', weekdays=[0, 1, 2, 3, 4], holidays=['2026-11-18']))
+        dated = {'2026-11-16': hours((5, 3600), (22, 3600)),        # Mon 05:00 belongs to Sunday night: closed
+                 '2026-11-17': hours((5, 3600), (6, 3600)),         # Tue 05:00 is Monday's shift; 06:00 is after
+                 '2026-11-18': hours((23, 3600)),                    # a holiday night: after hours
+                 '2026-11-21': hours((12, 3600))}                    # Saturday
+        self.assertEqual(insights.after_hours(dated, night),
+                         {'2026-11-16': 3600.0, '2026-11-17': 3600.0, '2026-11-18': 3600.0, '2026-11-21': 3600.0})
+        self.assertTrue(insights.open_at(night, dt.datetime(2026, 11, 17, 5, 59)))
+        self.assertFalse(insights.open_at(night, dt.datetime(2026, 11, 17, 6, 0)))
+        self.assertFalse(insights.open_at(night, dt.datetime(2026, 11, 19, 3, 0)))   # the holiday's shift never began
+
+    def test_week_energy_cost_trend_and_schedule_source(self):
+        # One night of 4 h after hours this week (Mon 16 - Sun 22 Nov) and 2 h the week before, 50 W, 2000 VND.
+        history = dict(daily={}, dated_hourly={'2026-11-16': hours((20, 3600), (21, 3600), (22, 3600), (23, 3600)),
+                                               '2026-11-12': hours((19, 3600), (20, 3600))})
+        config = insights.settings(dict(price=2000))
+        result = insights.after_week(history, None, 50, config, dt.date(2026, 11, 18))
+        self.assertEqual(result['source'], 'office-hours')
+        self.assertEqual(result['week'], dict(hours=6.0, kwh=0.3, cost=600.0))   # last 7 days 12-18 Nov: 6 h x 50 W
+        self.assertEqual(result['weeks'][-2:], [('2026-11-09', 2.0), ('2026-11-16', 4.0)])
+        schedule = dict(kind='business', start='07:00', end='22:00', weekdays=[0, 1, 2, 3, 4], holidays=[], timezone='local')
+        own = insights.after_week(history, schedule, 50, config, dt.date(2026, 11, 18))
+        self.assertEqual((own['source'], own['week']['hours']), ('schedule', 2.0))   # only Mon 22-24 is after 22:00
+        self.assertIsNone(insights.after_week(dict(daily={}), None, 50, config, TODAY))
+
+    def test_group_saving_counts_only_computers_whose_owner_allows_remote_power(self):
+        night = {day(1): hours((20, 3600), (21, 3600))}      # 2 h after hours, within the last 7 days
+        items = [dict(device_id=name, name=name, group='Lab', kind='desktop', control=control,
+                      history=dict(daily={}, dated_hourly=night)) for name, control in (('a', True), ('b', False))]
+        result = insights.fleet(items, insights.settings(dict(price=3000)), TODAY)
+        after = result['groups']['Lab']['after']
+        self.assertEqual((after['hours'], after['kwh'], after['allowed']), (4.0, 0.32, 1))     # 2 x 2 h x 80 W
+        self.assertEqual(after['saving_month'], dict(kwh=0.69, cost=2057.14))       # 0.16 x 30 / 7 = 0.6857 kWh
+        self.assertEqual(result['after_top'], ['a', 'b'])
+
+    def test_office_hours_are_validated(self):
+        for bad in (dict(start='8:00'), dict(start='09:00', end='09:00'), dict(weekdays=[7]), dict(weekdays=[1, 1]),
+                    dict(holidays=['2026-13-01'])):
+            with self.assertRaises(ValueError, msg=bad):
+                insights.settings(dict(hours=bad))
+
+
 class DesktopPanelTests(unittest.TestCase):
     """The desktop Reports page panel: its own on-battery readings (insights.json, never the ledger) and settings."""
 
@@ -104,6 +176,10 @@ class DesktopPanelTests(unittest.TestCase):
         panel._save()
         self.assertEqual(load_settings()['energy']['device_watts'], {'this': 40.0})
         self.assertEqual(panel.cards['today'][1].text(), '450 VND')                       # measured still wins
+        night = [0.0] * 24
+        night[22] = 3600.0
+        panel.set_ledger(dict(daily={dt.date.today().isoformat(): 36000}, dated_hourly={dt.date.today().isoformat(): night}))
+        self.assertTrue(panel.after.text().startswith('This computer was on 1.0 h after hours in the last 7 days'))
         panel.watts.setValue(0)
         panel._save()
         self.assertEqual(load_settings()['energy']['device_watts'], {})

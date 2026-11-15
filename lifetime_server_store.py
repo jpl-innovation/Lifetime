@@ -1529,7 +1529,8 @@ class Store:
             for row in db.execute("SELECT * FROM devices WHERE status='approved' ORDER BY created_at,device_id").fetchall():
                 identity, policy = json.loads(row['identity']), json.loads(row['policy'])
                 item = dict(device_id=row['device_id'], name=identity.get('display_name') or row['device_id'],
-                            group=identity.get('department', ''), created_at=row['created_at'],
+                            group=identity.get('department', ''), room=identity.get('location', ''),
+                            created_at=row['created_at'],
                             client_version=row['client_version'], control=bool(policy.get('control')),
                             history=None, readings=None, health=None, discharge=[], kind=None)
                 if policy.get('history') and row['history']:
@@ -1550,6 +1551,28 @@ class Store:
                 if policy.get('health') and row['health']:
                     item['health'] = json.loads(row['health'])
                 result.append(item)
+        return result
+
+    def sleep_candidates(self, groups, busy_percent=25):
+        """Approved computers in these groups (casefolded names) whose owner allows remote power, for the after-hours
+        sleep policy: online now, possibly in use (the latest processor reading at or above ``busy_percent``; Lifetime
+        cannot see a keyboard or mouse), a command already waiting, and when a sleep was last sent to it."""
+        result = []
+        with self._transaction() as db:
+            self._expire_commands(db)
+            for row in db.execute("SELECT * FROM devices WHERE status='approved'").fetchall():
+                if row['group_name'] not in groups or not json.loads(row['policy']).get('control'):
+                    continue
+                samples = self._live_samples.get(row['device_id'])
+                readings = json.loads(row['readings']) if row['readings'] else {}
+                cpu = (samples[-1] if samples else readings.get('performance') or {}).get('cpu_percent')
+                last = db.execute("SELECT MAX(created_at) FROM commands WHERE device_id=? AND action='sleep'",
+                                  (row['device_id'],)).fetchone()[0]
+                result.append(dict(device_id=row['device_id'], group=row['group_name'], online=self._online(db, row),
+                                   busy=cpu is not None and cpu >= busy_percent,
+                                   waiting=bool(db.execute("SELECT 1 FROM commands WHERE device_id=? AND status IN ('pending','delivered')",
+                                                           (row['device_id'],)).fetchone()),
+                                   last_sleep=last))
         return result
 
     def request_refresh(self, device_id):

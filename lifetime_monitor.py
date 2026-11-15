@@ -1039,6 +1039,27 @@ class Monitor:
             self._setting(db, 'insights', json.dumps(merged, sort_keys=True))
         return merged
 
+    def sleep_policies(self):
+        """{casefolded group: dict(group, sid, name, groups, since)}: groups whose computers are put to sleep after hours,
+        each with the named Windows account that turned it on (the commands are sent, and audited, as that account)."""
+        with self._lock:
+            saved = self._setting(self._db, 'sleep_policies')
+        return json.loads(saved) if saved else {}
+
+    def set_sleep_policy(self, group, enabled, identity=None, now=None):
+        if not isinstance(group, str) or len(group) > 128 or any(ord(c) < 32 for c in group) or type(enabled) is not bool:
+            raise MonitorError('Invalid group')
+        with self._transaction() as db:
+            saved = self._setting(db, 'sleep_policies')
+            policies = json.loads(saved) if saved else {}
+            policies.pop(group.casefold(), None)
+            if enabled:
+                policies[group.casefold()] = dict(group=group, sid=identity['sid'], name=identity['name'],
+                                                  groups=list(identity.get('groups', ())),
+                                                  since=_stamp(now or self.clock()))
+            self._setting(db, 'sleep_policies', json.dumps(policies, sort_keys=True))
+        return policies
+
     def resolved_schedules(self, devices):
         """{device_id: the expected-online schedule that applies to it} for [{device_id, group}]."""
         with self._lock:

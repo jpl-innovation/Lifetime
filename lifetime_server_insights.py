@@ -4,9 +4,9 @@ Everything comes from the admin ``insights`` call (lifetime_insights on the serv
 the window's panels, tables, buttons and translations, so Glass/Classic, light/dark and English/Vietnamese follow it.
 Estimated figures always say so; a computer that does not share its awake history is counted as unknown, never zero.
 """
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-                             QSizePolicy, QTableWidget, QTableWidgetItem, QWidget)
+from PyQt6.QtCore import QTime, Qt
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+                             QLineEdit, QSizePolicy, QTableWidget, QTableWidgetItem, QTimeEdit, QWidget)
 
 import lifetime_insights as insights
 from lifetime_charts import Plot
@@ -14,6 +14,13 @@ from lifetime_layout import ControlRow
 from lifetime_widgets_dashboard import EmptyState, InfoCard
 
 SOURCE_TEXT, ENERGY_NOTE = insights.SOURCE_TEXT, insights.ENERGY_NOTE
+POLICY_NOTE = ('Sleep after hours sends the ordinary single-computer Sleep command, as the account that turned it on, '
+               'to each computer of the group whose owner allows remote power: once a night, 30 minutes after its '
+               'hours close, within the usual rate limits, and recorded in the audit trail. It skips a computer that '
+               'is offline, already has a command waiting or looks busy (Lifetime cannot see a keyboard or mouse, so '
+               'busy means the processor is working), and does not try again that night if the computer is woken or '
+               'its owner declines. Turning it on needs an Admin or Operator role given to your own account.')
+SCHEDULE_TEXT = {'schedule': 'its own business hours', 'office-hours': 'office hours'}
 
 
 def power_text(t, power):
@@ -106,6 +113,7 @@ class InsightsUI:
         self.note.setObjectName('muted')
         content.addWidget(self.note)
         layout.addWidget(panel)
+        self._make_after(layout)
         # ---- settings ----
         settings, form = w._panel()
         w.access_ui.gate(settings, 'set_insight_settings')
@@ -158,8 +166,77 @@ class InsightsUI:
         self.overrides.setWordWrap(True)
         self.overrides.setObjectName('muted')
         form.addWidget(self.overrides)
+        hours_title = w.label('Office hours (for computers without business hours of their own)')
+        hours_title.setStyleSheet('font-weight: 600;')
+        form.addWidget(hours_title)
+        hours = ControlRow()
+        self.opens, self.closes = QTimeEdit(QTime(8, 0)), QTimeEdit(QTime(18, 0))
+        for control, key in ((self.opens, 'Opens'), (self.closes, 'Closes')):
+            control.setDisplayFormat('HH:mm')
+            hours.addWidget(w.label(key))
+            hours.addWidget(control)
+        self.weekday_boxes = []
+        for day in range(7):
+            box = QCheckBox()
+            box.setChecked(day < 5)
+            self.weekday_boxes.append(box)
+            hours.addWidget(box)
+        self.save_hours = w.button('Save hours', self._save_hours)
+        hours.addWidget(self.save_hours)
+        form.addLayout(hours)
         layout.addWidget(settings)
         layout.addStretch()
+
+    def _make_after(self, layout):
+        w = self.w
+        panel, content = w._panel()
+        heading = w.label('After hours')
+        heading.setObjectName('sectionTitle')
+        content.addWidget(heading)
+        self.after_summary = QLabel()
+        self.after_summary.setWordWrap(True)
+        content.addWidget(self.after_summary)
+        self.after_chart_title = w.label('Hours on after hours per week (all computers)')
+        self.after_chart_title.setObjectName('muted')
+        content.addWidget(self.after_chart_title)
+        self.after_chart = Plot('bars', 'h')
+        self.after_chart.setFixedHeight(140)
+        self.after_chart.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        content.addWidget(self.after_chart)
+        self.after_top_title = w.label('Most on after hours, last 7 days')
+        self.after_top_title.setStyleSheet('font-weight: 600;')
+        content.addWidget(self.after_top_title)
+        self.after_top = self._table(6, 'afterTopTable')
+        content.addWidget(self.after_top)
+        self.after_groups_title = w.label('By group, last 7 days')
+        self.after_groups_title.setStyleSheet('font-weight: 600;')
+        content.addWidget(self.after_groups_title)
+        self.after_groups = self._table(6, 'afterGroupTable')
+        content.addWidget(self.after_groups)
+        self.after_rooms_title = w.label('By room, last 7 days')
+        self.after_rooms_title.setStyleSheet('font-weight: 600;')
+        content.addWidget(self.after_rooms_title)
+        self.after_rooms = self._table(4, 'afterRoomTable')
+        content.addWidget(self.after_rooms)
+        policy = ControlRow()
+        policy.addWidget(w.label('Sleep after hours for'), 1)
+        self.policy_group = QComboBox()
+        self.policy_group.setMinimumWidth(200)
+        self.policy_group.currentIndexChanged.connect(self._policy_button)
+        policy.addWidget(self.policy_group)
+        self.policy_toggle = w.button('Turn on for this group', self._toggle_policy)
+        policy.addWidget(self.policy_toggle)
+        holder = QWidget()
+        holder.setLayout(policy)
+        w.access_ui.gate(holder, 'set_sleep_policy')
+        content.addWidget(holder)
+        self.policies = QLabel()
+        self.policies.setWordWrap(True)
+        content.addWidget(self.policies)
+        self.policy_note = w.label(POLICY_NOTE)
+        self.policy_note.setObjectName('muted')
+        content.addWidget(self.policy_note)
+        layout.addWidget(panel)
 
     # ---- loading and saving ----
 
@@ -191,17 +268,23 @@ class InsightsUI:
 
     def _fill_settings(self):
         config = self.result['settings']
+        hours = config['hours']
+        self.opens.setTime(QTime.fromString(hours['start'], 'HH:mm'))
+        self.closes.setTime(QTime.fromString(hours['end'], 'HH:mm'))
+        for day, box in enumerate(self.weekday_boxes):
+            box.setChecked(day in hours['weekdays'])
         self.price.setValue(config['price'])
         self.currency.setText(config['currency'])
         self.laptop.setValue(config['laptop_watts'])
         self.desktop.setValue(config['desktop_watts'])
 
-    def _send(self, values, button=None):
+    def _send(self, values, button=None, operation='set_insight_settings',
+              refused='The server did not accept this. Check the values and try again.'):
         client = self.w.client
 
         def work():
             try:
-                return dict(result=client.call('set_insight_settings', values=values))
+                return dict(result=client.call(operation, **values))
             except ValueError:
                 return dict(refused=True)
 
@@ -209,15 +292,36 @@ class InsightsUI:
             if button is not None:
                 button.setEnabled(True)
             ok = success and not result.get('refused')
-            self.w.status_label.setText(self.t('Changes saved.' if ok else 'The server did not accept this. Check the values and try again.'))
+            self.w.status_label.setText(self.t('Changes saved.' if ok else refused))
             self.load()
         if button is not None:
             button.setEnabled(False)
         self.w._submit(work, done, quiet=True)
 
     def _save(self):
-        self._send(dict(price=self.price.value(), currency=self.currency.text().strip().upper(),
-                        laptop_watts=self.laptop.value(), desktop_watts=self.desktop.value()), self.save)
+        self._send(dict(values=dict(price=self.price.value(), currency=self.currency.text().strip().upper(),
+                                    laptop_watts=self.laptop.value(), desktop_watts=self.desktop.value())), self.save)
+
+    def _save_hours(self):
+        hours = dict(self.result['settings']['hours'] if self.result else insights.OFFICE_HOURS,
+                     start=self.opens.time().toString('HH:mm'), end=self.closes.time().toString('HH:mm'),
+                     weekdays=[day for day, box in enumerate(self.weekday_boxes) if box.isChecked()])
+        self._send(dict(values=dict(hours=hours)), self.save_hours)
+
+    def _policy_on(self):
+        group = self.policy_group.currentData()
+        return group is not None and self.result is not None and group.casefold() in self.result.get('sleep_policies', {})
+
+    def _policy_button(self, *unused):
+        self.policy_toggle.setText(self.t('Turn off for this group' if self._policy_on() else 'Turn on for this group'))
+        self.policy_toggle.setEnabled(self.policy_group.currentData() is not None)
+
+    def _toggle_policy(self):
+        group = self.policy_group.currentData()
+        if group is None:
+            return
+        self._send(dict(group=group, enabled=not self._policy_on()), self.policy_toggle, 'set_sleep_policy',
+                   'Sleep after hours needs an Admin or Operator role given to your own Windows account.')
 
     def _override(self, add):
         target = self.target.currentData()
@@ -229,7 +333,7 @@ class InsightsUI:
         table.pop(key.casefold(), None)
         if add:
             table[key] = self.target_watts.value()
-        self._send({field: table})
+        self._send(dict(values={field: table}))
 
     # ---- rendering ----
 
@@ -245,6 +349,18 @@ class InsightsUI:
         self.groups.setAccessibleName(self.t('By group, last 30 days'))
         self.chart.setAccessibleName(self.t('Energy per day, last 30 days (kWh)'))
         self.target.setAccessibleName(self.t('Power for a group or computer'))
+        for day, box in enumerate(self.weekday_boxes):
+            box.setText(self.t(f'weekday.{day}'))
+        self.opens.setAccessibleName(self.t('Opens'))
+        self.closes.setAccessibleName(self.t('Closes'))
+        self.after_top.setHorizontalHeaderLabels([self.t(key) for key in (
+            'Computer', 'Group', 'After hours', 'Energy', 'Cost', 'Hours used')])
+        self.after_groups.setHorizontalHeaderLabels([self.t(key) for key in (
+            'Group', 'After hours', 'Energy', 'Cost', 'Estimated saving per month', 'Sleep after hours')])
+        self.after_rooms.setHorizontalHeaderLabels([self.t(key) for key in ('Room', 'After hours', 'Energy', 'Cost')])
+        self.after_chart.setAccessibleName(self.t('Hours on after hours per week (all computers)'))
+        self.policy_group.setAccessibleName(self.t('Sleep after hours for'))
+        self._policy_button()
         self.target_watts.setAccessibleName(self.t('Power for a group or computer'))
         if self.result:
             self.render()
@@ -315,3 +431,50 @@ class InsightsUI:
         parts = [t('Group: {name}', name=key) + f' {watts:g} W' for key, watts in sorted(config['group_watts'].items())]
         parts += [names.get(key, key) + f' {watts:g} W' for key, watts in sorted(config['device_watts'].items())]
         self.overrides.setText(t('Set: {list}', list=', '.join(parts)) if parts else t('No group or computer has its own power set.'))
+        self.render_after(groups)
+
+    def render_after(self, groups):
+        result, t = self.result, self.t
+        currency = result['settings']['currency']
+        after = result['fleet']['after']
+        hours = result['settings']['hours']
+        self.after_summary.setText(t('Last 7 days: {hours} h awake outside hours on {known} computers, {kwh} kWh, {cost}. '
+                                     '{unknown} do not share their hourly history.', hours=f"{after['hours']:,.1f}",
+                                     known=after['known'], kwh=f"{after['kwh']:,.2f}",
+                                     cost=insights.money(after['cost'], currency), unknown=after['unknown']))
+        self.after_chart.set_data([start[5:] for start, _ in after['weeks']], [value for _, value in after['weeks']],
+                                  message='' if after['known'] else t('No shared hourly history yet'))
+        by_id = {c['device_id']: c for c in result['computers']}
+
+        def used(c):
+            span = f"{c['after']['hours']['start']}–{c['after']['hours']['end']}"
+            return t(SCHEDULE_TEXT[c['after']['source']]) + ' ' + span
+        self._fill(self.after_top, [
+            (c['name'], c['group'] or t('No group'), f"{c['after']['week']['hours']:,.1f} h",
+             f"{c['after']['week']['kwh']:,.2f} kWh", insights.money(c['after']['week']['cost'], currency), used(c))
+            for c in (by_id[i] for i in result.get('after_top', []) if i in by_id)])
+        policies = result.get('sleep_policies', {})
+        self._fill(self.after_groups, [
+            (name or t('No group'), f"{g['after']['hours']:,.1f} h", f"{g['after']['kwh']:,.2f} kWh",
+             insights.money(g['after']['cost'], currency),
+             t('{cost} (est., {allowed} allow remote power)', cost=insights.money(g['after']['saving_month']['cost'], currency),
+               allowed=g['after']['allowed']),
+             t('On') if name.casefold() in policies else t('Off'))
+            for name, g in ((name, result['groups'][name]) for name in groups)])
+        rooms = result.get('rooms', {})
+        self._fill(self.after_rooms, [(name, f"{r['after']['hours']:,.1f} h", f"{r['after']['kwh']:,.2f} kWh",
+                                       insights.money(r['after']['cost'], currency)) for name, r in rooms.items()])
+        self.after_rooms_title.setVisible(bool(rooms))
+        chosen = self.policy_group.currentData()
+        self.policy_group.blockSignals(True)
+        self.policy_group.clear()
+        for name in groups:
+            if name:
+                self.policy_group.addItem(t('Group: {name}', name=name), name)
+        if chosen is not None and self.policy_group.findData(chosen) >= 0:
+            self.policy_group.setCurrentIndex(self.policy_group.findData(chosen))
+        self.policy_group.blockSignals(False)
+        self._policy_button()
+        self.policies.setText('\n'.join(t('{group}: on since {since}, sent as {name}', group=p['group'], name=p['name'],
+                                            since=self.w._timestamp(p['since'])) for p in policies.values())
+                              or t('Sleep after hours is off for every group.'))

@@ -86,7 +86,8 @@ class ServerExportDialog(ExportDialog):
     VOLATILE_ROWS = ('Client observation time', 'Server receipt time', 'System reading time', 'System disk free (%)',
                      # a new on-battery reading can change the measured draw between the review and the save
                      'Power draw (W)', 'Power method', 'Energy in the period (kWh)', 'Cost in the period',
-                     'Measured on battery', 'Estimated from typical power')
+                     'Measured on battery', 'Estimated from typical power', 'Awake after hours, last 7 days (hours)',
+                     'Energy after hours, last 7 days (kWh)', 'Cost after hours, last 7 days')
 
     @staticmethod
     def report_content(report):

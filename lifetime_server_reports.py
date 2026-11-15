@@ -135,6 +135,25 @@ def add_energy(report, items, config, language):
     report['notes'] = [*report['notes'], insights.ENERGY_NOTE]
 
 
+def after_rows(afters, config, language):
+    """Awake time outside the hours over the last 7 days for one computer or the sum of several (``afters``: their
+    lifetime_insights after-hours results, None where unknown)."""
+    known = [after for after in afters if after]
+    if not known:
+        return [('energy', 'Awake after hours, last 7 days (hours)', tr('Not available', language))]
+    total = sum(after['week']['kwh'] for after in known)
+    rows = [('energy', 'Awake after hours, last 7 days (hours)', round(sum(after['week']['hours'] for after in known), 2)),
+            ('energy', 'Energy after hours, last 7 days (kWh)', round(total, 3)),
+            ('energy', 'Cost after hours, last 7 days', insights.money(total * config['price'], config['currency']))]
+    if len(afters) == 1:
+        hours = known[0]['hours']
+        rows.append(('energy', 'Hours used', tr('its own business hours' if known[0]['source'] == 'schedule' else 'office hours',
+                                                 language) + f" {hours['start']}–{hours['end']}"))
+    else:
+        rows.append(('energy', 'Without hourly history (unknown)', len(afters) - len(known)))
+    return rows
+
+
 def _incident_line(item, language):
     end = _utc(item.get('resolved_at')) or tr('ongoing', language)
     return f"{tr(RULE_TEXT.get(item['rule'], item['rule']), language)} · {_utc(item['started_at'])} – {end} · {tr(STATUS_TEXT.get(item['state'], item['state']), language)}"
@@ -191,6 +210,7 @@ def device_report(device, start=None, end=None, selected_identity=(), system_fie
         item = insights['computers'].get(device['device_id'])
         add_energy(report, [(report['stats']['awake_seconds'] if item and item['energy'] is not None else None,
                              item and item['power'])], insights['settings'], language)
+        report['extra_rows'].extend(after_rows([item and item.get('after')], insights['settings'], language))
     return report
 
 
@@ -326,6 +346,8 @@ def _fleet_energy(report, devices, reports, results, language):
     merged.extend(position.get(index, []))
     report['extra_rows'] = merged
     add_energy(report, items, results['settings'], language)
+    report['extra_rows'].extend(after_rows([(results['computers'].get(device['device_id']) or {}).get('after')
+                                            for device in devices], results['settings'], language))
 
 
 def _fleet_monitoring(report, devices, reports, results, thresholds, language):

@@ -54,6 +54,7 @@ class FakeAdmin:
         self.whoami = None          # None: an older server without roles (whoami is unknown)
         self.roles, self.audit = [], []
         self.insight_items, self.insight_config = [], insights.settings()     # computed by the real lifetime_insights
+        self.sleep_policies = {}
         self.gui_thread = threading.get_ident()
         self.lock = threading.Lock()
 
@@ -220,7 +221,14 @@ class FakeAdmin:
                 self.updates.update(arguments)
             return copy.deepcopy(self.updates)
         if operation == 'insights':
-            return insights.fleet(copy.deepcopy(self.insight_items), self.insight_config, dt.date.today())
+            return dict(insights.fleet(copy.deepcopy(self.insight_items), self.insight_config, dt.date.today()),
+                        sleep_policies=copy.deepcopy(self.sleep_policies))
+        if operation == 'set_sleep_policy':
+            self.sleep_policies[arguments['group'].casefold()] = dict(group=arguments['group'], name='LAB\admin',
+                                                                      since='2026-11-17T11:00:00+00:00')
+            if not arguments['enabled']:
+                self.sleep_policies.pop(arguments['group'].casefold())
+            return {}
         if operation == 'set_insight_settings':
             self.insight_config = insights.settings(dict(self.insight_config, **arguments['values']))
             return copy.deepcopy(self.insight_config)
@@ -1113,6 +1121,33 @@ class ServerGuiTests(unittest.TestCase):
         self.window.language_button.click()
         self.assertIn('máy được đo khi chạy pin', ui.method.text())
         self.assertEqual(self.window.tabs.tabText(ui.index), 'Năng lượng')
+
+    def test_after_hours_lists_computers_groups_saving_and_toggles_the_sleep_policy(self):
+        today = dt.date.today()
+        night = [0.0] * 24
+        night[20] = night[21] = 3600.0                      # 2 h after 18:00
+        self.api.insight_items = [dict(device_id='a', name='Lab PC', group='Lab', room='A101', kind='desktop', control=True,
+                                       history=dict(daily={}, dated_hourly={today.isoformat(): night}))]
+        self.load([device(0)])
+        ui = self.window.insights
+        self.window.tabs.setCurrentIndex(ui.index)
+        self.wait_idle()
+        self.assertIn('2.0 h awake outside hours on 1 computers', ui.after_summary.text())
+        self.assertEqual([ui.after_top.item(0, c).text() for c in (0, 2, 3, 5)],
+                         ['Lab PC', '2.0 h', '0.16 kWh', 'office hours 08:00–18:00'])      # 2 h x 80 W
+        self.assertEqual(ui.after_groups.item(0, 4).text(), '1,714 VND (est., 1 allow remote power)')   # 0.16 x 30/7 x 2500
+        self.assertEqual(ui.after_rooms.item(0, 0).text(), 'A101')
+        self.assertEqual(ui.policy_toggle.text(), 'Turn on for this group')
+        ui._toggle_policy()
+        self.wait_idle()
+        self.assertIn(('set_sleep_policy', dict(group='Lab', enabled=True)), [(o, a) for o, a, _ in self.api.calls])
+        self.assertEqual(ui.policy_toggle.text(), 'Turn off for this group')
+        self.assertEqual(ui.after_groups.item(0, 5).text(), 'On')
+        self.assertIn('Lab: on since', ui.policies.text())
+        ui.opens.setTime(ui.opens.time().addSecs(3600))
+        ui._save_hours()
+        self.wait_idle()
+        self.assertEqual(self.api.insight_config['hours']['start'], '09:00')
 
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget

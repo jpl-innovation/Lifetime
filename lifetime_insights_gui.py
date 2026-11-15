@@ -65,7 +65,7 @@ class EnergyPanel(QFrame):
     def __init__(self):
         super().__init__()
         self.setObjectName('insetPanel')
-        self.daily, self.samples = {}, read_samples()
+        self.daily, self.hourly, self.samples = {}, {}, read_samples()
         self.tasks = Tasks(self)
         self.tasks.completed.connect(self._sampled)
         box = QVBoxLayout(self)
@@ -176,16 +176,16 @@ class EnergyPanel(QFrame):
             self.render()
 
     def set_ledger(self, ledger):
-        daily = dict(ledger.get('daily') or {})
-        if daily != self.daily:
-            self.daily = daily
+        daily, hourly = dict(ledger.get('daily') or {}), dict(ledger.get('dated_hourly') or {})
+        if (daily, hourly) != (self.daily, self.hourly):
+            self.daily, self.hourly = daily, hourly
             self.render()
 
     def item(self):
         """This computer in lifetime_insights.computer's input shape."""
         return dict(device_id='this', kind=self.samples.get('kind'), group='',
                     discharge=[row[1] for row in self.samples.get('discharge', [])],
-                    history=dict(daily=self.daily) if self.daily else None)
+                    history=dict(daily=self.daily, dated_hourly=self.hourly) if self.daily else None)
 
     def render(self, *unused):
         config = self.config()
@@ -215,4 +215,14 @@ class EnergyPanel(QFrame):
                             (self.watts, 'Power of this computer (0 = automatic)')):
             widget.setAccessibleName(tr(key))
         self.save.setText(tr('Save'))
+        after = result['after']
+        if after:
+            hours = after['hours']
+            days = ', '.join(tr(f'weekday.{day}') for day in hours['weekdays'])
+            span = tr('office hours {start}–{end}, {days}', start=hours['start'], end=hours['end'], days=days)
+            self.after.setText(tr('This computer was on {hours} h after hours in the last 7 days ({span}): about {kwh} kWh, {cost}.',
+                                  hours=f"{after['week']['hours']:,.1f}", span=span, kwh=f"{after['week']['kwh']:,.2f}",
+                                  cost=insights.money(after['week']['cost'], config['currency']))
+                               if after['week']['hours'] else tr('Not on after hours in the last 7 days ({span}).', span=span))
+        self.after.setVisible(bool(after))
         self.note.setText(tr(insights.ENERGY_NOTE))
