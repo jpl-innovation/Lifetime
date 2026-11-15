@@ -19,6 +19,7 @@ import lifetime_server_store as storage
 from lifetime_server import ServerRuntime
 from lifetime_server_gui import ServerWindow
 from qt_test_support import qt_app
+from lifetime_shell import shut_down
 from render_server import populate
 
 ROOT = Path(__file__).parent
@@ -47,6 +48,7 @@ class FleetGuiTests(unittest.TestCase):
     def close(self):
         self.window.close()
         self.wait()
+        shut_down(self.app, self.window)     # deleted now, not by the cycle collector at a random point or at exit
 
     def wait(self):
         deadline = time.monotonic() + 5

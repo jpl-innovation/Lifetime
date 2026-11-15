@@ -11,6 +11,21 @@ from qt_test_support import qt_app
 
 
 class RevealTests(unittest.TestCase):
+    def test_a_delayed_callback_on_a_deleted_widget_is_ignored(self):
+        """RollLabel.roll_in starts its animation 160 ms later; deleting the label first used to abort the process."""
+        from unittest.mock import patch
+        from PyQt6 import sip
+        qt_app()
+        calls = []
+        with patch.object(QTimer, 'singleShot', side_effect=lambda delay, kind, callback: calls.append(callback)):
+            label = reveal.RollLabel('123')
+            label.roll_in()
+        sip.delete(label)
+        calls[-1]()     # must not raise
+        with patch.object(QTimer, 'singleShot', side_effect=lambda delay, kind, callback: calls.append(callback)):
+            reveal.later(0, lambda: int('x'))
+        self.assertRaises(ValueError, calls[-1])     # other errors still surface
+
     def setUp(self):
         self.app = qt_app()
         self.window = QWidget()

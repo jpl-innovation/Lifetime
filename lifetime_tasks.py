@@ -15,12 +15,14 @@ class _Task(QRunnable):
 
     def run(self):
         try:
-            result = self.function()
-        except Exception as error:
+            result, error = self.function(), ''
+        except Exception as failure:
             # Never propagate credential-bearing network exception text into UI/logs.
-            self.signals.finished.emit(self.number, None, type(error).__name__)
-        else:
-            self.signals.finished.emit(self.number, result, '')
+            result, error = None, type(failure).__name__
+        try:
+            self.signals.finished.emit(self.number, result, error)
+        except RuntimeError:
+            pass    # the owner is gone (window deleted, app exiting): an unhandled error here aborts the process
 
 
 class Tasks(QObject):

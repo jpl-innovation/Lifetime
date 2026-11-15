@@ -5,7 +5,7 @@ import os
 import shlex
 import sys
 
-from PyQt6.QtCore import Qt, QObject, QRectF, QPointF, QLineF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent
+from PyQt6.QtCore import Qt, QObject, QRectF, QPointF, QLineF, QSize, QTimer, QVariantAnimation, QEasingCurve, QEvent, QThreadPool
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6 import QtWidgets
@@ -29,6 +29,9 @@ def shut_down(app, window):
     window.deleteLater()
     app.processEvents()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # Background tasks (lifetime_tasks) still running must finish before Python tears its objects down, or their
+    # result signal is emitted on a deleted object in a pool thread: an abort at exit (0xC0000409).
+    QThreadPool.globalInstance().waitForDone(3000)
 
 
 def tray_available():

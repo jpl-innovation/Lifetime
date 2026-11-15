@@ -15,6 +15,7 @@ import lifetime_gui as gui
 import lifetime_tracker as tracker
 from qt_test_support import qt_app
 from lifetime_settings import CATEGORIES
+from lifetime_shell import shut_down
 
 
 class WorkerTests(unittest.TestCase):
@@ -90,7 +91,11 @@ class DashboardTests(unittest.TestCase):
         self.window.worker.timer.stop()
 
     def tearDown(self):
+        # Delete the window now, at a safe point. A window left to Python's cycle collector was destroyed at a random
+        # allocation in a later test, sometimes inside one of its own background-task slots (Connect status poll,
+        # Health load), which then ran on deleted widgets: RuntimeError -> qFatal -> process abort (0xC0000409).
         self.window.close()
+        shut_down(self.app, self.window)
         for p in reversed(self.patches):
             p.stop()
 
@@ -197,6 +202,11 @@ class DashboardTests(unittest.TestCase):
             self.app.processEvents()
             for card in self.window.cards.values():
                 self.assertEqual(card.effect.opacity(), 1)
+
+    def test_closing_the_window_stops_the_connect_status_poll(self):
+        self.assertTrue(self.window.connect_page.timer.isActive())
+        self.window.close()
+        self.assertFalse(self.window.connect_page.timer.isActive())
 
 
 if __name__ == '__main__':

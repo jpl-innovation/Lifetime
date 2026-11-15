@@ -1160,6 +1160,7 @@ class Window(QWidget):
         self.timer.stop()
         self.health.timer.stop()
         self.system.sparklines.timer.stop()
+        self.connect_page.timer.stop()      # its 2 s status poll kept running after the window closed
         self.worker.stop()
         super().closeEvent(event)
 

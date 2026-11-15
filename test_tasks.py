@@ -16,6 +16,14 @@ class TaskTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertTrue(values)
 
+    def test_result_for_a_deleted_owner_is_dropped_not_raised(self):
+        """An exception escaping QRunnable.run in a pool thread aborts the whole process (seen at test exit)."""
+        from PyQt6 import sip
+        from lifetime_tasks import _Task
+        task = _Task(1, lambda: 'done')
+        sip.delete(task.signals)
+        task.run()      # must not raise
+
     def test_worker_and_result_thread(self):
         app = qt_app()
         owner = threading.get_ident()

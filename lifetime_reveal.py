@@ -14,8 +14,17 @@ def later(delay, callback):
     """Run `callback` after `delay` ms on a coarse timer. Qt makes short single shots precise, and on Windows every
     precise timer holds one of the process's few multimedia timers. An entrance cascade can hold them all; the
     animation clock then falls back to the 15.6 ms system tick and every animation in the window runs at ~40 fps
-    for as long as any animation keeps the clock alive (the status pulse loops forever)."""
-    QTimer.singleShot(max(0, int(delay)), Qt.TimerType.CoarseTimer, callback)
+    for as long as any animation keeps the clock alive (the status pulse loops forever).
+
+    The widget the callback touches may be deleted before it runs (a page rebuilt, a window closed). The timer has no
+    Qt receiver to cancel it, so that case is ignored here: an exception escaping a Qt callback aborts the process."""
+    def run():
+        try:
+            callback()
+        except RuntimeError as error:
+            if 'has been deleted' not in str(error):
+                raise
+    QTimer.singleShot(max(0, int(delay)), Qt.TimerType.CoarseTimer, run)
 
 
 def warm_pages(pages, busy, start=3000, gap=300):
