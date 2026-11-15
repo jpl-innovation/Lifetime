@@ -29,7 +29,7 @@ build() {
     export LIFETIME_SERVER_ONLY=$([[ "$server_only" == true ]] && echo 1 || echo 0)
     python3.12 -m PyInstaller --noconfirm --clean --distpath "$work/dist" --workpath "$work/pyinstaller" \
         "$root/packaging/linux/lifetime-linux.spec"
-    ldd --version | head -n 1 > "$work/dist/GLIBC-BASELINE.txt"
+    ldd --version | sed -n 1p > "$work/dist/GLIBC-BASELINE.txt"   # sed reads to the end: head would SIGPIPE ldd under pipefail (exit 141)
     if [[ -n "${HOST_UID:-}" ]]; then
         chown -R "$HOST_UID:${HOST_GID:-$HOST_UID}" "$work"     # the CI host packages these files next
     fi
