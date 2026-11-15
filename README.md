@@ -318,13 +318,22 @@ readings that stop arriving show as "telemetry missing" on the computer, not as 
 - **Expected online hours** (everyone, a group or one computer): always, never, or business hours with a time zone,
   weekdays and holidays. The default expects desktops always and laptops never, so a laptop asleep after work
   raises nothing. **Maintenance windows** pause alerts.
+- **Network checks** for printers, routers, NAS boxes and websites that do not run Lifetime: ping, TCP port or a web
+  page (status, optional keyword, certificate checked), limited to the networks you allow; a check failing three
+  times in a row opens one incident.
+- **Availability and reports**: monthly (or any period) reports per computer, group or fleet, in PDF or CSV, show
+  awake time and availability side by side but separately, with coverage and unknown time, incidents, a health
+  summary and replacement candidates with their reasons. Availability counts only expected online hours and never
+  counts unknown time (the server was off, the computer had not reported) as up or down.
 - **Notifications**: one email when an incident opens and one when it recovers (SMTP with STARTTLS or TLS), retried
   and logged; an optional daily summary and an optional webhook for Teams, Slack or Telegram bridges, both off by
   default. Messages name the computer and the problem only. See
   [server operations](docs/SERVER_OPERATIONS.md#alerts-and-notifications).
 
-Monitoring keeps its own history (`monitoring.sqlite`) next to the server database; time when the server itself was
-not running is shown as unknown, never as offline. Not yet verified with a real mail server or webhook service
+Monitoring keeps its own history (`monitoring.sqlite`) next to the server database, saved and restored with the
+dashboard's backup as a second file; time when the server itself was not running is shown as unknown, never as
+offline. Time zone names such as `Asia/Ho_Chi_Minh` use the `tzdata` package from `requirements-server.txt`.
+Network checks are not yet verified against real devices or websites. Not yet verified with a real mail server or webhook service
 (tests use a local SMTP stub and a fake webhook).
 
 See [server protocol](docs/SERVER_PROTOCOL.md) and

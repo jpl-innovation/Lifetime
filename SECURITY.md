@@ -224,6 +224,33 @@ protected administration API, and every setting is validated (ranges, time zones
 - A test message never creates an incident. Retries are bounded (five attempts), and a message interrupted by a
   server stop is never sent twice.
 
+## Agentless checks and the network policy
+
+Checks of printers, routers, NAS boxes and websites run from the server, so they must not become a way to reach
+places the administrator did not intend (server-side request forgery):
+
+- **Allowed networks.** A check may reach only addresses inside the configured scopes: `private` (RFC 1918, CGNAT
+  100.64.0.0/10 and IPv6 unique local; the default), `public` (globally routable addresses) or explicit CIDR ranges.
+  Loopback (127.0.0.0/8, ::1, IPv4-mapped forms) and link-local (169.254.0.0/16, fe80::/10) addresses are refused
+  unless an explicit range names them. Cloud metadata addresses (169.254.169.254, fd00:ec2::254, 100.100.100.200),
+  this server's loopback admin port, unspecified, multicast, broadcast and reserved addresses are always refused.
+- **Every attempt and every redirect** resolves the name again, refuses the check if any address it resolves to is
+  outside the policy, and connects to that checked address (no second lookup between the check and the connection),
+  so DNS rebinding and redirects to internal or metadata addresses fail as *Blocked*. Redirects are limited (0 to 5)
+  and may only go to `http://` or `https://` addresses without a user name or password.
+- **No credentials.** URLs with a user name or password are refused when saved and when met in a redirect. Requests
+  are plain GET or HEAD with a fixed user agent and no cookies, authorization headers or body. TLS (1.2 or newer) is
+  verified against the system's trusted roots and the host name by default; turning verification off is a per-check
+  administrator choice for devices with their own certificates.
+- **Bounded work.** One worker, at most 16 attempts at a time, a minimum spacing per target, jitter, a deadline on
+  every attempt, a response size cap (at most 1 MiB) and a bounded result queue; at most 500 checks with intervals of
+  at least 30 seconds. Ping runs the operating system's `ping` with a fixed argument list, no shell, and only an IP
+  address that already passed the policy, so no host name or option reaches its command line.
+- **Storage.** Results go only to the monitor, the single writer of `monitoring.sqlite`; checks never touch
+  `server.sqlite` or any awake-time ledger. Check settings and results are part of the dashboard's monitoring backup.
+  The dashboard reaches all of this only through the loopback-only, token-protected administration API, and every
+  field is validated (kinds, host names, URLs, ports, status ranges, sizes, intervals, scopes).
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem. Use GitHub's private vulnerability reporting on this repository
