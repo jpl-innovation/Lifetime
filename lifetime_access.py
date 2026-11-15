@@ -36,7 +36,7 @@ READ = frozenset({
     'whoami', 'live', 'overview', 'devices', 'device', 'configuration', 'invitations', 'fleet', 'server_info',
     'pending_enrollments', 'server_log', 'presence', 'alert_rules', 'incidents', 'incident', 'schedules',
     'maintenance', 'alert_summary', 'notifications', 'deliveries', 'time_zones', 'availability', 'coverage_floor',
-    'checks', 'check_scopes', 'updates'})
+    'checks', 'check_scopes', 'updates', 'insights'})
 AUDIT_READ = frozenset({'audit', 'verify_audit'})
 OPERATE = frozenset({'acknowledge', 'add_maintenance', 'delete_maintenance', 'refresh', 'send_command',
                      'cancel_command', 'wake'})
@@ -45,7 +45,7 @@ ADMINISTER = frozenset({
     'invitation', 'revoke_invitation', 'organisation', 'names', 'set_alert_rule', 'set_schedule', 'delete_schedule',
     'set_notifications', 'test_notification', 'set_coverage_floor', 'save_check', 'delete_check', 'set_check_scopes',
     'roles', 'set_role', 'delete_role', 'backup_archive', 'verify_backup', 'stage_restore',
-    'upload_update', 'set_update', 'rollback_update'})
+    'upload_update', 'set_update', 'rollback_update', 'set_insight_settings'})
 PERMISSIONS = {'viewer': READ, 'auditor': READ | AUDIT_READ, 'operator': READ | OPERATE,
                'admin': READ | AUDIT_READ | OPERATE | ADMINISTER}
 POWER = frozenset({'send_command', 'wake'})        # 'refresh' as a send_command action is not power

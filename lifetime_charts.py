@@ -298,7 +298,7 @@ class Plot(QWidget):
             return 100
         if self.unit == 'sessions':
             return max(3, math.ceil(peak/3)*3)
-        return max(1, peak*1.18)
+        return max(0.01 if self.unit == 'kWh' else 1, peak*1.18)     # a laptop's day is a fraction of a kWh
 
     def positions(self, rect):
         n = len(self.values)

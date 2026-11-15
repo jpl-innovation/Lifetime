@@ -7,6 +7,7 @@ from copy import deepcopy
 import datetime as dt
 
 import lifetime_availability as availability
+import lifetime_insights as insights
 from lifetime_identity import FIELDS, LABELS
 from lifetime_protocol import CLIENT_VERSION
 from lifetime_reports import build_report, tr, LABELS as REPORT_LABELS
@@ -93,6 +94,47 @@ def health_rows(device, thresholds=None, language='en'):
     return rows, reasons
 
 
+def power_method(power, language):
+    text = tr(insights.SOURCE_TEXT[power['source']], language)
+    if power['method'] == 'measured':
+        text += ' ' + tr('({count} readings)', language).format(count=power['readings'])
+    return text
+
+
+def energy_rows(awake_seconds, power, config, language, section='energy'):
+    """Power, how it was obtained, and the energy and cost of the report's awake time."""
+    if power is None:
+        yield section, 'Energy in the period (kWh)', tr('Not available', language)
+        return
+    yield section, 'Power draw (W)', power['watts']
+    yield section, 'Power method', power_method(power, language)
+    if awake_seconds is None:
+        yield section, 'Energy in the period (kWh)', tr('Not available', language)
+        return
+    value = insights.kwh(awake_seconds, power['watts'])
+    yield section, 'Energy in the period (kWh)', round(value, 3)
+    yield section, 'Cost in the period', insights.money(value * config['price'], config['currency'])
+
+
+def add_energy(report, items, config, language):
+    """Energy section for one computer or the sum of several: ``items`` [(awake seconds or None, power or None)]."""
+    rows = [('energy', 'Electricity price', tr('{price} per kWh', language).format(
+        price=insights.money(config['price'], config['currency'])))]
+    if len(items) == 1:
+        rows.extend(energy_rows(*items[0], config, language))
+    else:
+        known = [(seconds, power) for seconds, power in items if seconds is not None and power is not None]
+        total = sum(insights.kwh(seconds, power['watts']) for seconds, power in known)
+        rows += [('energy', 'Computers with energy figures', len(known)),
+                 ('energy', 'Measured on battery', sum(power['method'] == 'measured' for _, power in known)),
+                 ('energy', 'Estimated from typical power', sum(power['method'] == 'estimated' for _, power in known)),
+                 ('energy', 'Without shared awake history (unknown)', len(items) - len(known)),
+                 ('energy', 'Energy in the period (kWh)', round(total, 3)),
+                 ('energy', 'Cost in the period', insights.money(total * config['price'], config['currency']))]
+    report['extra_rows'] = [*report.get('extra_rows', ()), *rows]
+    report['notes'] = [*report['notes'], insights.ENERGY_NOTE]
+
+
 def _incident_line(item, language):
     end = _utc(item.get('resolved_at')) or tr('ongoing', language)
     return f"{tr(RULE_TEXT.get(item['rule'], item['rule']), language)} · {_utc(item['started_at'])} – {end} · {tr(STATUS_TEXT.get(item['state'], item['state']), language)}"
@@ -133,7 +175,7 @@ def footer(zone, language):
 
 
 def device_report(device, start=None, end=None, selected_identity=(), system_fields=(), language='en',
-                  availability=None, thresholds=None):
+                  availability=None, thresholds=None, insights=None):
     """Use dated client snapshots only with current permission; never report host OS. ``availability``: this
     computer's entry from the admin availability call (None leaves the report as awake time only)."""
     report = _device_report(device, start, end, selected_identity, system_fields, language)
@@ -145,6 +187,10 @@ def device_report(device, start=None, end=None, selected_identity=(), system_fie
                  tr('online {good} s · offline {bad} s · unknown {unknown} s · maintenance {excluded} s', language).format(
                      good=day['good_s'], bad=day['bad_s'], unknown=day['unknown_s'], excluded=day['excluded_s']))
                 for day in availability['daily'])
+    if insights is not None:
+        item = insights['computers'].get(device['device_id'])
+        add_energy(report, [(report['stats']['awake_seconds'] if item and item['energy'] is not None else None,
+                             item and item['power'])], insights['settings'], language)
     return report
 
 
@@ -198,7 +244,7 @@ def _device_report(device, start=None, end=None, selected_identity=(), system_fi
 
 
 def fleet_report(devices, start=None, end=None, selected_identity=(), system_fields=(), language='en',
-                 availability=None, thresholds=None, group=None):
+                 availability=None, thresholds=None, group=None, insights=None):
     """Sum one contribution per UUID. Unknown devices remain explicitly missing. ``availability``: the admin
     availability results (a list) for these computers; ``group`` names a group report."""
     seen = set()
@@ -255,10 +301,31 @@ def fleet_report(devices, start=None, end=None, selected_identity=(), system_fie
         report['notes'].append('Only the first 90 daily rows are shown in the preview and PDF. CSV contains every selected retained daily row.')
     if group is not None:
         report['extra_rows'][0] = ('report', 'Report scope', tr('Group: {name}', language).format(name=group or tr('No group', language)))
+    if insights is not None:
+        _fleet_energy(report, devices, reports, insights, language)
     if availability is None and thresholds is None:
         return report
     _fleet_monitoring(report, devices, reports, availability or [], thresholds, language)
     return report
+
+
+def _fleet_energy(report, devices, reports, results, language):
+    """Each computer's power and energy after its awake-time rows, and the sum in an Energy section."""
+    items, position = [], {}
+    for index, (device, item) in enumerate(zip(devices, reports), 1):
+        result = results['computers'].get(device['device_id'])
+        seconds = item['stats']['awake_seconds'] if result and result['energy'] is not None else None
+        items.append((seconds, result and result['power']))
+        position[index] = list(energy_rows(seconds, result and result['power'], results['settings'], language, 'fleet'))
+    merged, index = [], None
+    for row in report['extra_rows']:
+        if row[:2] == ('fleet', 'Device'):
+            merged.extend(position.get(index, []))
+            index = row[2]
+        merged.append(row)
+    merged.extend(position.get(index, []))
+    report['extra_rows'] = merged
+    add_energy(report, items, results['settings'], language)
 
 
 def _fleet_monitoring(report, devices, reports, results, thresholds, language):

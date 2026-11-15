@@ -244,7 +244,7 @@ def report_html(report):
     headings = {'identity': 'Device identity', 'system': 'Selected system information',
                 'statistics': 'Awake time (seconds)', 'coverage': 'Coverage and sources',
                 'availability': 'Availability (server monitoring)', 'incidents': 'Incidents',
-                'health': 'Health summary', 'replacement': 'Replacement candidates'}
+                'health': 'Health summary', 'replacement': 'Replacement candidates', 'energy': 'Energy and cost'}
     previous = None
     for section, key, value in report_rows(report):
         if section != previous:

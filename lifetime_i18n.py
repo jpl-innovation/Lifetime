@@ -2072,3 +2072,67 @@ for _key, _text in _DASHBOARD_WIDGETS_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+
+# Unique features: energy and cost from true awake time (lifetime_insights), both apps and the reports.
+_INSIGHTS_VI = {
+    'Energy': 'Năng lượng',
+    'Energy and lifecycle': 'Năng lượng và vòng đời',
+    'What each computer’s true awake time costs: energy, money, time on after hours, what to replace next and how healthy it is.':
+        'Thời gian thức thực của mỗi máy tính tốn bao nhiêu: điện năng, tiền, thời gian bật ngoài giờ, cần thay gì tiếp theo và máy khỏe đến đâu.',
+    'Energy figures are unavailable. Showing the last data received, if any.': 'Không có số liệu năng lượng. Đang hiển thị dữ liệu nhận được gần nhất, nếu có.',
+    'Energy and cost': 'Điện năng và chi phí',
+    'Energy per day, last 30 days (kWh)': 'Điện năng mỗi ngày, 30 ngày qua (kWh)',
+    'Top consumers, last 30 days': 'Máy dùng điện nhiều nhất, 30 ngày qua',
+    'By group, last 30 days': 'Theo nhóm, 30 ngày qua',
+    'Electricity price and typical power': 'Giá điện và công suất điển hình',
+    'Price per kWh': 'Giá mỗi kWh',
+    'Currency': 'Tiền tệ',
+    'Typical laptop': 'Máy xách tay điển hình',
+    'Typical desktop': 'Máy để bàn điển hình',
+    'Power for a group or computer': 'Công suất cho một nhóm hoặc máy tính',
+    'Set': 'Đặt',
+    'Clear': 'Xóa',
+    'Whole fleet': 'Toàn bộ máy',
+    'Today': 'Hôm nay',
+    'Cost': 'Chi phí',
+    'Power draw': 'Công suất tiêu thụ',
+    'Computers': 'Máy tính',
+    '{watts} W · {how}': '{watts} W · {how}',
+    'measured on battery': 'đo khi chạy pin',
+    'estimated: set for this computer': 'ước tính: đặt cho máy này',
+    'estimated: set for its group': 'ước tính: đặt cho nhóm của máy',
+    'estimated: typical laptop': 'ước tính: máy xách tay điển hình',
+    'estimated: typical desktop': 'ước tính: máy để bàn điển hình',
+    'estimated: kind unknown, typical desktop': 'ước tính: không rõ loại máy, dùng máy để bàn điển hình',
+    'Energy = awake hours × power draw. Power is measured only when the computer reported its own draw on battery; otherwise it is a typical wattage, and it says estimated. Computers that do not share their awake history are left out and counted as unknown.':
+        'Điện năng = số giờ thức × công suất tiêu thụ. Công suất chỉ là số đo khi máy tự báo mức tiêu thụ lúc chạy pin; nếu không, đó là công suất điển hình và được ghi là ước tính. Máy không chia sẻ lịch sử thời gian thức được bỏ ra và tính là không rõ.',
+    '{measured} of {known} computers measured on battery; the others are estimated from typical power. {unknown} do not share their awake history.':
+        '{measured} trên {known} máy được đo khi chạy pin; các máy còn lại được ước tính theo công suất điển hình. {unknown} máy không chia sẻ lịch sử thời gian thức.',
+    'No shared awake history yet': 'Chưa có lịch sử thời gian thức được chia sẻ',
+    'No energy figures yet': 'Chưa có số liệu năng lượng',
+    'Energy appears once approved computers share their awake history.': 'Số liệu năng lượng sẽ hiện khi các máy đã phê duyệt chia sẻ lịch sử thời gian thức.',
+    'Set: {list}': 'Đã đặt: {list}',
+    'No group or computer has its own power set.': 'Chưa có nhóm hay máy tính nào được đặt công suất riêng.',
+    '({count} readings)': '({count} lần đo)',
+    'Energy in the period (kWh)': 'Điện năng trong kỳ (kWh)',
+    'Power draw (W)': 'Công suất tiêu thụ (W)',
+    'Power method': 'Cách xác định công suất',
+    'Cost in the period': 'Chi phí trong kỳ',
+    'Electricity price': 'Giá điện',
+    '{price} per kWh': '{price} mỗi kWh',
+    'Computers with energy figures': 'Số máy có số liệu điện năng',
+    'Measured on battery': 'Đo khi chạy pin',
+    'Estimated from typical power': 'Ước tính theo công suất điển hình',
+    'Without shared awake history (unknown)': 'Không chia sẻ lịch sử thời gian thức (không rõ)',
+    'Power: {watts} W · {how}': 'Công suất: {watts} W · {how}',
+    'Energy needs the awake history. Turn on History in Settings.': 'Cần lịch sử thời gian thức để tính điện năng. Hãy bật Lịch sử trong Cài đặt.',
+    'Power of this computer (0 = automatic)': 'Công suất của máy này (0 = tự động)',
+    'Wattage must be between 1 and 2000 W': 'Công suất phải từ 1 đến 2000 W',
+    'Currency must be a three-letter code such as VND': 'Tiền tệ phải là mã ba chữ cái, ví dụ VND',
+    'Invalid electricity price': 'Giá điện không hợp lệ',
+}
+for _key, _text in _INSIGHTS_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

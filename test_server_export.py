@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from qt_test_support import qt_app
+import lifetime_insights as insights
 from lifetime_server_export import ServerExportDialog
 from test_server_reports import device, measured
 
@@ -26,6 +27,10 @@ class ServerExportTests(unittest.TestCase):
             self.requests.append((operation, arguments))
             if operation == 'availability':
                 return dict(devices=[measured(identifier) for identifier in arguments['device_ids']])
+            if operation == 'insights':
+                return dict(settings=insights.settings(), computers=[dict(
+                    device_id=self.source['device_id'], energy={},
+                    power=dict(watts=20.0, method='estimated', source='typical-laptop', readings=0))])
             if operation == 'alert_rules':
                 return [dict(rule='disk_low', threshold=10), dict(rule='offline', threshold=None)]
             return [copy.deepcopy(self.source)] if operation == 'devices' else copy.deepcopy(self.source)
@@ -45,6 +50,7 @@ class ServerExportTests(unittest.TestCase):
         self.dialog.refresh_preview()
         self.wait()
         self.assertTrue(self.dialog.reviewed_report['identity'])
+        self.assertIn(('energy', 'Power method', 'estimated: typical laptop'), self.dialog.reviewed_report['extra_rows'])
         self.assertTrue(self.dialog.save_csv.isEnabled())
         self.assertTrue(all(t != threading.get_ident() for t in self.threads))
         self.dialog.system_checks['system'].setChecked(True)

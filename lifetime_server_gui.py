@@ -30,6 +30,7 @@ import os
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
+from lifetime_server_insights import InsightsUI
 from lifetime_server_alerts import AlertsUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, table_action
 from lifetime_reveal import RollLabel, fade_in, later, warm_pages
@@ -292,6 +293,7 @@ class ServerWindow(QMainWindow):
         self._make_overview()
         self._make_devices()
         self.alerts = AlertsUI(self)        # the Incidents page, the header alert badge and the alert settings
+        self.insights = InsightsUI(self)    # the Energy page: energy and cost, after hours, replacements, health
         self._make_admin()
         self._make_this_server()
         self.local_server = QLabel(self.t('Local server: {name}', name=socket.gethostname()), body)
@@ -1730,9 +1732,10 @@ class ServerWindow(QMainWindow):
         for widget, key, setter in self._bindings:
             getattr(widget, setter)(self.t(key))
             widget.setAccessibleName(self.t(key))
-        for index, key in enumerate(('Overview', 'Devices', 'Incidents', 'Administration', 'This Server')):
+        for index, key in enumerate(('Overview', 'Devices', 'Incidents', 'Energy', 'Administration', 'This Server')):
             self.tabs.setTabText(index, self.t(key))
         self.alerts.retranslate()
+        self.insights.retranslate()
         self.access_ui.retranslate()
         for index, key in enumerate(('All statuses', 'Pending approval', 'Approved', 'Denied', 'Disconnected', 'Connected', 'Offline', 'Unavailable')):
             self.status_filter.setItemText(index, self.t(key))
@@ -1845,6 +1848,7 @@ class ServerWindow(QMainWindow):
         self._load_fleet()
         self._load_server_info()
         self.alerts.load()
+        self.insights.load()
         self.access_ui.load()
 
     def _load_overview(self):

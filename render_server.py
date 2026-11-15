@@ -69,12 +69,18 @@ def populate(store, fingerprint, count=20, detailed=False):
             displays=[dict(width=2560, height=1440, hz=144)],
             os=dict(name='Windows 11', build='26100', architecture='64-bit', installed='2025-06-01',
                     last_boot=(observed-dt.timedelta(hours=6)).isoformat(), uptime_seconds=21600))
+        desktop = detailed and index % 3 == 2      # every third demo computer is a desktop: no battery, estimated power
+        if desktop:
+            specs['battery_design_wh'] = None
+
         def readings(stamp, sample):
+            battery = {} if desktop else dict(battery_percent=82 - sample, charging=False,
+                                              power_watts=round(9 + index % 5 + (sample % 3) * 1.5, 1))
             return dict(observed_at=stamp.isoformat(), specs=specs,
                         performance=dict(cpu_percent=12 + (sample * 13 + index) % 65,
                                          ram_used_bytes=(5 + sample % 4) * 1024**3,
                                          disk_free_bytes=(24 if index == 1 else 180) * 1024**3,
-                                         battery_percent=82 - sample, charging=False, temperature_c=45 + sample))
+                                         temperature_c=45 + sample, **battery))
         if detailed:
             for sample in range(6):
                 stamp = observed - dt.timedelta(minutes=(6 - sample) * 10)
@@ -82,6 +88,23 @@ def populate(store, fingerprint, count=20, detailed=False):
                     store.ingest(request['device_id'], credential, dict(version=1, device_id=request['device_id'],
                                  policy_version=1, policy=request['policy'], records=[], readings=readings(stamp, sample)))
         history = dict(daily=daily, recording_started=(now-dt.timedelta(days=60)).isoformat())
+        if detailed:
+            # Hour by hour: office hours on weekdays, and every fourth computer is left on overnight and at weekends.
+            dated = {}
+            for i in range(30):
+                date = day - dt.timedelta(days=i)
+                hours = [0.0] * 24
+                if date.weekday() < 5:
+                    for hour in range(8, 8 + 3 + (index + i * 3) % 8):
+                        hours[hour] = 3600.0
+                if index % 4 == 1:
+                    for hour in (*range(0, 7), *range(19, 24)):
+                        hours[hour] = 3600.0
+                elif index % 4 == 3 and i % 3 == 0:
+                    for hour in range(18, 21):
+                        hours[hour] = 3000.0
+                dated[date.isoformat()] = hours
+            history.update(dated_hourly=dated, daily={key: sum(hours) for key, hours in dated.items()})
         health = None
         if detailed:
             weekdays_hours = [0.0]*24

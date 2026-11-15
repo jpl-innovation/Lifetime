@@ -18,6 +18,7 @@ from PyQt6.QtCore import QDate, QItemSelectionModel, QTimer, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QLabel, QPushButton, QComboBox
 
+import lifetime_insights as insights
 import lifetime_server_gui as gui
 from lifetime_widgets_dashboard import VISUAL_ROLE
 import lifetime_server_access_ui as gui_access
@@ -52,6 +53,7 @@ class FakeAdmin:
         self.updates = None         # None: a server without agent updates
         self.whoami = None          # None: an older server without roles (whoami is unknown)
         self.roles, self.audit = [], []
+        self.insight_items, self.insight_config = [], insights.settings()     # computed by the real lifetime_insights
         self.gui_thread = threading.get_ident()
         self.lock = threading.Lock()
 
@@ -217,6 +219,11 @@ class FakeAdmin:
             if operation == 'set_update':
                 self.updates.update(arguments)
             return copy.deepcopy(self.updates)
+        if operation == 'insights':
+            return insights.fleet(copy.deepcopy(self.insight_items), self.insight_config, dt.date.today())
+        if operation == 'set_insight_settings':
+            self.insight_config = insights.settings(dict(self.insight_config, **arguments['values']))
+            return copy.deepcopy(self.insight_config)
         if operation == 'set_coverage_floor':
             return dict(coverage_floor=arguments['percent'])
         if operation == 'test_notification':
@@ -1077,10 +1084,40 @@ class ServerGuiTests(unittest.TestCase):
             self.window.tabs.setCurrentIndex(0)
             self.assertEqual(bar.pill_rect().toRect(), bar.tabRect(0).adjusted(5, 5, -5, -5))
 
+    def test_energy_page_says_measured_or_estimated_sums_groups_and_saves_the_price(self):
+        today = dt.date.today().isoformat()
+        self.api.insight_items = [
+            dict(device_id='a', name='Lab PC', group='Lab', kind='laptop', discharge=[10, 10, 10], history=dict(daily={today: 36000})),
+            dict(device_id='b', name='Office PC', group='Office', kind='desktop', history=dict(daily={today: 36000})),
+            dict(device_id='c', name='Private PC', group='Office', kind=None, history=None)]
+        self.load([device(0)])
+        ui = self.window.insights
+        self.window.tabs.setCurrentIndex(ui.index)
+        self.wait_idle()
+        card, cost = ui.cards['today']
+        self.assertEqual((card.headline.text(), cost.text()), ('0.90 kWh', '2,250 VND'))     # 10 h x (10 + 80) W x 2500
+        self.assertIn('1 of 2 computers measured on battery', ui.method.text())
+        self.assertIn('1 do not share their awake history', ui.method.text())
+        self.assertEqual([ui.top.item(row, 0).text() for row in range(ui.top.rowCount())], ['Office PC', 'Lab PC'])
+        self.assertEqual(ui.top.item(0, 2).text(), '80 W · estimated: typical desktop')
+        self.assertEqual(ui.top.item(1, 2).text(), '10 W · measured on battery')
+        ui.scope.setCurrentIndex(ui.scope.findData('Lab'))
+        self.assertEqual(card.headline.text(), '0.10 kWh')
+        ui.price.setValue(3000)
+        ui.currency.setText('usd')
+        ui._save()
+        self.wait_idle()
+        self.assertIn(('set_insight_settings', dict(values=dict(price=3000.0, currency='USD', laptop_watts=20.0, desktop_watts=80.0))),
+                      [(o, a) for o, a, _ in self.api.calls])
+        self.assertEqual(cost.text(), '300.00 USD')
+        self.window.language_button.click()
+        self.assertIn('máy được đo khi chạy pin', ui.method.text())
+        self.assertEqual(self.window.tabs.tabText(ui.index), 'Năng lượng')
+
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget
         self.assertIsInstance(self.window.tabs, QStackedWidget)
-        self.assertEqual(self.window.tabs.count(), 5)
+        self.assertEqual(self.window.tabs.count(), 6)      # Overview, Devices, Incidents, Energy, Administration, This Server
         bar = self.window.tabs.tabBar()
         bar.setFocus()
         with patch('lifetime_server_devices.reduced_motion', return_value=False):

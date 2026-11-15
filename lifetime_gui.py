@@ -23,6 +23,7 @@ from lifetime_i18n import duration
 from lifetime_dashboard import ProbeWorker, SystemDashboard, RefreshGlyph
 from lifetime_charts import Insights, Plot, clean_daily, date_series
 from lifetime_health_gui import HealthPage
+from lifetime_insights_gui import EnergyPanel
 from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
 from lifetime_shell import install_glass_surfaces, attach_glass_all, ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
 from lifetime_settings import load_settings, save_settings, update_settings
@@ -776,6 +777,8 @@ class Window(QWidget):
         chips.addStretch()
         sources.addLayout(chips)
         reports_layout.addWidget(self.sources_panel)
+        self.energy = EnergyPanel()      # kWh and cost from the awake time, method stated (lifetime_insights)
+        reports_layout.addWidget(self.energy)
         self.report_list = QFrame()
         self.report_list.setObjectName('insetPanel')
         reports_list = QVBoxLayout(self.report_list)
@@ -1404,6 +1407,7 @@ class Window(QWidget):
             self.source_breakdown.setText(tr('Saved sources · measured: {measured} · OS logs: {imported} · manual baseline: {baseline}',
                 measured=component(parts['measured_seconds']), imported=component(parts['imported_seconds']), baseline=component(parts['baseline_seconds'])))
             self._show_sources(parts)
+            self.energy.set_ledger(ledger)
             if not self.initialized or abs(total - self.hero.target) > 5:
                 self.hero.set_total(total)
             else:

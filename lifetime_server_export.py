@@ -70,14 +70,23 @@ class ServerExportDialog(ExportDialog):
                 arguments.update(start=options['start'], end=options['end'])
             measured += self.client.call('availability', **arguments)['devices']
         thresholds = {rule['rule']: rule.get('threshold') for rule in self.client.call('alert_rules')}
+        try:
+            found = self.client.call('insights')
+        except ValueError:      # an older server without energy figures
+            found = None
+        energy = found and dict(settings=found['settings'], computers={c['device_id']: c for c in found['computers']})
         if single:
-            return device_report(devices[0], availability=measured[0] if measured else None, thresholds=thresholds, **options)
-        return fleet_report(devices, availability=measured, thresholds=thresholds, group=group, **options)
+            return device_report(devices[0], availability=measured[0] if measured else None, thresholds=thresholds,
+                                 insights=energy, **options)
+        return fleet_report(devices, availability=measured, thresholds=thresholds, group=group, insights=energy, **options)
 
     # When a computer last reported changes with every sync, so a connected computer would make every save
     # "different from the review" and the file could never be written. The saved report still carries the
     # newest times; only a change to the content the administrator reviewed asks for a new review.
-    VOLATILE_ROWS = ('Client observation time', 'Server receipt time', 'System reading time', 'System disk free (%)')
+    VOLATILE_ROWS = ('Client observation time', 'Server receipt time', 'System reading time', 'System disk free (%)',
+                     # a new on-battery reading can change the measured draw between the review and the save
+                     'Power draw (W)', 'Power method', 'Energy in the period (kWh)', 'Cost in the period',
+                     'Measured on battery', 'Estimated from typical power')
 
     @staticmethod
     def report_content(report):

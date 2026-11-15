@@ -24,6 +24,7 @@ import zoneinfo
 
 import lifetime_availability as availability
 import lifetime_checks as checks
+import lifetime_insights as insights
 import lifetime_notify as notify
 
 SCHEMA_VERSION = 2
@@ -1017,6 +1018,31 @@ class Monitor:
         with self._transaction() as db:
             self._setting(db, 'coverage_floor', str(percent))
         return dict(coverage_floor=percent)
+
+    # ---- energy and lifecycle settings (lifetime_insights), kept with the other monitoring settings ----
+
+    def insight_settings(self):
+        with self._lock:
+            saved = self._setting(self._db, 'insights')
+        return insights.settings(json.loads(saved) if saved else None)
+
+    def set_insight_settings(self, values):
+        """Merge the given settings (price, currency, typical wattages, per-group and per-computer wattages)."""
+        if not isinstance(values, dict):
+            raise MonitorError('Invalid settings')
+        with self._transaction() as db:
+            saved = self._setting(db, 'insights')
+            try:
+                merged = insights.settings(dict(json.loads(saved) if saved else {}, **values))
+            except ValueError as error:
+                raise MonitorError(str(error)) from None
+            self._setting(db, 'insights', json.dumps(merged, sort_keys=True))
+        return merged
+
+    def resolved_schedules(self, devices):
+        """{device_id: the expected-online schedule that applies to it} for [{device_id, group}]."""
+        with self._lock:
+            return {device['device_id']: self._schedule_for(self._db, device) for device in devices}
 
     def availability(self, device_ids, start=None, end=None, as_of=None, daily=False):
         """Per computer over local dates start..end (inclusive, the computer's calendar), or over everything

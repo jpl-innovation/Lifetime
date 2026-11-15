@@ -27,6 +27,7 @@ import datetime as dt
 import uuid
 
 import lifetime_access as access
+import lifetime_insights as insights
 import lifetime_permissions as permissions
 import lifetime_server_backup as archive
 from lifetime_protocol import CAPABILITIES, MAX_BYTES, ProtocolError, canonical, decode
@@ -303,6 +304,9 @@ _ADMIN = {
     'upload_update': ('updates.upload', ('path', 'version', 'sha256'), ()),
     'set_update': ('updates.set_rollout', (), ('percent', 'paused')),
     'rollback_update': ('updates.rollback', (), ()),
+    # Energy and lifecycle (lifetime_insights): computed from what each computer shares; settings live in monitoring.
+    'insights': (None, (), ()),
+    'set_insight_settings': ('monitor.set_insight_settings', ('values',), ()),
 }
 
 
@@ -641,6 +645,8 @@ class ServerRuntime:
             self._check_backup_path(value['path'])
         if operation == 'server_info':
             return self.server_info()
+        if operation == 'insights':
+            return self.insights()
         if operation in ('backup', 'restore'):
             return getattr(self, operation)(value['path'])
         if operation == 'names':
@@ -680,6 +686,11 @@ class ServerRuntime:
         elif operation == 'device':
             result = dict(result, alerts=self.monitor.device_alerts(value['device_id']))
         return result
+
+    def insights(self, today=None):
+        """Energy and cost per computer, group and fleet (lifetime_insights), from what each computer shares."""
+        return insights.fleet(self._store.insight_inputs(), self.monitor.insight_settings(),
+                              today or self.clock().astimezone().date())
 
     def whoami(self, identity):
         roles = self.access.roles_for(identity)

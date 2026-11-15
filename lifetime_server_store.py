@@ -1520,6 +1520,38 @@ class Store:
                 result.append(item)
         return result
 
+    def insight_inputs(self):
+        """Per approved computer, only what its policy shares, for lifetime_insights (read-only): the awake history
+        (history), the latest readings and the week's on-battery power draw (resources), the health summary and its
+        detail (health), plus the agent version."""
+        result = []
+        with self._transaction() as db:
+            for row in db.execute("SELECT * FROM devices WHERE status='approved' ORDER BY created_at,device_id").fetchall():
+                identity, policy = json.loads(row['identity']), json.loads(row['policy'])
+                item = dict(device_id=row['device_id'], name=identity.get('display_name') or row['device_id'],
+                            group=identity.get('department', ''), created_at=row['created_at'],
+                            client_version=row['client_version'], control=bool(policy.get('control')),
+                            history=None, readings=None, health=None, discharge=[], kind=None)
+                if policy.get('history') and row['history']:
+                    history = json.loads(row['history'])
+                    item['history'] = dict(daily=history.get('daily') or {}, dated_hourly=history.get('dated_hourly') or {},
+                                           first_seen=history.get('first_seen'))
+                if policy.get('resources'):
+                    readings = json.loads(row['readings']) if row['readings'] else {}
+                    item['readings'] = readings or None
+                    specs, perf = readings.get('specs') or {}, readings.get('performance') or {}
+                    if specs or perf:
+                        item['kind'] = 'laptop' if any(value is not None for value in (
+                            specs.get('battery_design_wh'), perf.get('battery_percent'),
+                            perf.get('battery_health_percent'))) else 'desktop'
+                    item['discharge'] = [r[0] for r in db.execute(
+                        'SELECT power_watts FROM performance_samples WHERE device_id=? AND power_watts IS NOT NULL',
+                        (row['device_id'],))]
+                if policy.get('health') and row['health']:
+                    item['health'] = json.loads(row['health'])
+                result.append(item)
+        return result
+
     def request_refresh(self, device_id):
         with self._transaction() as db:
             row = self._device_row(db, device_id)
@@ -1549,10 +1581,13 @@ class Store:
             return
         ram = specs.get('ram_bytes')
         used = perf.get('ram_used_bytes')
+        # Only the discharge rate on battery is the computer's own draw; while charging the battery reports its charge
+        # rate instead, which says nothing about the computer. Energy figures treat these samples as measurements.
+        watts = perf.get('power_watts') if perf.get('charging') is False else None
         db.execute('INSERT INTO performance_samples VALUES (?,?,?,?,?,?,?,?)',
                    (device_id, _stamp(observed), perf.get('cpu_percent'),
                     min(100, 100*used/ram) if ram and used is not None else None,
-                    _disk_percent(specs, perf), perf.get('battery_percent'), perf.get('power_watts'), perf.get('temperature_c')))
+                    _disk_percent(specs, perf), perf.get('battery_percent'), watts, perf.get('temperature_c')))
 
     @staticmethod
     def _expire_commands(db):
