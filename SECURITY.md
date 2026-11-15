@@ -198,6 +198,20 @@ Reading the data requires the loopback-only administrator API (its bearer token,
 (theme, language, style) are stored locally and are not sent anywhere. If you find a way to make the server accept or
 display data it should refuse, please report it as described below.
 
+## Energy, after hours and the sleep-after-hours policy
+
+Energy, after-hours, forecast and health figures are computed only from what each computer already shares under its
+History, Readings and Health consent; a computer that shares nothing is counted as unknown. Monitoring's daily
+disk/battery readings for forecasts are deleted as soon as a computer stops sharing readings. The desktop app keeps its
+own on-battery power readings and daily disk reading in `insights.json` beside its settings (Battery and Resources
+permissions), never in the awake-time ledger.
+
+The **Sleep after hours** policy adds no new power path: each command is the existing single-computer Sleep, sent
+through the same gate as a person's (named Windows account, role re-checked before every command, owner's remote-power
+consent, per-computer and per-account rate limits, ten-minute expiry, audit trail). It can be turned on only by an
+account with an Admin or Operator role assigned to that account itself, never over the shared token, and it stops when
+that role is removed. It never sends a bulk command.
+
 ## Agent updates
 
 A computer takes an agent update only when its owner switched updates on (off by default, kept on the computer, not

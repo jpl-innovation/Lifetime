@@ -125,6 +125,42 @@ Not yet verified against real printers, routers, NAS boxes or websites, nor with
 
 Monitoring data lives in `monitoring.sqlite` in the data directory, written only by the running server: presence history (online, offline or unknown, with a reason), agentless checks with their last results, and incidents for 180 days, at most 64 MiB (the oldest closed history goes first), and the last 5,000 delivery log entries. Removing a computer also removes its monitoring history.
 
+## Energy, after hours, replacements and health
+
+The **Energy** page (admin operation `insights`, readable by every role) computes everything when it is opened, from
+what each computer shares; nothing is stored except the settings and one disk/battery reading per computer and day.
+
+- **Energy** = awake hours (the computer's daily record) x power. Power is the mean of the computer's on-battery
+  discharge readings when it has at least 3 in the last week (the server now keeps a battery reading as a power sample
+  only while discharging; a charging battery reports its charge rate), else the wattage set for the computer or its
+  group, else the typical laptop (20 W) or desktop (80 W) wattage; a computer of unknown kind is treated as a desktop.
+  The price (default 2,500 VND per kWh) and currency are settings (`set_insight_settings`, Admin, audited).
+- **After hours** uses the computer's hourly awake record (its own wall-clock hours; a night is split at midnight, a
+  daylight-saving day has an empty or double hour) against its business hours, or the **office hours** setting when its
+  schedule is Automatic, Always or Never. An hour cut by the opening or closing time is shared by minutes. Older
+  computers that do not send hourly history count as unknown.
+- **Sleep after hours** (`set_sleep_policy`, Admin): only a named Windows account with an Admin or Operator role
+  assigned to the account itself can turn it on (not the token, and not membership of Administrators alone, which the
+  server cannot re-check later). Every 15 seconds the server looks at that group's computers whose owner allows remote
+  power and, 30 minutes after their hours close, sends one ordinary Sleep command per computer per 12 hours through the
+  same path as a person: the account's role is checked again, the per-computer (3 / 10 min) and per-account (10 / 10 min)
+  limits apply, and the audit trail records it as "<account> (after-hours policy)". It skips computers that are offline,
+  already have a command waiting, or whose latest processor reading is 25 % or more (Lifetime cannot see a keyboard or
+  mouse). Removing the account's role stops it at once. The estimated monthly saving is this week's after-hours energy
+  of computers that allow remote power x 30/7. Not tested on real machines.
+- **Replacement plan**: battery health comes from the computer's battery report history (Health with Readings);
+  system disk free space from one reading per computer and day that monitoring keeps in `monitoring.sqlite` (table
+  `trends`, two years, included in backups, removed with the computer and as soon as it stops sharing readings). A
+  least-squares line gives the date the battery falls below the replacement level (default 80 %) or the disk below the
+  free-space level (default 10 %), only with at least 4 readings over 30 days. Unit prices for batteries and disks are
+  optional; parts without a price are counted, not priced.
+- **Health score**: the badge's score (good 100, needs a look 50, poor 0, averaged) over stability, battery, system disk
+  free, temperature and agent version (against the newer of this server's version and the approved update package).
+  Unknown parts are listed and left out; group and fleet scores average the known computers and say how many are
+  unknown.
+
+Reports add the same sections (Energy and cost with the method, after hours, forecasts and the plan, health score).
+
 ## Named administrators and roles
 
 On Windows the dashboard signs in as the Windows account that opens it. The server reads the account from its local

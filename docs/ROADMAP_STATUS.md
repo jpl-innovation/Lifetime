@@ -94,6 +94,15 @@ done and tested here, and the gate still needs a real-world run.
 | 4 | Measured limits doc: supported size = tested size | implemented | `d780550` |
 | Gate | Supported count equals measured count; no unbounded memory or disk; ledger invariant | supported = 50 (measured). Bounded stores reviewed (performance samples, monitoring quota, audit retention, event and log caps). 200/500: **owner action**. | |
 
+## Unique features: what true awake time makes possible
+
+| # | Item | Status | Commits |
+|---|---|---|---|
+| 1 | Energy and cost (measured on battery vs estimated, per computer/group/fleet, price and currency, reports) | implemented, tested synthetic (hand-calculated golden cases). **needs real machines**: real discharge readings vs a wall meter; typical wattages are assumptions. **owner action**: the default price (2,500 VND per kWh) and wattages. | `9db3633` |
+| 2 | After hours per computer/room/group, weekly trend, sleep-after-hours policy with estimated saving, desktop note | implemented, tested synthetic (midnight, DST, partial hours, overnight hours; policy role, consent, grace, busy, once a night, revocation). **needs real machines**: the policy on real computers and networks; "busy" is processor load only. | `b2b92c5` |
+| 3 | Replacement forecast (battery, disk fill, disk health, age, usage) and plan with budget | implemented, tested synthetic (exact dates, not enough data, reached, flat, beyond ten years). **needs real machines**: months of real readings to judge the straight-line forecast. | `c56b1be` |
+| 4 | Health score per computer and averaged per group/fleet with breakdown; unknown parts disclosed | implemented, tested synthetic | `aee5368` |
+
 ## Stage 5: pilot and proof kit
 
 | # | Plan item | Status | Commits |

@@ -83,8 +83,11 @@ The installer needs Python 3 and PyQt6 and offers to install PyQt6 for you (no s
 - **Overview** – awake time ticking live to the second, with separate measured, reconstructed and manual-baseline amounts. **Earliest known date** names its source (OS installation, system-file timestamp, recovered log, first observation or unknown), not a claim of true first use. A **Verify** button cross-checks the current boot against the operating system's own records (the Windows event log or the Linux journal). Coverage stays unknown unless specific missing evidence supports a partial status.
 - **Activity** – calendar heatmap, daily hours with a 7-day average, cumulative lifetime hours, hour-of-day and weekday profiles, and a session-length histogram, for 30 days, 90 days, a year or everything. **Show data** reveals the numbers behind every chart.
 - **System** – live power and battery, network and Wi-Fi, graphics, CPU, memory and disks, each with a small five-minute trend next to its reading. A hardware section lists the computer's details in plain groups: processor (clock speed, and temperature where the computer reports it), cooling fans (count and speed where the firmware exposes them, otherwise it says so), network cards (name, Wi-Fi, Ethernet or virtual, link speed), memory modules, disks (model, SSD or HDD, health), motherboard and BIOS, graphics driver, displays and the operating system build. Anything a computer does not report shows "Not available" with a short reason; nothing is guessed. Serial numbers and user names are never collected.
-- **Health** – stability (unexpected shutdowns and crashes), battery wear and cycles, and sleep patterns, when you allow Health.
-- **Reports** – export a PDF or CSV report, edit the device identity, review coverage.
+- **Health** – stability (unexpected shutdowns and crashes), battery wear and cycles, and sleep patterns, when you allow Health. A 0-100 health score with its parts (unknown parts are shown and left out), and a **Replacement forecast**: when the battery reaches 80 % health and when the system disk runs out of room, or "not enough data" with what it has.
+- **Reports** – export a PDF or CSV report, edit the device identity, review coverage, and see **Energy and cost**:
+  kWh and money today, this week and this month from the awake time, with a note when the computer was on after
+  office hours. Power is *measured* only from this computer's own on-battery readings (Battery permission);
+  otherwise it is a typical or owner-set wattage and says *estimated*.
 - **Connect** – connect to a Lifetime Server with one code and manage sharing.
 - **Settings** – a page inside the app (not a pop-up window): language, appearance, what to track, adding earlier usage, start at login and deleting history. Every option is a sliding switch, green when on.
 - **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts.
@@ -362,6 +365,30 @@ their pinned connection, check its SHA-256 and, on Windows, its signature when i
 back; they never run it. `install_agent_windows.ps1 -StagedUpdate` installs it, for example from a startup script at
 the next restart. See [server operations](docs/SERVER_OPERATIONS.md#agent-updates-staged). Not yet verified from a
 real GPO or Intune startup script.
+
+### Energy, after hours, replacements and health (the Energy page)
+
+Lifetime knows each computer's true awake time, so the server's **Energy** page can say what others cannot:
+
+- **Energy and cost** per computer, group and fleet (today, 7 and 30 days, daily chart, top consumers): awake hours
+  x power draw, at your electricity price (default 2,500 VND per kWh; any currency). Power is **measured** only when a
+  computer reported its own draw on battery (at least 3 readings); otherwise it is the wattage you set for the
+  computer or its group, or a typical laptop (20 W) or desktop (80 W), and is labelled **estimated** with its source.
+- **After hours**: awake time outside each computer's business hours (its expected-online schedule) or the office
+  hours you set (default 08:00-18:00, Monday-Friday), per computer, room, group and fleet, with energy, cost, an
+  8-week trend and the estimated monthly saving. **Sleep after hours** for a group sends the ordinary single-computer
+  Sleep command, once a night, 30 minutes after closing, only to computers whose owner allows remote power, within the
+  usual rate limits and audited as the Admin or Operator who turned it on. It skips computers that are offline, busy or
+  already have a command, and does not insist if a computer is woken or its owner declines.
+- **Replacement plan**: when each battery falls below the replacement level and when each system disk fills, from the
+  computer's own readings (a date only with at least 4 readings over 30 days, otherwise "not enough data"), disks that
+  report a problem, age and awake hours, what to replace this quarter and this year, and a budget from unit prices you
+  set.
+- **Health score** 0-100 per computer, averaged per group and fleet: stability, battery wear, system disk free,
+  temperature and agent version; a part without a reading is shown as unknown and never counted as good or bad.
+
+Reports (PDF and CSV) carry the same figures with how each one was obtained. Nothing here is verified on real
+fleets yet: the numbers are tested with hand-calculated cases and demo data only.
 
 ### Tested size
 

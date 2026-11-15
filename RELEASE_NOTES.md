@@ -1,5 +1,19 @@
 ## Next release (not yet published)
 
+- **Energy and cost from true awake time (both apps):** kWh and money per computer, group and fleet for today, 7 and
+  30 days, a daily chart and the top consumers on the server's new **Energy** page; an **Energy and cost** panel on the
+  desktop Reports page. Power is measured only from a computer's own on-battery readings, otherwise estimated from a
+  wattage you set or a typical laptop (20 W) or desktop (80 W), and always labelled. Price (default 2,500 VND per kWh)
+  and currency are editable. Reports include an Energy and cost section with the method.
+- **After hours:** awake time outside business or office hours per computer, room, group and fleet, with energy, cost,
+  an 8-week trend and the estimated monthly saving; an optional per-group **Sleep after hours** that sends the
+  ordinary one-computer Sleep command within the existing consent, role, rate-limit and audit rules (never a bulk
+  command). The desktop app says how long the computer was on after hours this week.
+- **Replacement plan:** battery and disk forecasts from each computer's own readings, with "not enough data" and the
+  data span instead of a guess, disks that report a problem, age and awake hours, what to replace this quarter and this
+  year, and an optional budget. The desktop Health page shows its own forecast.
+- **Health score per computer, group and fleet:** the badge now also counts system disk free space, temperature and the
+  agent version; unknown parts are shown and left out of the score.
 - **Click-through QA fixes (both apps):** the Server log and the Overview's recent events are event rails (dot, words, time and computer); device cards show the last 24 hours as hourly ticks (loaded off the interface thread, once a minute per computer); the desktop Reports page shows where the saved time comes from as one bar with labelled parts; the desktop Connect page shows the connection as a card; empty Maintenance windows, Delivery log and Roles lists say so instead of showing a blank table; the Pending approvals list is tall enough for its rows; **Open device** on the Overview no longer lands on "No computers match" when a status filter was left on; the server header subtitle ends in "…" with a tooltip instead of being cut mid-word; desktop Overview tiles grow instead of cutting a three-line heading (Vietnamese at 1024 px). Stability: a delayed number roll-in on a removed label, and a background result arriving for a closed window, could stop the app; shutdown now waits up to 3 s for running background tasks. Report: docs/qa/clickthrough-report.md.
 - **Two styles:** **Classic** (the original solid look) and **Glass** (translucent panels, glass menu and a blue-to-gold background). Desktop: Settings; Server: Administration. Applies instantly and is remembered.
 - **Settings is a page**, not a pop-up, and every tick box is now a sliding switch (green when on).
