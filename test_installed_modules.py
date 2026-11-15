@@ -93,9 +93,29 @@ class SourceInstallationTests(unittest.TestCase):
         for path, pattern in (('build_server_windows.ps1', "-Filter 'lifetime_*.py'"),
                               ('install_server_windows.ps1', "-Filter 'lifetime_*.py'"),
                               ('build_windows.ps1', 'Copy-Item lifetime_*.py package'),
-                              ('.github/workflows/windows.yml', 'cp lifetime_*.py ')):
+                              ('Dockerfile', 'COPY lifetime_*.py ./'),
+                              ('.dockerignore', '!lifetime_*.py')):
             with self.subTest(path=path):
                 self.assertIn(pattern, (PROJECT/path).read_text(encoding='utf-8'))
+
+    def test_linux_bundles_include_every_module_in_every_program(self):
+        """The Linux spec bundles all lifetime_*.py into each program (so a lazily imported module is never missing),
+        keeps Qt out of the headless server and the background programs, and ships time zone data."""
+        spec = (PROJECT/'packaging/linux/lifetime-linux.spec').read_text(encoding='utf-8')
+        self.assertIn("glob.glob(os.path.join(ROOT, 'lifetime_*.py'))", spec)
+        self.assertIn('hiddenimports=MODULES', spec)
+        self.assertIn("collect_all('tzdata')", spec)
+        self.assertIn("[] if qt else ['PyQt6']", spec)
+        self.assertIn("analysis('lifetime_server.py', False", spec)
+        for program in ('Lifetime', 'LifetimeTracker', 'LifetimeImport', 'LifetimeAgent', 'LifetimeServerDashboard',
+                        'LifetimeServerRuntime'):
+            self.assertIn(f"'{program}'", spec)
+        build = (PROJECT/'packaging/linux/build_linux.sh').read_text(encoding='utf-8')
+        for name in ('install_linux.sh', 'uninstall_linux.sh', 'install_server_linux.sh', 'uninstall_server_linux.sh',
+                     'restart_server_linux.sh', 'lifetime-server.service', 'lifetime-server.openrc',
+                     'lifetime-server.sysv', 'server.conf', 'GLIBC-BASELINE'):
+            self.assertIn(name, build)
+        self.assertIn('rockylinux:8', (PROJECT/'.github/workflows/windows.yml').read_text(encoding='utf-8'))
 
 
     def test_install_lists_provide_complete_headless_and_desktop_dependencies(self):

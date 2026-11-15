@@ -26,3 +26,5 @@ admin-token
 .env.*
 server-demo-*/
 fleet-report/
+!packaging/linux/lifetime-linux.spec
+build-linux/
