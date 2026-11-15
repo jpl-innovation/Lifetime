@@ -53,7 +53,7 @@ try {
     Copy-Item -LiteralPath 'assets\lifetime.png', 'assets\lifetime.ico', 'assets\jpl_innovation.png', 'assets\jpl_innovation_light.png' -Destination (Join-Path $output 'assets')
     Copy-Item -LiteralPath 'docs\SERVER_OPERATIONS.md' -Destination (Join-Path $output 'docs')
     Copy-Item -LiteralPath 'docs\SERVER_PROTOCOL.md' -Destination (Join-Path $output 'docs')
-    Copy-Item -LiteralPath 'README.md', 'TECHNICIAN_VERIFICATION.md', 'SECURITY.md' -Destination $output
+    Copy-Item -LiteralPath 'README.md', 'TECHNICIAN_VERIFICATION.md', 'SECURITY.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md' -Destination $output
     $manifest = Get-ChildItem -LiteralPath $output -Recurse -File | Sort-Object FullName | ForEach-Object {
         $relative = $_.FullName.Substring($output.Length + 1).Replace('\', '/')
         '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $relative

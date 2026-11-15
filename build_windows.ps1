@@ -21,7 +21,7 @@ Copy-Item dist\Lifetime.exe, dist\LifetimeTracker.exe, dist\LifetimeImport.exe, 
     install_windows.ps1, install_windows_auto.ps1, 'Install Lifetime.cmd' package\ -Force
 # The Python sources too: when Smart App Control blocks the unsigned .exe files, the installer falls back to these.
 Copy-Item lifetime_*.py package\ -Force
-Copy-Item README.md, TECHNICIAN_VERIFICATION.md package\ -Force
+Copy-Item README.md, TECHNICIAN_VERIFICATION.md, LICENSE, THIRD_PARTY_NOTICES.md package\ -Force
 New-Item -ItemType Directory -Force -Path package\assets | Out-Null
 Copy-Item assets\lifetime.png, assets\lifetime.ico, assets\jpl_innovation.png, assets\jpl_innovation_light.png package\assets\ -Force
 Write-Host 'Done. Open the "package" folder and double-click "Install Lifetime.cmd".'

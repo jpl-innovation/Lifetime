@@ -142,9 +142,11 @@ Windows 10 and 11 (x64 and ARM64), and Linux with systemd and Python 3.11+. Desk
 - **Linux: no Wi-Fi or graphics details.** Wi-Fi uses NetworkManager (`nmcli`) or `iw`; graphics names use `lspci`. Install them with your package manager if a field shows "Not available".
 - **Something else.** Open an issue on GitHub with your operating system, Python version and the exact message.
 
-## Credits
+## Credits and license
 
 Lifetime · Made by JPL Innovation
+
+Lifetime is free software under the [GNU General Public License v3](LICENSE) (GPL-3.0-only): free to use, including in a business, and free to copy, change and share, as long as anyone you give it to gets the same rights and the source code. It is built on PyQt6, Qt, cryptography, websockets and pywin32; their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Technician workflow
 
