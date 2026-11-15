@@ -15,6 +15,7 @@ from lifetime_health_gui import HealthPage
 from lifetime_i18n import set_language
 from test_health import REPORT, summary
 import lifetime_health as health
+from lifetime_widgets_dashboard import VISUAL_ROLE
 
 
 class HealthPageTests(unittest.TestCase):
@@ -99,7 +100,7 @@ class HealthPageTests(unittest.TestCase):
                     row.update(health=summary(),unstable=True)
                     window._render_rows([row])
                     self.assertIn('Unstable',window.table.item(0,2).text())
-                    self.assertFalse(window.table.item(0,2).icon().isNull())
+                    self.assertEqual(window.table.item(0,2).data(VISUAL_ROLE), ('chip', 'warning'))   # a chip now, not a dot icon
                     window._render_detail(row)
                     contents=window.detail_text.toPlainText()
                     self.assertIn('Health',contents)

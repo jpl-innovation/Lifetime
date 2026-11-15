@@ -6,8 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLineEdit, QSpinBox, QTableWidgetItem)
 
 from lifetime_layout import ControlRow
-from lifetime_server_widgets import status_dot
-from lifetime_theme import T
+from lifetime_widgets_dashboard import VISUAL_ROLE, EmptyState
 
 KINDS = (('ping', 'Ping'), ('tcp', 'TCP port'), ('http', 'Web page (HTTP or HTTPS)'))
 RESULT_TEXT = {'ok': 'Up', 'dns': 'Name not found', 'blocked': 'Blocked by the allowed networks',
@@ -42,6 +41,9 @@ class ChecksUI:
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemSelectionChanged.connect(self._picked)
         content.addWidget(self.table)
+        self.empty = EmptyState('setup')
+        self.empty.hide()
+        content.addWidget(self.empty)
         first, second, third = ControlRow(), ControlRow(), ControlRow()
         for row in (first, second, third):
             row.setSpacing(8)
@@ -144,6 +146,10 @@ class ChecksUI:
         self._rows = rows
         if not self.scopes.hasFocus() and result.get('check_scopes') is not None:
             self.scopes.setText(', '.join(result['check_scopes']))
+        self.table.setVisible(bool(rows))
+        self.empty.setVisible(not rows)
+        self.empty.set_state('setup', self.t('No network checks yet'),
+                             self.t('Fill in a name and a printer, router or website below, then choose Save check.'))
         self.table.blockSignals(True)
         self.table.setRowCount(len(rows))
         for index, check in enumerate(rows):
@@ -156,8 +162,9 @@ class ChecksUI:
                 item.setToolTip(value)
                 item.setData(Qt.ItemDataRole.UserRole, check['id'])
                 if column == 2:
-                    colour = '#65D782' if check['last_category'] == 'ok' else '#9FB0CC' if check['last_category'] is None else '#FF8A8A'
-                    item.setIcon(status_dot(T(colour)))
+                    kind = 'neutral' if not check['enabled'] or check['last_category'] is None else (
+                        'good' if check['last_category'] == 'ok' else 'danger')
+                    item.setData(VISUAL_ROLE, ('chip', kind))
                 self.table.setItem(index, column, item)
             if check['id'] == self._selected:
                 self.table.selectRow(index)

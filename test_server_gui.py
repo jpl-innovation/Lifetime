@@ -19,6 +19,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QLabel, QPushButton, QComboBox
 
 import lifetime_server_gui as gui
+from lifetime_widgets_dashboard import VISUAL_ROLE
 import lifetime_server_access_ui as gui_access
 from qt_test_support import qt_app
 
@@ -197,6 +198,8 @@ class FakeAdmin:
             return 80
         if operation == 'checks':
             return copy.deepcopy(self.checks)
+        if operation == 'presence':
+            return copy.deepcopy(getattr(self, 'presence', []))
         if operation == 'check_scopes':
             return ['private']
         if operation == 'set_check_scopes':
@@ -794,7 +797,8 @@ class ServerGuiTests(unittest.TestCase):
         for row in range(self.window.table.rowCount()):
             self.assertNotIn('●', self.window.table.item(row, 2).text())
             self.assertNotIn('â—', self.window.table.item(row, 2).text())
-            self.assertFalse(self.window.table.item(row, 2).icon().isNull())
+            # The status is drawn as a chip (glyph + words) from the item's visual role, not a dot icon.
+            self.assertEqual(self.window.table.item(row, 2).data(VISUAL_ROLE)[0], 'chip')
             self.assertNotRegex(self.window.table.item(row, 4).text(), r'\d{4}-\d{2}-\d{2}')
         self.assertTrue(self.window.table.item(0, 3).textAlignment() & Qt.AlignmentFlag.AlignRight)
         self.assertTrue(self.window.table.horizontalHeaderItem(3).textAlignment() & Qt.AlignmentFlag.AlignRight)
@@ -861,7 +865,7 @@ class ServerGuiTests(unittest.TestCase):
         invitation_table = self.window.invitation_table
         self.assertEqual(invitation_table.parentWidget().objectName(), 'panel')
         self.assertIn('2 Jan 2099', invitation_table.item(0, 1).text())
-        self.assertFalse(invitation_table.item(0, 4).icon().isNull())
+        self.assertEqual(invitation_table.item(0, 4).data(VISUAL_ROLE), ('chip', 'good'))     # a chip, not a dot icon
         self.assertEqual(self.window.retention_date.displayFormat(), 'd MMM yyyy')
         self.assertTrue(self.window.fingerprint.isReadOnly())
         approve = self.window._admin_row_actions[0]
@@ -1270,8 +1274,10 @@ class ServerGuiTests(unittest.TestCase):
         self.assertEqual(alerts.table.rowCount(), 2)
         alerts.table.selectRow(0)
         self.wait_idle()
-        self.assertIn('Incident opened', alerts.detail.text())
-        self.assertIn('Sign-in refused', alerts.detail.text())
+        # The timeline is an event rail now (dots and words), deliveries a line under it; the facts stay in the detail.
+        self.assertIn('Incident opened', alerts.rail.text())
+        self.assertIn('Sign-in refused', alerts.deliveries.text())
+        self.assertEqual(alerts.state_chip.text(), 'Needs attention')
         self.assertTrue(alerts.acknowledge_button.isEnabled())
         alerts.acknowledge_button.click()
         self.wait_idle()
@@ -1289,6 +1295,31 @@ class ServerGuiTests(unittest.TestCase):
         self.window.refresh()
         self.wait_idle()
         self.assertFalse(alerts.badge.isVisible())
+
+    def test_device_detail_shows_hourly_presence_and_a_status_chip(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        self.api.presence = [dict(state='online', reason='report', start_at=(now - dt.timedelta(hours=3)).isoformat(), end_at=None),
+                             dict(state='offline', reason='silent', start_at=(now - dt.timedelta(hours=10)).isoformat(),
+                                  end_at=(now - dt.timedelta(hours=3)).isoformat())]
+        row = device(0)
+        self.load([row])
+        self.window.tabs.setCurrentIndex(1)
+        self.window._select_box(row['device_id'])
+        self.wait_idle()
+        kinds = [kind for kind, _ in self.window.presence_bar.ticks]
+        self.assertEqual(len(kinds), 24)
+        self.assertIsNone(kinds[0])                 # nothing recorded 24 hours ago: an outline, not "online"
+        self.assertEqual(kinds[-1], 'good')
+        self.assertIn('warning', kinds)
+        self.assertIn('online in 3 of 24 hours', self.window.presence_bar.accessibleName())
+        self.assertFalse(self.window.presence_box.isHidden())
+        self.assertTrue(self.window.detail_status.text())
+        self.assertTrue(any(op == 'presence' for op, _, _ in self.api.calls))
+        self.api.presence = []
+        self.window._select_box(row['device_id'])
+        self.window._selection_changed()
+        self.wait_idle()
+        self.assertTrue(self.window.presence_box.isHidden())     # no monitoring history: nothing drawn
 
     def test_device_detail_shows_its_incident_history_and_monitoring_state(self):
         row = device(0)

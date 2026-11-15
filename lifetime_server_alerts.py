@@ -15,8 +15,9 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateTimeE
 from lifetime_layout import ControlRow
 from lifetime_server_checks import ChecksUI
 from lifetime_server_updates import UpdatesUI
-from lifetime_server_widgets import status_dot, table_action
+from lifetime_server_widgets import table_action
 from lifetime_theme import T
+from lifetime_widgets_dashboard import VISUAL_ROLE, EmptyState, EventRail, StatusChip
 
 RULE_TEXT = {'offline': 'Computer offline', 'no_report': 'No report received', 'disk_low': 'Disk almost full',
              'cpu_high': 'Processor busy', 'memory_high': 'Memory almost full', 'battery_worn': 'Battery worn',
@@ -25,12 +26,13 @@ RULE_TEXT = {'offline': 'Computer offline', 'no_report': 'No report received', '
 UNIT = {'disk_low': '%', 'cpu_high': '%', 'memory_high': '%', 'battery_worn': '%', 'temperature_high': ' °C', 'crashes': ''}
 STATE_TEXT = {'pending': 'Starting', 'open': 'Needs attention', 'acknowledged': 'Acknowledged', 'resolved': 'Resolved',
               'suppressed': 'Paused by maintenance'}
-STATE_COLOUR = {'open': '#FF8A8A', 'acknowledged': '#FFC93C', 'suppressed': '#9FB0CC', 'pending': '#9FB0CC',
-                'resolved': '#65D782'}
+STATE_KIND = {'open': 'danger', 'acknowledged': 'warning', 'suppressed': 'neutral', 'pending': 'neutral', 'resolved': 'good'}
 FILTERS = (('active', 'Current problems'), ('open', 'Needs attention'), ('acknowledged', 'Acknowledged'),
            ('suppressed', 'Paused by maintenance'), ('resolved', 'Resolved'), ('', 'All'))
 EVENT_TEXT = {'pending': 'Problem started', 'opened': 'Incident opened', 'acknowledged': 'Acknowledged by {who}',
               'returned': 'Problem returned', 'suppressed': 'Paused by maintenance', 'resolved': 'Resolved'}
+EVENT_KIND = {'pending': 'neutral', 'opened': 'danger', 'acknowledged': 'warning', 'returned': 'danger',
+              'suppressed': 'neutral', 'resolved': 'good'}
 RESOLUTION_TEXT = {'recovered': 'Recovered', 'not-monitored': 'No longer monitored'}
 DELIVERY_TEXT = {'open': 'Incident opened', 'recovery': 'Recovered', 'test': 'Test message', 'summary': 'Daily summary'}
 DELIVERY_STATUS = {'queued': 'Waiting to retry', 'sending': 'Sending', 'sent': 'Sent', 'failed': 'Failed'}
@@ -101,17 +103,29 @@ class AlertsUI:
             self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemSelectionChanged.connect(self._selection_changed)
         content.addWidget(self.table, 1)
-        self.empty = w.label('No incidents. Lifetime opens one when a rule under Administration finds a problem.')
-        self.empty.setObjectName('muted')
+        self.empty = EmptyState('clear')
         content.addWidget(self.empty)
+        content.addStretch()
         row.addWidget(panel, 3)
         detail, detail_layout = w._panel()
+        self.state_chip = StatusChip()
+        self.state_chip.hide()
+        detail_layout.addWidget(self.state_chip)
         self.detail = QLabel()
         self.detail.setTextFormat(Qt.TextFormat.RichText)
         self.detail.setWordWrap(True)
         self.detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.detail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         detail_layout.addWidget(self.detail)
+        self.rail_title = QLabel()
+        self.rail_title.setStyleSheet('font-weight:600;')
+        detail_layout.addWidget(self.rail_title)
+        self.rail = EventRail()        # the incident's timeline, newest at the top
+        detail_layout.addWidget(self.rail)
+        self.deliveries = QLabel()
+        self.deliveries.setWordWrap(True)
+        self.deliveries.setObjectName('muted')
+        detail_layout.addWidget(self.deliveries)
         self.acknowledge_button = w.button('Acknowledge', self.acknowledge)
         self.acknowledge_button.setObjectName('primary')
         self.acknowledge_button.setEnabled(False)
@@ -228,6 +242,12 @@ class AlertsUI:
         incidents = result['incidents']
         self.table.setRowCount(len(incidents))
         self.empty.setVisible(not incidents)
+        state = self.filter.currentData()
+        if state in ('active', None):
+            self.empty.set_state('clear', self.t('No current problems'),
+                                 self.t('No incidents. Lifetime opens one when a rule under Administration finds a problem.'))
+        else:
+            self.empty.set_state('off', self.t('Nothing in this list'), self.t('No incidents match this filter.'))
         self.table.setVisible(bool(incidents))
         selected = None
         for index, incident in enumerate(incidents):
@@ -239,7 +259,7 @@ class AlertsUI:
                 item.setData(Qt.ItemDataRole.UserRole, incident['id'])
                 item.setToolTip(self._when(incident['started_at']) if column == 3 else value)
                 if column == 2:
-                    item.setIcon(status_dot(T(STATE_COLOUR[incident['state']])))
+                    item.setData(VISUAL_ROLE, ('chip', STATE_KIND[incident['state']]))
                 self.table.setItem(index, column, item)
             if incident['id'] == self._selected:
                 selected = index
@@ -265,10 +285,16 @@ class AlertsUI:
         if not incident:
             self.detail.setText(html.escape(self.t('Select an incident to see its timeline.')))
             self.acknowledge_button.setEnabled(False)
+            self.state_chip.hide()
+            self.rail_title.hide()
+            self.rail.set_events([])
+            self.deliveries.clear()
             return
+        self.state_chip.set_state(STATE_KIND[incident['state']], self.t(STATE_TEXT[incident['state']]))
+        self.state_chip.show()
         e = lambda value: html.escape(str(value))
         rows = [('Computer', incident['device_name'] or incident['device_id']), ('Group', incident.get('group_name') or '—'),
-                ('Problem', self._problem(incident)), ('State', self.t(STATE_TEXT[incident['state']])),
+                ('Problem', self._problem(incident)),
                 ('Started', self._when(incident['started_at'])), ('Opened', self._when(incident.get('opened_at')))]
         if incident.get('acknowledged_by'):
             rows.append(('Acknowledged', self.t('{who} · {time}', who=incident['acknowledged_by'],
@@ -278,13 +304,14 @@ class AlertsUI:
             rows.append(('Outcome', self.t(RESOLUTION_TEXT.get(incident.get('resolution'), 'Resolved'))))
         text = '<table width="100%" cellpadding="4">' + ''.join(
             T('<tr><td style="color:#9FB0CC;">') + e(self.t(key)) + '</td><td>' + e(value) + '</td></tr>' for key, value in rows) + '</table>'
-        timeline = incident.get('timeline')
-        if timeline:
-            text += '<p style="font-weight:600;margin:12px 0 4px">' + e(self.t('Timeline')) + '</p><p>'
-            text += '<br>'.join(e(self._when(event['time']) + ' · ' + self.t(EVENT_TEXT.get(event['kind'], 'Unknown'), who=event.get('detail') or ''))
-                                for event in timeline) + '</p>'
-        for delivery in incident.get('deliveries') or []:
-            text += '<p style="margin:2px 0">' + e(self._delivery_line(delivery)) + '</p>'
+        timeline = incident.get('timeline') or []
+        self.rail_title.setText(self.t('Timeline'))
+        self.rail_title.setVisible(bool(timeline))
+        self.rail.set_events([(EVENT_KIND.get(event['kind'], 'neutral'),
+                               self.t(EVENT_TEXT.get(event['kind'], 'Unknown'), who=event.get('detail') or ''),
+                               self._when(event['time']), '') for event in reversed(timeline)], self.t('Timeline'))
+        self.deliveries.setText('\n'.join(self._delivery_line(delivery) for delivery in incident.get('deliveries') or []))
+        self.deliveries.setVisible(bool(incident.get('deliveries')))
         self.detail.setText(text)
         allowed = self.w.access_ui.can('acknowledge')
         self.acknowledge_button.setEnabled(incident['state'] == 'open' and allowed)

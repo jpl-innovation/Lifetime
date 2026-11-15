@@ -31,13 +31,14 @@ from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_alerts import AlertsUI
-from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
+from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, table_action
 from lifetime_reveal import RollLabel, fade_in, later, warm_pages
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot, Insights
 from lifetime_health_gui import HealthPage
 from lifetime_system_gui import HardwarePanel
+from lifetime_widgets_dashboard import VISUAL_ROLE, CapacityBar, EmptyState, HeartbeatBar, InfoCard, StatusChip, SummaryStrip, interval_ticks
 from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
@@ -421,7 +422,8 @@ class ServerWindow(QMainWindow):
             self.kpi_notes[key] = note
             tile_layout.addWidget(note)
             self.tiles.append(tile)
-        self.fleet_empty = self.button('No devices yet. Add device', self.add_device)
+        self.fleet_empty = EmptyState('setup')
+        self.fleet_empty.clicked.connect(self.add_device)
         layout.addWidget(self.fleet_empty)
         self.fleet_empty.hide()
         self.fleet_grid = QGridLayout()
@@ -512,8 +514,8 @@ class ServerWindow(QMainWindow):
         self.events.horizontalHeader().setMinimumSectionSize(40)     # the default 100 px pushed the time out of the panel
         self.events.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.events.verticalHeader().setDefaultSectionSize(40)
-        self.events.setMinimumHeight(204)
-        self.events.setMaximumHeight(212)
+        self.events.setMinimumHeight(216)     # five rows of chips, not cut at the bottom
+        self.events.setMaximumHeight(222)
         events_layout.addWidget(self.events)
         self.gauge_panel, gauge_layout = self._panel()
         title = self.label('Online now')
@@ -531,6 +533,11 @@ class ServerWindow(QMainWindow):
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(16)
         left.addLayout(self.tile_grid)
+        # The fleet's state in one bar, with a chip per state that opens the matching list.
+        self.state_strip = SummaryStrip()
+        self.state_strip.picked.connect(self._state_picked)
+        self.state_strip.hide()
+        left.addWidget(self.state_strip)
         left.addWidget(self.chart_panel)
         left.addWidget(self.fleet_panel)
         left.addStretch()
@@ -654,8 +661,9 @@ class ServerWindow(QMainWindow):
         self.device_grid = QGridLayout()
         self.device_grid.setSpacing(16)
         self.devices_panel, table_layout = self._panel()
-        self.empty_label = self.label('No computers match. Choose Add device to connect a computer.')
-        self.empty_label.setWordWrap(True)
+        self.empty_label = EmptyState('off', self.t('No computers match'), self.t('No computers match. Choose Add device to connect a computer.'),
+                                      self.t('Add device'))
+        self.empty_label.clicked.connect(self.add_device)
         table_layout.addWidget(self.empty_label)
         self.table = QTableWidget(0, 5)
         self.table.setProperty('lifetimeCards', True)
@@ -700,15 +708,26 @@ class ServerWindow(QMainWindow):
         self.detail_name.setStyleSheet('font-size: 22px; font-weight: 600;')
         detail_layout.addWidget(self.detail_name)
         status_row = QHBoxLayout()
-        self.detail_group, self.detail_status = QLabel(), QLabel()
+        self.detail_group, self.detail_status = QLabel(), StatusChip()
         self.detail_group.setObjectName('groupBadge')
         self.detail_group.setStyleSheet('background: #22345A; padding: 3px 8px;')
-        self.detail_dot = QLabel()
         status_row.addWidget(self.detail_group)
-        status_row.addWidget(self.detail_dot)
         status_row.addWidget(self.detail_status)
         status_row.addStretch()
         detail_layout.addLayout(status_row)
+        # Online history from monitoring: one tick per hour, newest on the right, so a flapping computer shows.
+        self.presence_title = self.label('Last 24 hours')
+        self.presence_title.setObjectName('muted')
+        self.presence_bar = HeartbeatBar()
+        presence_row = QHBoxLayout()
+        presence_row.setSpacing(12)
+        presence_row.addWidget(self.presence_title)
+        presence_row.addWidget(self.presence_bar, 1)
+        self.presence_box = QWidget()
+        self.presence_box.setLayout(presence_row)
+        presence_row.setContentsMargins(0, 0, 0, 0)
+        self.presence_box.hide()
+        detail_layout.addWidget(self.presence_box)
         # Before anything is selected the rows below all read "Not available"; say why, at the top where it is seen.
         self.detail_hint = QLabel()
         self.detail_hint.setWordWrap(True)
@@ -729,20 +748,28 @@ class ServerWindow(QMainWindow):
         self.spec_title = self.label('Computer specifications')
         self.spec_title.setStyleSheet('font-size:18px; font-weight:600;')
         detail_layout.addWidget(self.spec_title)
-        self.spec_values = {}
-        spec_form = QFormLayout()
-        spec_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
-        spec_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        for key in ('Manufacturer', 'Model', 'CPU', 'Cores / threads', 'RAM', 'Graphics', 'Operating system', 'Storage', 'Battery design capacity'):
-            value = QLabel()
-            value.setWordWrap(True)
-            value.setMinimumWidth(0)
-            value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-            self.spec_values[key] = value
-            spec_form.addRow(self._field(key), value)
-        detail_layout.addLayout(spec_form)
+        # Specifications as small cards grouped by what a technician looks for, instead of one long list.
+        self.spec_values, self.spec_cards, self.spec_keys = {}, {}, {}
+        spec_box = QWidget()
+        spec_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)     # no spare height into the cards
+        spec_grid = QGridLayout(spec_box)
+        spec_grid.setContentsMargins(0, 0, 0, 0)
+        spec_grid.setSpacing(12)
+        groups = (('system', 'Computer', ('Manufacturer', 'Model', 'Operating system')),
+                  ('cpu', 'CPU', ('CPU', 'Cores / threads')),
+                  ('memory', 'Memory & graphics', ('RAM', 'Graphics', 'Battery design capacity')),
+                  ('storage', 'Storage', ('Storage',)))
+        for index, (icon, title, keys) in enumerate(groups):
+            card = InfoCard(icon, self.t(title))
+            self.bind(card.title, title)        # follows the language switch
+            for key in keys:
+                value = QLabel()
+                self.spec_values[key] = value
+                self.spec_keys[key] = self.bind(card.add_row(self.t(key), value), key)
+            self.spec_cards[title] = card
+            spec_grid.addWidget(card, index // 2, index % 2)
+        self.storage_bars = []
+        detail_layout.addWidget(spec_box)
         live_header = QHBoxLayout()
         self.live_marker = QLabel()
         live_header.addWidget(self.live_marker, 1)
@@ -1074,8 +1101,7 @@ class ServerWindow(QMainWindow):
         if fresh and self._detail.get('last_received_at') != item['sample']['observed_at']:
             self._detail['last_received_at'] = item['sample']['observed_at']
             self._detail['reporting_status'] = 'reporting'
-            self.detail_status.setText(self._fleet_status('reporting'))
-            self.detail_dot.setPixmap(status_dot(T('#4CC38A')).pixmap(20, 20))
+            self.detail_status.set_state('good', self._fleet_status('reporting'))
             self._power_state(self._detail)
         marker = self.t('Live: {seconds}s ago' if fresh else 'Last seen: {seconds}s ago', seconds=int(age)) if age is not None else self.t('Last seen')
         if self.live_marker.text() != marker:
@@ -1237,6 +1263,22 @@ class ServerWindow(QMainWindow):
                   'Battery design capacity': None if specs.get('battery_design_wh') is None else f"{specs['battery_design_wh']:,.1f} Wh"}
         for key, label in self.spec_values.items():
             label.setText(str(values.get(key) or missing))
+            label.setAccessibleName(self.t(key))
+        # One capacity bar per disk; the words stay in the Storage row for copying into a ticket.
+        disks = [d for d in specs.get('disks') or [] if d.get('total_bytes') and d.get('free_bytes') is not None]
+        card = self.spec_cards['Storage']
+        while len(self.storage_bars) < len(disks):
+            bar = CapacityBar()
+            card.extra.addWidget(bar)
+            self.storage_bars.append(bar)
+        for bar, disk in zip(self.storage_bars, disks):
+            used = disk['total_bytes'] - disk['free_bytes']
+            detail = self.t('{free} free of {total}', free=byte_text(disk['free_bytes'], missing), total=byte_text(disk['total_bytes'], missing))
+            bar.set_usage(used, disk['total_bytes'], disk['name'], detail, f"{disk['name']} {detail}")
+        for index, bar in enumerate(self.storage_bars):
+            bar.setVisible(index < len(disks))
+        for widget in (self.spec_values['Storage'], self.spec_keys['Storage']):
+            widget.setVisible(not disks)
         history = (device.get('performance_history') or []) if allowed else []
         for field, plot in self.performance_plots.items():
             if field in ('cpu_percent', 'ram_percent') and self.performance_range.currentData() == 'live':
@@ -1984,8 +2026,7 @@ class ServerWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, device['device_id'])
                 item.setData(Qt.ItemDataRole.UserRole + 1, device.get('today') if column == 3 else str(value).casefold())
                 if column == 2:
-                    item.setIcon(status_dot(T('#FFC93C') if unstable else T(T('#4CC38A')) if status == 'reporting' else T('#FFC93C')
-                                            if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))))
+                    item.setData(VISUAL_ROLE, ('chip', self._status_kind(status, unstable)))
                 if column == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if column == 4:
@@ -2017,6 +2058,8 @@ class ServerWindow(QMainWindow):
         if focused is not None and not sip.isdeleted(focused) and focused.isVisible():
             focused.setFocus(Qt.FocusReason.OtherFocusReason)
         self.empty_label.setVisible(not rows)
+        self.empty_label.set_state('off', self.t('No computers match'),
+                                   self.t('No computers match. Choose Add device to connect a computer.'), self.t('Add device'))
         self.previous_button.setEnabled(self._offset > 0)
         self.next_button.setEnabled(self._offset + len(rows) < self._device_matching)
         self.page_label.setText(self.t('Showing {start} to {end} of {total} devices',
@@ -2060,6 +2103,14 @@ class ServerWindow(QMainWindow):
         except (ValueError, TypeError, AttributeError):
             return self.t('Not available')
 
+    @staticmethod
+    def _status_kind(status, unstable=False):
+        """Online is good; offline, waiting for a report and unstable need a look; waiting for approval is
+        information; disconnected or unknown is neutral."""
+        if unstable or status in ('report-overdue',):
+            return 'warning'
+        return {'reporting': 'good', 'pending': 'info', 'denied': 'danger'}.get(status, 'neutral')
+
     def _status_text(self, value):
         return self.t({'pending': 'Pending approval', 'approved': 'Approved', 'denied': 'Denied',
                        'revoked': 'Disconnected', 'reporting': 'Online', 'report-overdue': 'Offline',
@@ -2100,6 +2151,32 @@ class ServerWindow(QMainWindow):
         revision, client = self._detail_revision, self.client
         self._submit(lambda: client.call('device', device_id=device_id, limit=25, after_seq=0),
                      lambda result, ok: self._detail_finished(result, ok, revision, device_id))
+        self._submit(lambda: client.call('presence', device_id=device_id, limit=200),
+                     lambda result, ok: self._render_presence(result if ok else None, revision), quiet=True)
+
+    def _render_presence(self, rows, revision):
+        """Hourly ticks for the last 24 hours from the monitoring presence history (online, offline, unknown); an hour
+        with no record stays an outline. Hidden when monitoring has nothing for this computer."""
+        if revision != self._detail_revision:
+            return
+        now = dt.datetime.now(dt.timezone.utc)
+        start = now - dt.timedelta(hours=24)
+        kinds = {'online': 'good', 'offline': 'warning', 'unknown': 'neutral'}
+        words = {'good': 'Online', 'warning': 'Offline', 'neutral': 'Unknown', None: 'No record'}
+        def moment(stamp):
+            return dt.datetime.fromisoformat(stamp.replace('Z', '+00:00')) if stamp else None
+        intervals = [(kinds.get(row.get('state'), 'neutral'), moment(row['start_at']), moment(row.get('end_at')))
+                     for row in rows or [] if row.get('start_at')]
+        self.presence_box.setVisible(bool(intervals))
+        if not intervals:
+            return self.presence_bar.set_ticks([])
+        states = interval_ticks(intervals, start, now, 24)
+        ticks = []
+        for index, kind in enumerate(states):
+            begin = (start + dt.timedelta(hours=index)).astimezone()
+            ticks.append((kind, f"{begin.strftime('%H:%M')}–{(begin + dt.timedelta(hours=1)).strftime('%H:%M')} · {self.t(words[kind])}"))
+        online = sum(kind == 'good' for kind in states)
+        self.presence_bar.set_ticks(ticks, self.t('Last 24 hours: online in {online} of 24 hours', online=online))
 
     def _detail_finished(self, result, success, revision, device_id):
         if revision != self._detail_revision or self.selected_device_ids() != [device_id]:
@@ -2122,8 +2199,8 @@ class ServerWindow(QMainWindow):
         self.detail_group.hide()
         for edit in self.identity_fields.values():
             edit.clear()
-        self.detail_dot.clear()
-        self.detail_status.clear()
+        self.detail_status.hide()
+        self.presence_box.hide()
         self.detail_total.setText(self.t('Not available'))
         self.device_id_label.clear()
         self.copy_device_id.setEnabled(False)
@@ -2212,9 +2289,8 @@ class ServerWindow(QMainWindow):
         self.detail_name.setText(identity.get('display_name') or device['device_id'])
         self.detail_group.show()
         self.detail_group.setText(identity.get('department') or self.t('No group'))
-        self.detail_status.setText(self._fleet_status(status))
-        self.detail_dot.setPixmap(status_dot(T('#4CC38A') if status == 'reporting' else T('#FFC93C')
-            if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))).pixmap(20, 20))
+        self.detail_status.set_state(self._status_kind(status), self._fleet_status(status))
+        self.detail_status.show()
         total = None if not totals else totals.get('measured_seconds', 0) + totals.get('imported_seconds', 0)
         self.detail_total.setText(missing if total is None else self.t('{hours} h', hours=f'{total / 3600:,.1f}'))
         history_data = device.get('history') if (device.get('policy') or {}).get('history') is True else None
@@ -2642,6 +2718,14 @@ class ServerWindow(QMainWindow):
         self._arm_overview_entrance()
         self.kpi_notes['Pending approval'].setText(self.t('Administrator review required'))
         self.fleet_empty.setVisible(counts['total'] == 0)
+        self.fleet_empty.set_state('setup', self.t('No devices yet'),
+                                   self.t('Add a computer with a one-time code; it shows here once you approve it.'), self.t('Add device'))
+        waiting = max(0, counts['enrolled'] - counts['connected'] - counts['overdue'])
+        self.state_strip.set_counts([(key, kind, self.t(words), number) for key, kind, words, number in (
+            ('online', 'good', 'Online', counts['connected']), ('offline', 'warning', 'Offline', counts['overdue']),
+            ('waiting', 'neutral', 'No report yet', waiting), ('pending', 'info', 'Pending approval', counts['pending'])) if number],
+            self.t('{connected} of {total} computers online', connected=counts['connected'], total=counts['enrolled']))
+        self.state_strip.setVisible(counts['total'] > 0)
         selected_group = self.fleet_group.currentData()
         self.fleet_group.blockSignals(True)
         self.fleet_group.clear()
@@ -2663,10 +2747,8 @@ class ServerWindow(QMainWindow):
                 item = QTableWidgetItem(value)
                 item.setData(Qt.ItemDataRole.UserRole, row['device_id'])
                 item.setToolTip(str(value) if column != 4 else (row['last'] or value))
-                if column == 2:
-                    # Colour lives on the dot; the word stays in normal text colour for readability.
-                    item.setIcon(status_dot(T('#FFC93C') if row.get('unstable') else T(T('#4CC38A')) if row['status'] == 'reporting' else T('#FFC93C')
-                                            if row['status'] in ('pending', 'report-overdue') else T(T('#9FB0CC'))))
+                if column == 2:     # a chip: glyph and words, the colour is never the only signal
+                    item.setData(VISUAL_ROLE, ('chip', self._status_kind(row['status'], row.get('unstable'))))
                 if column == 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(row_index, column, item)
@@ -2688,6 +2770,13 @@ class ServerWindow(QMainWindow):
         """One date style everywhere, in the window's language: '8 Nov 2026' / '8 thg 11, 2026'."""
         day = dt.date.fromisoformat(str(value)[:10])
         return self.t('date.full' if year else 'date.short', day=day.day, month=self.t(f'month.{day.month}'), year=day.year)
+
+    def _state_picked(self, key):
+        """A state chip on Overview opens Devices showing just those computers."""
+        if key == 'pending':
+            return self.review_pending()
+        self.tabs.setCurrentIndex(1)
+        self._set_chip(key if key in ('online', 'offline') else 'all')
 
     def _fleet_status(self, status):
         return self.t('Connected') if status == 'reporting' else self._status_text(status)
@@ -2742,14 +2831,15 @@ class ServerWindow(QMainWindow):
                  'command-pending': 'Command sent', 'command-delivered': 'Command delivered', 'command-done': 'Command finished',
                  'command-failed': 'Command failed', 'command-cancelled': 'Command cancelled', 'command-expired': 'Command expired',
                  'wake': 'Turn on sent'}
-        colors = {'report-received': T(T('#65D782')), 'report-overdue': T('#FFC93C'), 'enrollment-pending': T('#FFC93C')}
+        chips = {'report-received': 'good', 'report-overdue': 'warning', 'enrollment-pending': 'info', 'command-failed': 'danger',
+                 'revoked': 'neutral'}
         for index, event in enumerate(events):
             values = (event.get('name') or event.get('device_id') or '', self.t(kinds.get(event['kind'], 'Unknown')), self._clock_text(event['time'])[:5])   # HH:MM; the tooltip has the full stamp
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(event['time'] if column == 2 else value)
                 if column == 1:
-                    item.setIcon(status_dot(colors.get(event['kind'], T(T('#9FB0CC')))))
+                    item.setData(VISUAL_ROLE, ('chip', chips.get(event['kind'], 'neutral')))
                 if column == 2:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.events.setItem(index, column, item)
@@ -2865,7 +2955,7 @@ class ServerWindow(QMainWindow):
                 if column == 1:
                     item.setToolTip(self._timestamp(invitation['expires_at']))
                 if column == 4:
-                    item.setIcon(status_dot(T('#65D782') if state == 'Active' else T(T('#9FB0CC'))))
+                    item.setData(VISUAL_ROLE, ('chip', 'good' if state == 'Active' else 'neutral'))
                 self.invitation_table.setItem(index, column, item)
             button = QPushButton(self.t('Revoke'))
             button.setAccessibleName(self.t('Revoke invitation') + ': ' + invitation['invitation_id'])

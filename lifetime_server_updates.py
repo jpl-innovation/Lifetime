@@ -6,8 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog, QLabel, QLineEdit, QSpinBox, QTableWidgetItem
 
 from lifetime_layout import ControlRow
-from lifetime_server_widgets import status_dot
-from lifetime_theme import T
+from lifetime_widgets_dashboard import VISUAL_ROLE
 
 NOTE = ('Offer an approved Lifetime agent package to computers whose owner allowed updates. They download it over '
         'their secure connection, check its SHA-256 (and its signature when it has one) and keep it ready; '
@@ -15,7 +14,7 @@ NOTE = ('Offer an approved Lifetime agent package to computers whose owner allow
 STATUS_TEXT = {'staged': 'Ready to install', 'installed': 'Installed', 'failed': 'Failed'}
 FAILURE_TEXT = {'download': 'download failed', 'size': 'wrong size', 'checksum': 'SHA-256 did not match',
                 'signature': 'signature not valid', 'version': 'older version refused', 'disk': 'could not be saved'}
-COLOURS = {'staged': '#9FB0CC', 'installed': '#65D782', 'failed': '#FF8A8A'}
+KINDS = {'staged': 'info', 'installed': 'good', 'failed': 'danger'}
 
 
 class UpdatesUI:
@@ -113,7 +112,7 @@ class UpdatesUI:
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
                 if column == 1:
-                    item.setIcon(status_dot(T(COLOURS.get(report['status'], '#9FB0CC'))))
+                    item.setData(VISUAL_ROLE, ('chip', KINDS.get(report['status'], 'neutral')))
                 self.table.setItem(index, column, item)
 
     def browse(self):

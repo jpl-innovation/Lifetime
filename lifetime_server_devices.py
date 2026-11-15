@@ -7,10 +7,11 @@ from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayo
                             QHBoxLayout, QPushButton, QProgressBar, QStyle, QStyledItemDelegate,
                             QStyleOptionViewItem, QGraphicsOpacityEffect)
 
-from lifetime_server_widgets import reduced_motion, status_dot, more_icon
+from lifetime_server_widgets import reduced_motion, more_icon
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_theme
 from lifetime_glass import STYLES, set_style, active_style, paint_classic, paint_glass, Glass, glass   # shared with the desktop app
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase
+from lifetime_widgets_dashboard import VISUAL_ROLE, MiniSpark, StatusChip, chip_width, paint_cell
 
 
 class SegmentedBar(QTabBar):
@@ -464,6 +465,13 @@ class RowDelegate(QStyledItemDelegate):
             watched.update()
         return False
 
+    def sizeHint(self, option, index):
+        hint = super().sizeHint(option, index)
+        visual = index.data(VISUAL_ROLE)
+        if visual and visual[0] == 'chip':     # room for the glyph and the pill's padding, so the words are not cut
+            hint.setWidth(max(hint.width(), chip_width(option.fontMetrics, index.data(Qt.ItemDataRole.DisplayRole) or '') + 20))
+        return hint
+
     def paint(self, painter, option, index):
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         # A selected row already shows where the keyboard is; a focused but unselected row needs the outline.
@@ -489,6 +497,13 @@ class RowDelegate(QStyledItemDelegate):
             painter.setBrush(wash if selected else QColor(255, 255, 255, 12) if dark else QColor(20, 33, 61, 12))
             painter.drawRoundedRect(rect, CONTROL_RADIUS, CONTROL_RADIUS)
             painter.restore()
+        visual = index.data(VISUAL_ROLE)
+        if visual:      # a chip or slim bar instead of plain text; the item's text is still what it says
+            painter.save()
+            painter.setFont(option.font)
+            paint_cell(painter, option.rect, visual, index.data(Qt.ItemDataRole.DisplayRole) or '')
+            painter.restore()
+            return
         plain = QStyleOptionViewItem(option)
         plain.state &= ~(QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_HasFocus)
         super().paint(painter, plain, index)
@@ -583,11 +598,11 @@ class DeviceBox(QWidget):
         layout.setContentsMargins(18, 12, 18, 22)
         layout.setSpacing(6)
         top = QHBoxLayout()
-        self.name, self.status, self.dot = QLabel(), QLabel(), QLabel()
+        self.name, self.status = QLabel(), StatusChip()
+        self.status.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.name.setStyleSheet('font-size:18px; font-weight:600;')
         self.name.setWordWrap(True)
         top.addWidget(self.name, 1)
-        top.addWidget(self.dot)
         top.addWidget(self.status)
         self.menu_button = QPushButton()
         self.menu_button.setIcon(more_icon())
@@ -607,15 +622,20 @@ class DeviceBox(QWidget):
         self.attention.setStyleSheet('color:#FFC93C; font-size:13px;')
         layout.addWidget(self.attention)
         meters = QHBoxLayout()
-        self.meters = {}
+        self.meters, self.sparks = {}, {}
         for key in ('CPU', 'RAM'):
-            value, meter = QLabel(), QProgressBar()
+            value, meter, spark = QLabel(), QProgressBar(), MiniSpark()
             meter.setRange(0, 100)
             meter.setTextVisible(False)
-            meter.setFixedWidth(120)
+            meter.setFixedWidth(96)
+            spark.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            spark.hide()
             meters.addWidget(value)
             meters.addWidget(meter)
+            meters.addWidget(spark)       # the last 24 hours beside the current value, once they are loaded
+            meters.addSpacing(12)
             self.meters[key] = value, meter
+            self.sparks[key] = spark
         meters.addStretch()
         layout.addLayout(meters)
         layout.addWidget(self.bottom)
@@ -642,10 +662,16 @@ class DeviceBox(QWidget):
                             ram=byte_text(summary.get('ram_bytes', specs.get('ram_bytes')), missing)))
         codes = problems(device)
         status = device.get('reporting_status') if device.get('status') == 'approved' else device.get('status')
-        self.status.setText(window._fleet_status(status))
+        self.status.set_state(window._status_kind(status), window._fleet_status(status))
         color = T(T('#FF8A8A')) if any(c in codes for c in ('hot', 'disk_low', 'unstable')) else T(T('#FFC93C')) if codes else T(T('#4CC38A')) if status == 'reporting' else T(T('#9FB0CC'))
-        status_color = T(T('#4CC38A')) if status == 'reporting' else T(T('#FFC93C')) if status in ('pending', 'report-overdue') else T(T('#9FB0CC'))
-        self.dot.setPixmap(status_dot(status_color).pixmap(16, 16))
+        history = (detail or {}).get('performance_history') or []
+        ram_total = specs.get('ram_bytes') or summary.get('ram_bytes')
+        series = {'CPU': [r.get('cpu_percent') for r in history],
+                  'RAM': [r.get('ram_percent') if r.get('ram_percent') is not None else
+                          (r['ram_used_bytes'] / ram_total * 100 if r.get('ram_used_bytes') is not None and ram_total else None)
+                          for r in history]}
+        for key, spark in self.sparks.items():
+            spark.set_values(series[key], t('{metric}, last 24 hours', metric=t(key)))
         self.attention.setText(' · '.join(t('Pending approval' if c == 'approval' else ATTENTION.get(c, 'Needs attention')) for c in codes if c != 'offline'))
         self.attention.setStyleSheet(f'color:{color}; font-size:13px;')
         self.attention.setVisible(any(c != 'offline' for c in codes))
