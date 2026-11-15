@@ -242,7 +242,9 @@ def report_html(report):
             'td,th{padding:5pt;border-bottom:1px solid #d8deda;text-align:left;}li{margin-bottom:5pt;}',
             '</style></head><body><h1>', esc(tr('Computer Awake-Time Report', lang)), '</h1>']
     headings = {'identity': 'Device identity', 'system': 'Selected system information',
-                'statistics': 'Awake time (seconds)', 'coverage': 'Coverage and sources'}
+                'statistics': 'Awake time (seconds)', 'coverage': 'Coverage and sources',
+                'availability': 'Availability (server monitoring)', 'incidents': 'Incidents',
+                'health': 'Health summary', 'replacement': 'Replacement candidates'}
     previous = None
     for section, key, value in report_rows(report):
         if section != previous:
@@ -335,6 +337,30 @@ def ensure_report_font():
     return QFont(family, 10)
 
 
+def _print_with_footer(document, writer, footer, band, font):
+    """Paint the document page by page with the footer (and page number) on every page."""
+    from PyQt6.QtCore import QRectF, Qt
+    from PyQt6.QtGui import QFont, QPainter
+    height, width = writer.height() - band, writer.width()
+    pages = max(1, document.pageCount())
+    painter = QPainter(writer)
+    try:
+        small = QFont(font)
+        small.setPointSizeF(max(6.0, font.pointSizeF() * 0.75))
+        for page in range(pages):
+            if page:
+                writer.newPage()
+            painter.save()
+            painter.translate(0, -page * height)
+            document.drawContents(painter, QRectF(0, page * height, width, height))
+            painter.restore()
+            painter.setFont(small)
+            painter.drawText(QRectF(0, height, width, band), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+                                                                 | Qt.TextFlag.TextWordWrap), f'{footer} · {page + 1}/{pages}')
+    finally:
+        painter.end()
+
+
 def write_pdf(report, path, font=None):
     if Path(path).suffix.lower() != '.pdf':
         raise ValueError('PDF output requires a .pdf filename')
@@ -361,10 +387,15 @@ def write_pdf(report, path, font=None):
             document.setDefaultFont(font)
             document.documentLayout().setPaintDevice(writer)
             document.setDocumentMargin(0)
-            document.setPageSize(QSizeF(writer.width(), writer.height()))
+            footer = report.get('footer')
+            band = int(writer.height() * 0.04) if footer else 0     # a strip under every page for the footer
+            document.setPageSize(QSizeF(writer.width(), writer.height() - band))
             document.setHtml(report_html(report))
             document.documentLayout().documentSize()
-            document.print(writer)
+            if footer:
+                _print_with_footer(document, writer, footer, band, font)
+            else:
+                document.print(writer)
         finally:
             # Close the Windows handle even if layout or printing fails.
             del document

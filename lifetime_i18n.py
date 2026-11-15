@@ -1821,3 +1821,57 @@ for _key, _text in _ALERTS_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+_REPORTS2_VI = {
+    'Availability (server monitoring)': 'Mức sẵn sàng (máy chủ theo dõi)',
+    'Health summary': 'Tóm tắt tình trạng',
+    'All computers': 'Tất cả máy tính',
+    'Replacement candidates': 'Máy tính nên cân nhắc thay thế',
+    'Observed availability': 'Mức sẵn sàng quan sát được',
+    'Monitoring coverage': 'Độ bao phủ theo dõi',
+    'Coverage floor': 'Độ bao phủ tối thiểu',
+    'Observed online (seconds)': 'Quan sát thấy trực tuyến (giây)',
+    'Observed offline (seconds)': 'Quan sát thấy ngoại tuyến (giây)',
+    'Unknown, not observed (seconds)': 'Không rõ, không quan sát được (giây)',
+    'Maintenance, excluded (seconds)': 'Bảo trì, không tính (giây)',
+    'Expected online (seconds)': 'Cần trực tuyến (giây)',
+    'Availability period': 'Khoảng thời gian tính mức sẵn sàng',
+    'Calendar time zone': 'Múi giờ của lịch',
+    'Incidents in the period': 'Sự cố trong khoảng thời gian',
+    'Incident': 'Sự cố',
+    'Battery health (%)': 'Tình trạng pin (%)',
+    'Battery charge cycles': 'Số chu kỳ sạc pin',
+    'Crashes in the last 30 days': 'Số lần lỗi hệ thống trong 30 ngày qua',
+    'Unexpected shutdowns in the last 30 days': 'Số lần tắt máy bất thường trong 30 ngày qua',
+    'System disk free (%)': 'Dung lượng trống ổ hệ thống (%)',
+    'Health reading time': 'Thời điểm đọc tình trạng',
+    'Health readings': 'Số đo tình trạng',
+    'Replacement candidate': 'Nên cân nhắc thay thế',
+    'Reason': 'Lý do',
+    'Data source': 'Nguồn dữ liệu',
+    'Computers with availability data': 'Số máy tính có dữ liệu mức sẵn sàng',
+    'Not expected online in this period': 'Không cần trực tuyến trong khoảng thời gian này',
+    'Insufficient evidence (observed {value}, coverage {coverage})': 'Chưa đủ bằng chứng (quan sát được {value}, độ bao phủ {coverage})',
+    'Battery health {value} % is below {limit} %': 'Tình trạng pin {value} % thấp hơn {limit} %',
+    'System disk has less than {limit} % free': 'Ổ hệ thống còn trống dưới {limit} %',
+    '{value} crashes in 30 days (limit {limit})': '{value} lần lỗi hệ thống trong 30 ngày (ngưỡng {limit})',
+    'Not shared by this computer': 'Máy tính này không chia sẻ',
+    'ongoing': 'đang diễn ra',
+    'Network check failing': 'Kiểm tra mạng không thành công',
+    'Day {date}': 'Ngày {date}',
+    'online {good} s · offline {bad} s · unknown {unknown} s · maintenance {excluded} s': 'trực tuyến {good} giây · ngoại tuyến {bad} giây · không rõ {unknown} giây · bảo trì {excluded} giây',
+    'each computer’s own calendar ({zones})': 'lịch riêng của từng máy tính ({zones})',
+    'Lifetime Server {version} · Time zone: {zone} · Source: {source}': 'Lifetime Server {version} · Múi giờ: {zone} · Nguồn: {source}',
+    'Lifetime Server monitoring and the latest snapshot each computer permits': 'Dữ liệu theo dõi của Lifetime Server và bản chụp mới nhất mà mỗi máy tính cho phép',
+    'from this computer’s schedule': 'theo lịch của máy tính này',
+    'from its group’s schedule': 'theo lịch của nhóm',
+    'from the default schedule': 'theo lịch mặc định',
+    'Awake time and availability are different measures: awake time comes from the computer’s own record, availability from the server observing whether it was reporting during its expected hours.': 'Thời gian máy thức và mức sẵn sàng là hai thước đo khác nhau: thời gian máy thức lấy từ bản ghi của chính máy tính, còn mức sẵn sàng là việc máy chủ quan sát máy tính có gửi báo cáo trong giờ cần trực tuyến hay không.',
+    'Availability counts only expected-online hours. Unknown time (server down, no report yet, before monitoring) is never counted as up or down; maintenance windows are excluded.': 'Mức sẵn sàng chỉ tính trong giờ cần trực tuyến. Thời gian không rõ (máy chủ tắt, chưa có báo cáo, trước khi bắt đầu theo dõi) không bao giờ được tính là hoạt động hay ngừng hoạt động; thời gian bảo trì không được tính.',
+    'Day labels for availability use each computer’s calendar: the time zone of its expected-online schedule.': 'Nhãn ngày của mức sẵn sàng dùng lịch của từng máy tính: múi giờ trong lịch giờ cần trực tuyến của máy đó.',
+    'Replacement candidates are suggestions from the stated readings and the alert thresholds, not a diagnosis.': 'Danh sách nên cân nhắc thay thế chỉ là gợi ý dựa trên các số đo đã nêu và ngưỡng cảnh báo, không phải chẩn đoán.',
+}
+for _key, _text in _REPORTS2_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

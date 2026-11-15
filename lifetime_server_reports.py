@@ -1,13 +1,154 @@
-"""Read-only server report models, rendered by the existing local PDF/CSV writers."""
-from copy import deepcopy
+"""Read-only server report models, rendered by the existing local PDF/CSV writers.
 
+Awake time (the computer's own ledger) and availability (the server's monitoring of whether it was reporting during
+its expected hours) are reported side by side but in separate sections: they measure different things.
+"""
+from copy import deepcopy
+import datetime as dt
+
+import lifetime_availability as availability
 from lifetime_identity import FIELDS, LABELS
+from lifetime_protocol import CLIENT_VERSION
 from lifetime_reports import build_report, tr, LABELS as REPORT_LABELS
 from lifetime_settings import SYSTEM_FIELDS
 
+RULE_TEXT = {'offline': 'Computer offline', 'no_report': 'No report received', 'disk_low': 'Disk almost full',
+             'cpu_high': 'Processor busy', 'memory_high': 'Memory almost full', 'battery_worn': 'Battery worn',
+             'temperature_high': 'Running hot', 'crashes': 'Repeated crashes', 'agent_outdated': 'Lifetime version too old',
+             'check_down': 'Network check failing'}
+STATUS_TEXT = {'resolved': 'Resolved', 'open': 'Needs attention', 'acknowledged': 'Acknowledged',
+               'suppressed': 'Paused by maintenance'}
+THRESHOLDS = dict(battery_worn=60, disk_low=10, crashes=3)      # the alert rules' defaults
+SOURCE = 'Lifetime Server monitoring and the latest snapshot each computer permits'
+SEPARATE = ('Awake time and availability are different measures: awake time comes from the computer’s own record, '
+            'availability from the server observing whether it was reporting during its expected hours.')
+AVAILABILITY_NOTES = [
+    SEPARATE,
+    'Availability counts only expected-online hours. Unknown time (server down, no report yet, before monitoring) is never counted as up or down; maintenance windows are excluded.',
+    'Day labels for availability use each computer’s calendar: the time zone of its expected-online schedule.',
+    'Replacement candidates are suggestions from the stated readings and the alert thresholds, not a diagnosis.',
+]
 
-def device_report(device, start=None, end=None, selected_identity=(), system_fields=(), language='en'):
-    """Use dated client snapshots only with current permission; never report host OS."""
+
+def _percent(value):
+    return None if value is None else f'{value:g} %'
+
+
+def _utc(stamp):
+    if not stamp:
+        return None
+    return dt.datetime.fromisoformat(stamp).astimezone(dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+
+def availability_text(result, language):
+    """The headline figure, or why there is none."""
+    if result['status'] == 'not-scheduled':
+        return tr('Not expected online in this period', language)
+    if result['status'] == 'insufficient':
+        observed = _percent(result['availability']) or tr('Not available', language)
+        return tr('Insufficient evidence (observed {value}, coverage {coverage})', language).format(
+            value=observed, coverage=_percent(result['coverage']) or '0 %')
+    return _percent(result['availability'])
+
+
+def availability_rows(result, language):
+    yield 'availability', 'Observed availability', availability_text(result, language)
+    yield 'availability', 'Monitoring coverage', _percent(result['coverage'])
+    yield 'availability', 'Coverage floor', _percent(result['coverage_floor'])
+    for key, title in (('good_s', 'Observed online (seconds)'), ('bad_s', 'Observed offline (seconds)'),
+                       ('unknown_s', 'Unknown, not observed (seconds)'), ('excluded_s', 'Maintenance, excluded (seconds)'),
+                       ('scheduled_s', 'Expected online (seconds)')):
+        yield 'availability', title, result[key]
+
+
+def health_rows(device, thresholds=None, language='en'):
+    """(rows, reasons): the health summary and why the computer may need replacing, from shared readings only."""
+    limits = dict(THRESHOLDS, **{key: value for key, value in (thresholds or {}).items() if value is not None})
+    policy = device.get('policy') or {}
+    health = device.get('health') if policy.get('health') else None
+    readings = (device.get('readings') or {}) if policy.get('resources') else {}
+    specs, performance = readings.get('specs') or {}, readings.get('performance') or {}
+    disks = specs.get('disks') or []
+    total, free = (disks[0].get('total_bytes') if disks else None), performance.get('disk_free_bytes')
+    disk = round(min(100, 100 * free / total)) if total and free is not None else None
+    battery = (health or {}).get('battery_health')
+    if battery is None:
+        battery = performance.get('battery_health_percent')
+    crashes = (health or {}).get('crashes_30d')
+    rows = [('health', 'Battery health (%)', None if battery is None else round(battery)),
+            ('health', 'Battery charge cycles', (health or {}).get('cycle_count')),
+            ('health', 'Crashes in the last 30 days', crashes),
+            ('health', 'Unexpected shutdowns in the last 30 days', (health or {}).get('shutdowns_30d')),
+            ('health', 'System disk free (%)', disk),
+            ('health', 'Health reading time', (health or {}).get('observed_at'))]
+    reasons = []
+    if battery is not None and battery < limits['battery_worn']:
+        reasons.append(tr('Battery health {value} % is below {limit} %', language).format(value=round(battery), limit=limits['battery_worn']))
+    if disk is not None and disk < limits['disk_low']:
+        reasons.append(tr('System disk has less than {limit} % free', language).format(limit=limits['disk_low']))
+    if crashes is not None and crashes >= limits['crashes']:
+        reasons.append(tr('{value} crashes in 30 days (limit {limit})', language).format(value=crashes, limit=limits['crashes']))
+    if not health and not readings:
+        rows.append(('health', 'Health readings', tr('Not shared by this computer', language)))
+    return rows, reasons
+
+
+def _incident_line(item, language):
+    end = _utc(item.get('resolved_at')) or tr('ongoing', language)
+    return f"{tr(RULE_TEXT.get(item['rule'], item['rule']), language)} · {_utc(item['started_at'])} – {end} · {tr(STATUS_TEXT.get(item['state'], item['state']), language)}"
+
+
+def add_monitoring(report, device, result, thresholds=None, language='en'):
+    """Availability, incidents, health and replacement sections for one computer, plus the page footer."""
+    report['version'] = CLIENT_VERSION
+    rows = []
+    if result:
+        rows.append(('availability', 'Availability period', f"{result['start']} / {result['end']}"))
+        rows.append(('availability', 'Calendar time zone', f"{result['timezone']} ({tr(ZONE_SOURCE[result['zone_source']], language)})"))
+        rows.extend(availability_rows(result, language))
+        rows.append(('incidents', 'Incidents in the period', len(result.get('incidents') or [])))
+        rows.extend(('incidents', 'Incident', _incident_line(item, language)) for item in result.get('incidents') or [])
+    else:
+        rows.append(('availability', 'Observed availability', tr('Not available', language)))
+    health, reasons = health_rows(device, thresholds, language)
+    rows.extend(health)
+    rows.append(('replacement', 'Replacement candidate', tr('Yes' if reasons else 'No', language)))
+    rows.extend(('replacement', 'Reason', reason) for reason in reasons)
+    report['extra_rows'] = [*report.get('extra_rows', ()), *rows]
+    report['notes'] = [*report['notes'], *AVAILABILITY_NOTES]
+    zone = result['timezone'] if result else tr('Not available', language)
+    report['extra_rows'].insert(1, ('report', 'Data source', tr(SOURCE, language)))
+    report['extra_rows'].insert(2, ('report', 'Calendar time zone', zone))
+    report['footer'] = footer(zone, language)
+    return reasons
+
+
+ZONE_SOURCE = {'device': 'from this computer’s schedule', 'group': 'from its group’s schedule',
+               'default': 'from the default schedule'}
+
+
+def footer(zone, language):
+    return tr('Lifetime Server {version} · Time zone: {zone} · Source: {source}', language).format(
+        version=CLIENT_VERSION, zone=zone, source=tr(SOURCE, language))
+
+
+def device_report(device, start=None, end=None, selected_identity=(), system_fields=(), language='en',
+                  availability=None, thresholds=None):
+    """Use dated client snapshots only with current permission; never report host OS. ``availability``: this
+    computer's entry from the admin availability call (None leaves the report as awake time only)."""
+    report = _device_report(device, start, end, selected_identity, system_fields, language)
+    if availability is not None or thresholds is not None:
+        add_monitoring(report, device, availability, thresholds, language)
+        if availability and availability.get('daily'):
+            report['extra_rows'].extend(
+                ('availability', tr('Day {date}', language).format(date=day['date']),
+                 tr('online {good} s · offline {bad} s · unknown {unknown} s · maintenance {excluded} s', language).format(
+                     good=day['good_s'], bad=day['bad_s'], unknown=day['unknown_s'], excluded=day['excluded_s']))
+                for day in availability['daily'])
+    return report
+
+
+def _device_report(device, start=None, end=None, selected_identity=(), system_fields=(), language='en'):
     policy = device.get('policy') or {}
     history = deepcopy(device.get('history') or {}) if policy.get('history') else {}
     totals = device.get('totals')
@@ -56,8 +197,10 @@ def device_report(device, start=None, end=None, selected_identity=(), system_fie
     return report
 
 
-def fleet_report(devices, start=None, end=None, selected_identity=(), system_fields=(), language='en'):
-    """Sum one contribution per UUID. Unknown devices remain explicitly missing."""
+def fleet_report(devices, start=None, end=None, selected_identity=(), system_fields=(), language='en',
+                 availability=None, thresholds=None, group=None):
+    """Sum one contribution per UUID. Unknown devices remain explicitly missing. ``availability``: the admin
+    availability results (a list) for these computers; ``group`` names a group report."""
     seen = set()
     reports = []
     for device in devices:
@@ -65,7 +208,7 @@ def fleet_report(devices, start=None, end=None, selected_identity=(), system_fie
         if identifier in seen:
             raise ValueError('Duplicate device in fleet report')
         seen.add(identifier)
-        reports.append(device_report(device, start, end, selected_identity, system_fields, language))
+        reports.append(_device_report(device, start, end, selected_identity, system_fields, language))
     empty = dict(device_id='fleet', policy={}, identity={}, totals=None)
     report = device_report(empty, start, end, (), (), language)
     for key in ('awake_seconds', 'measured_seconds', 'imported_seconds', 'baseline_seconds'):
@@ -110,4 +253,55 @@ def fleet_report(devices, start=None, end=None, selected_identity=(), system_fie
         report['notes'].append('Manual baseline hours have no recorded dates and are excluded from period totals.')
     if len(report['daily']) > 90:
         report['notes'].append('Only the first 90 daily rows are shown in the preview and PDF. CSV contains every selected retained daily row.')
+    if group is not None:
+        report['extra_rows'][0] = ('report', 'Report scope', tr('Group: {name}', language).format(name=group or tr('No group', language)))
+    if availability is None and thresholds is None:
+        return report
+    _fleet_monitoring(report, devices, reports, availability or [], thresholds, language)
     return report
+
+
+def _fleet_monitoring(report, devices, reports, results, thresholds, language):
+    """Each computer's availability beside its awake time, the group or fleet sum, and replacement candidates."""
+    report['version'] = CLIENT_VERSION
+    by_id = {item['device_id']: item for item in results}
+    rows, candidates, measured = [], [], []
+    position = {}
+    for index, (device, item) in enumerate(zip(devices, reports), 1):
+        result = by_id.get(device['device_id'])
+        if result:
+            measured.append(result)
+        _, reasons = health_rows(device, thresholds, language)
+        name = (device.get('identity') or {}).get('display_name') or device['device_id']
+        if reasons:
+            candidates.append((name, reasons))
+        position[index] = [('fleet', 'Observed availability', availability_text(result, language) if result else tr('Not available', language)),
+                           ('fleet', 'Monitoring coverage', _percent(result['coverage']) if result else None),
+                           ('fleet', 'Incidents in the period', len(result.get('incidents') or []) if result else None),
+                           ('fleet', 'Replacement candidate', tr('Yes' if reasons else 'No', language))]
+    if measured:
+        total = availability.combine(measured, measured[0]['coverage_floor'])
+        rows.extend(availability_rows(total, language))
+        rows.append(('availability', 'Computers with availability data', len(measured)))
+        rows.append(('incidents', 'Incidents in the period', sum(len(item.get('incidents') or []) for item in measured)))
+    else:
+        rows.append(('availability', 'Observed availability', tr('Not available', language)))
+    rows.append(('replacement', 'Replacement candidates', len(candidates)))
+    for name, reasons in candidates:
+        rows.append(('replacement', 'Computer', name))
+        rows.extend(('replacement', 'Reason', reason) for reason in reasons)
+    # Interleave each computer's availability right after its awake-time rows ("Device", index, ... ).
+    merged, index = [], None
+    for row in report['extra_rows']:
+        if row[:2] == ('fleet', 'Device'):
+            merged.extend(position.get(index, []))
+            index = row[2]
+        merged.append(row)
+    merged.extend(position.get(index, []))
+    zones = sorted({item['timezone'] for item in measured})
+    zone = zones[0] if len(zones) == 1 else tr('each computer’s own calendar ({zones})', language).format(zones=', '.join(zones) or '—')
+    merged.insert(1, ('report', 'Data source', tr(SOURCE, language)))
+    merged.insert(2, ('report', 'Calendar time zone', zone))
+    report['extra_rows'] = merged + rows
+    report['notes'] = [*report['notes'], *AVAILABILITY_NOTES]
+    report['footer'] = footer(zone, language)

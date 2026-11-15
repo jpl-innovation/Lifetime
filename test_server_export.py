@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from qt_test_support import qt_app
 from lifetime_server_export import ServerExportDialog
-from test_server_reports import device
+from test_server_reports import device, measured
 
 
 class ServerExportTests(unittest.TestCase):
@@ -19,8 +19,15 @@ class ServerExportTests(unittest.TestCase):
         self.addCleanup(self.root.cleanup)
         self.source = device('one')
         self.threads = []
+        self.requests = []
+
         def call(operation, **arguments):
             self.threads.append(threading.get_ident())
+            self.requests.append((operation, arguments))
+            if operation == 'availability':
+                return dict(devices=[measured(identifier) for identifier in arguments['device_ids']])
+            if operation == 'alert_rules':
+                return [dict(rule='disk_low', threshold=10), dict(rule='offline', threshold=None)]
             return [copy.deepcopy(self.source)] if operation == 'devices' else copy.deepcopy(self.source)
         self.client = SimpleNamespace(directory=Path(self.root.name), call=call)
         self.dialog = ServerExportDialog(self.client, ['one'])
@@ -89,6 +96,30 @@ class ServerExportTests(unittest.TestCase):
         self.wait()
         self.assertTrue(path.exists())
         self.assertIn('Report saved.', self.dialog.result.text())
+
+    def test_availability_uses_one_fixed_as_of_and_a_group_scope(self):
+        self.dialog.refresh_preview()
+        self.wait()
+        rows = self.dialog.reviewed_report['extra_rows']
+        self.assertIn(('availability', 'Observed availability', '90.909 %'), rows)
+        first = [arguments for operation, arguments in self.requests if operation == 'availability']
+        path = Path(self.root.name) / 'saved.csv'
+        with patch('lifetime_server_export.QFileDialog.getSaveFileName', return_value=(str(path), '')):
+            self.dialog.save_report('csv')
+        self.wait()
+        calls = [arguments for operation, arguments in self.requests if operation == 'availability']
+        self.assertEqual(calls[0]['as_of'], calls[-1]['as_of'])         # the save measures what was reviewed
+        self.assertTrue(first[0]['daily'])
+        self.assertIn('Observed availability', path.read_text(encoding='utf-8-sig'))
+        fleet = ServerExportDialog(self.client, None, groups=['Sales', 'Lab'])
+        self.addCleanup(fleet.close)
+        self.assertEqual(fleet.scope.count(), 3)
+        fleet.scope.setCurrentIndex(1)
+        self.dialog = fleet
+        fleet.refresh_preview()
+        self.wait()
+        self.assertIn(('devices', dict(limit=25, offset=0, group='Sales')), self.requests)
+        self.assertIn(('report', 'Report scope', 'Group: Sales'), fleet.reviewed_report['extra_rows'])
 
     def test_read_failure_is_visible(self):
         self.client.call = lambda *a, **k: (_ for _ in ()).throw(PermissionError('secret'))

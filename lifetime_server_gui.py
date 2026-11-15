@@ -2372,7 +2372,8 @@ class ServerWindow(QMainWindow):
     def _show_export(self, device_ids):
         try:
             from lifetime_server_export import ServerExportDialog
-            ServerExportDialog(self.client, device_ids=device_ids, parent=self, language=self.language).exec()
+            groups = [self.group.itemData(index) for index in range(1, self.group.count())]
+            ServerExportDialog(self.client, device_ids=device_ids, parent=self, language=self.language, groups=groups).exec()
         except Exception:
             self.status_label.setText(self.t('Export could not open. Check the reporting components and try again.'))
 

@@ -1,8 +1,9 @@
 """Asynchronous server report preview/save using the shared native export form."""
 import copy
+import datetime as dt
 from pathlib import Path
 
-from PyQt6.QtWidgets import QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QComboBox, QFileDialog, QMessageBox
 
 from lifetime_reports import ensure_report_font, write_csv, write_pdf
 from lifetime_server_reports import device_report, fleet_report
@@ -11,9 +12,10 @@ from lifetime_technician import ExportDialog, iso_date
 
 
 class ServerExportDialog(ExportDialog):
-    def __init__(self, client, device_ids=None, parent=None, language='en'):
+    def __init__(self, client, device_ids=None, parent=None, language='en', groups=()):
         self.client = client
         self.device_ids = tuple(device_ids) if device_ids is not None else None
+        self._as_of = None          # "now" for availability, fixed at the preview so the save matches it
         self._generation = 0
         self._busy = False
         self._jobs = {}
@@ -23,6 +25,14 @@ class ServerExportDialog(ExportDialog):
         self.tasks.completed.connect(self.completed)
         self.tasks.failed.connect(self.failed)
         self.note('Server exports use current reporting permissions. Optional system fields remain excluded unless selected and permitted by the device.')
+        self.scope = QComboBox()
+        self.scope.addItem(self.t('All computers'), None)
+        for group in groups:
+            self.scope.addItem(self.t('Group: {name}', name=group), group)
+        self.scope.setAccessibleName(self.t('Report scope'))
+        self.scope.setVisible(self.device_ids is None and bool(groups))
+        self.form.insertWidget(1, self.scope)
+        self.scope.currentIndexChanged.connect(self.invalidate_preview)
 
     def options(self):
         start = end = None
@@ -30,17 +40,21 @@ class ServerExportDialog(ExportDialog):
             start, end = iso_date(self.start_date.text().strip()), iso_date(self.end_date.text().strip())
             if not start or not end or start > end:
                 raise ValueError('Start date must be on or before end date.')
-        return dict(start=start, end=end, language=self.language,
+        self._as_of = self._as_of or dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
+        return dict(start=start, end=end, language=self.language, as_of=self._as_of,
+                    group=self.scope.currentData() if self.device_ids is None else None,
                     selected_identity=tuple(key for key, check in self.identity_checks.items() if check.isChecked()),
                     system_fields=tuple(key for key, check in self.system_checks.items() if check.isChecked()))
 
     def build(self, options):
+        options = dict(options)
+        as_of, group = options.pop('as_of'), options.pop('group')
         ids = self.device_ids
         if ids is None:
             ids = []
             offset = 0
             while True:
-                page = self.client.call('devices', limit=25, offset=offset)
+                page = self.client.call('devices', limit=25, offset=offset, **({'group': group} if group else {}))
                 ids.extend(item['device_id'] for item in page)
                 if len(page) < 25:
                     break
@@ -48,14 +62,22 @@ class ServerExportDialog(ExportDialog):
                 if offset >= 10000:
                     raise ValueError('Fleet selection exceeds the supported limit')
         devices = [self.client.call('device', device_id=identifier, limit=1) for identifier in ids]
-        if self.device_ids is not None and len(devices) == 1:
-            return device_report(devices[0], **options)
-        return fleet_report(devices, **options)
+        single = self.device_ids is not None and len(devices) == 1
+        measured = []
+        for index in range(0, len(ids), 100):
+            arguments = dict(device_ids=list(ids[index:index + 100]), as_of=as_of, daily=single)
+            if options['start']:
+                arguments.update(start=options['start'], end=options['end'])
+            measured += self.client.call('availability', **arguments)['devices']
+        thresholds = {rule['rule']: rule.get('threshold') for rule in self.client.call('alert_rules')}
+        if single:
+            return device_report(devices[0], availability=measured[0] if measured else None, thresholds=thresholds, **options)
+        return fleet_report(devices, availability=measured, thresholds=thresholds, group=group, **options)
 
     # When a computer last reported changes with every sync, so a connected computer would make every save
     # "different from the review" and the file could never be written. The saved report still carries the
     # newest times; only a change to the content the administrator reviewed asks for a new review.
-    VOLATILE_ROWS = ('Client observation time', 'Server receipt time', 'System reading time')
+    VOLATILE_ROWS = ('Client observation time', 'Server receipt time', 'System reading time', 'System disk free (%)')
 
     @staticmethod
     def report_content(report):
@@ -66,6 +88,7 @@ class ServerExportDialog(ExportDialog):
 
     def invalidate_preview(self, *unused):
         self._generation += 1
+        self._as_of = None
         super().invalidate_preview(*unused)
 
     def submit(self, operation, function):

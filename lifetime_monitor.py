@@ -939,7 +939,7 @@ class Monitor:
                 incidents = [dict(row) for row in db.execute(
                     '''SELECT rule,state,started_at,opened_at,resolved_at,value FROM incidents WHERE device_id=?
                        AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
-                       ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(high), _stamp(low)))]
+                       ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
                 result = availability.device_availability(presence, schedule, device.get('laptop'), windows, begin, finish,
                                                           zone, now, floor, daily, since)
                 name = schedule['timezone'] if zone_ok else 'local'
