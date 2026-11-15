@@ -8,7 +8,15 @@ from lifetime_charts import Plot, RangeSegments, range_bounds, weekly
 from lifetime_tasks import Tasks
 import lifetime_health as health
 from lifetime_theme import install, tokens
+from lifetime_widgets_dashboard import EmptyState, HealthBadge
+
 from PyQt6.QtGui import QColor, QPainter
+
+# How the badge's score is computed (lifetime_health.factors); shown under the score and as its tooltip.
+HEALTH_EXPLAIN = ('Score: the average of the readings shown, each good 100, needs a look 50, poor 0. Stability counts '
+                  'unexpected shutdowns and crashes in the last 30 days: none is good, 1 or 2 needs a look, 3 or more is '
+                  'poor. Battery compares full charge with design capacity: 80% or more is good, 60 to 79% needs a look, '
+                  'below 60% is poor. A missing reading is left out; with none the score is unknown.')
 
 
 class HealthPlot(Plot):
@@ -68,14 +76,12 @@ class HealthPage(QWidget):
         box.addWidget(text(tr('Health'), 'pageTitle'))
         self.machine = text('', 'caption')
         box.addWidget(self.machine)
-        self.disabled = QFrame()
+        self.disabled = EmptyState('off', tr('Health readings are off'),
+                                   tr('Health readings are off. Enable Health and stability in Settings to read system events, battery condition and machine dates.'),
+                                   tr('Open Settings'))
         self.disabled.setObjectName('insetPanel')
-        disabled = QVBoxLayout(self.disabled)
-        disabled.setContentsMargins(20, 20, 20, 20)
-        disabled.addWidget(text(tr('Health readings are off. Enable Health and stability in Settings to read system events, battery condition and machine dates.')))
-        button = QPushButton(tr('Open Settings'))
-        button.clicked.connect(open_settings)
-        disabled.addWidget(button, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.disabled.layout().setContentsMargins(20, 20, 20, 20)
+        self.disabled.clicked.connect(open_settings)
         box.addWidget(self.disabled)
         self.content = QWidget()
         content = QVBoxLayout(self.content)
@@ -86,6 +92,14 @@ class HealthPage(QWidget):
         self.range.setAccessibleName(tr('Health date range'))
         self.range.currentIndexChanged.connect(self.render)
         content.addWidget(self.range, alignment=Qt.AlignmentFlag.AlignLeft)
+        # One answer first (a score with its reasons), then the detail below.
+        self.badge_panel = QFrame()
+        self.badge_panel.setObjectName('insetPanel')
+        badge_box = QVBoxLayout(self.badge_panel)
+        badge_box.setContentsMargins(20, 16, 20, 16)
+        self.badge = HealthBadge()
+        badge_box.addWidget(self.badge)
+        content.addWidget(self.badge_panel)
         self.panels, self.states = {}, {}
         for key, title in (('stability', 'Stability'), ('battery', 'Battery'), ('sleep', 'Sleep')):
             panel = QFrame()
@@ -205,6 +219,22 @@ class HealthPage(QWidget):
             self.data[job[0]] = result
             self.render()
 
+    def render_badge(self):
+        """The last 30 days, whatever range the charts show, so the score does not change with the range buttons."""
+        stability, battery = self.data.get('stability'), self.data.get('battery')
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=30)
+        events = sum(1 for r in stability if health.stamp(r['date']) >= cutoff) if isinstance(stability, list) else None
+        packs = battery.get('packs') if isinstance(battery, dict) else None
+        rows = health.factors(events, (packs or [{}])[0].get('health'), has_battery=packs != [])
+        names = {'stability': tr('Stability'), 'battery': tr('Battery')}
+        def value(key, number):
+            if number is None:
+                return tr('Not available')
+            return tr('{count} in 30 days', count=number) if key == 'stability' else f'{number:.0f}%'
+        self.badge.set_factors([(names[key], kind, value(key, number)) for key, kind, number in rows],
+                               dict(good=tr('Good'), warning=tr('Needs a look'), danger=tr('Poor'), neutral=tr('Unknown')),
+                               tr(HEALTH_EXPLAIN))
+
     def series(self, plot, values, message=''):
         if plot.kind != 'line' and plot.unit != 'events':
             start, end = range_bounds({}, ('30 days', '90 days', '1 year')[min(self.range.index, 2)])
@@ -240,6 +270,7 @@ class HealthPage(QWidget):
             message = tr('Loading…') if data == 'loading' else unavailable if data is None else ''
             self.states[key].setText(message)
             self.states[key].setVisible(bool(message))
+        self.render_badge()
         data = self.data.get('stability')
         events = [r for r in data if selected(r['date'])] if isinstance(data, list) else []
         self.stability_count.setVisible(isinstance(data, list))

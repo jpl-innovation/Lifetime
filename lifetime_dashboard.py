@@ -18,6 +18,7 @@ from lifetime_charts import LiveSparklines
 from lifetime_system_gui import HardwarePanel
 from lifetime_reveal import Intro, progress
 from lifetime_glass import solid
+from lifetime_widgets_dashboard import CapacityBar, Icon, capacity_kind
 
 
 class ProbeWorker(QWidget):
@@ -171,7 +172,7 @@ def storage(used, total, unit='GiB', divisor=1024**3):
 
 
 class SignalCard(QFrame):
-    def __init__(self, title):
+    def __init__(self, title, icon='system'):
         super().__init__()
         self.setObjectName('signalCard')
         self.box = QVBoxLayout(self)
@@ -180,7 +181,11 @@ class SignalCard(QFrame):
         heading = QLabel(tr(title))
         heading.setWordWrap(True)
         heading.setObjectName('groupTitle')
-        self.box.addWidget(heading)
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        header.addWidget(Icon(icon, 22))
+        header.addWidget(heading, 1)
+        self.box.addLayout(header)
         self.rows = QWidget()
         self.grid = QGridLayout(self.rows)
         self.grid.setContentsMargins(0, 0, 0, 0)
@@ -194,6 +199,7 @@ class SignalCard(QFrame):
         self.sparks = {}
         self.entrance = None        # (intro, start, end): the meters fill once, top to bottom
         self.percent = {}
+        self.capacity = set()       # rows whose percentage is space used (RAM, disks): amber under 15 % free, red under 5 %
 
     def set_rows(self, rows, tokens):
         keys = [r[0] for r in rows]
@@ -232,10 +238,8 @@ class SignalCard(QFrame):
                     chart.show()
                 trailing_box.addWidget(value)
                 self.grid.addWidget(trailing, position, 1)
-                meter = QProgressBar()
-                meter.setTextVisible(False)
-                meter.setRange(0, 1000)
-                meter.setFixedHeight(3)
+                meter = CapacityBar(thin=True)
+                meter.setFixedHeight(5)
                 self.grid.addWidget(meter, position+1, 0, 1, 2)
                 self.fields[key] = (value, meter)
                 position += 2
@@ -251,13 +255,17 @@ class SignalCard(QFrame):
             meter.setVisible(percentage is not None)
             if percentage is not None:
                 self.percent[key] = max(0, min(100, percentage))
-                meter.setValue(round(self.percent[key]*10*progress(self.entrance)))
-                meter.setAccessibleName(f'{key}: {percentage:.1f}%')
+                self._meter(key, meter, f'{key}: {percentage:.1f}%')
+
+    def _meter(self, key, meter, description=''):
+        percent = self.percent[key]
+        kind = capacity_kind(percent / 100) if key in self.capacity else 'info'
+        meter.set_segments([(percent * progress(self.entrance), kind)], 100, description=description or meter.accessibleName())
 
     def refresh_entrance(self):
         for key, (value, meter) in self.fields.items():
             if key in self.percent and meter.isVisibleTo(self):
-                meter.setValue(round(self.percent[key]*10*progress(self.entrance)))
+                self._meter(key, meter)
 
 
 class SystemDashboard(QWidget):
@@ -300,7 +308,8 @@ class SystemDashboard(QWidget):
         self.data_toggle.toggled.connect(self.show_data)
         self.grid = QGridLayout()
         self.grid.setSpacing(16)
-        self.cards = [SignalCard(title) for title in (tr('Power'), tr('Network'), tr('Graphics'), tr('Computer'))]
+        self.cards = [SignalCard(title, icon) for title, icon in ((tr('Power'), 'battery'), (tr('Network'), 'network'),
+                                                                 (tr('Graphics'), 'graphics'), (tr('Computer'), 'system'))]
         self.columns = 0
         layout.addLayout(self.grid)
         self.set_columns(1)
@@ -426,6 +435,7 @@ class SystemDashboard(QWidget):
             total = sum(watts) if all(value is not None for value in watts) else None
             graphics.insert(0, (tr('Total GPU power'), fmt(total, 'W'), None))
             mappings[2] = {tr('Total GPU power'): chart['gpu']}
+        self.cards[3].capacity = {'RAM'} | {tr('disk', path=disk['path']) for disk in data.get('disks') or []}
         for card, rows, mapping in zip(self.cards, (power, network, graphics, computer), mappings):
             card.sparks = mapping
             card.set_rows(rows, tokens)

@@ -30,6 +30,7 @@ from lifetime_setup import SetupDialog, SettingsPage, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
+from lifetime_widgets_dashboard import Icon as Glyph
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase, progress, warm_pages
 from lifetime_tasks import Tasks
 
@@ -333,7 +334,13 @@ class StatCard(QFrame):
         self.caption.setWordWrap(True)
         self.caption.hide()
         self.progress = None
-        self.box.addWidget(self.heading_label)
+        heading = QWidget()      # a small icon before the words, so the five figures scan as tiles, not a sentence
+        heading_row = QHBoxLayout(heading)
+        heading_row.setContentsMargins(0, 0, 0, 0)
+        heading_row.setSpacing(6)
+        heading_row.addWidget(Glyph(kind, 16), 0, Qt.AlignmentFlag.AlignVCenter)
+        heading_row.addWidget(self.heading_label, 1)
+        self.box.addWidget(heading)
         self.box.addWidget(self.value)
         self.setFixedHeight(104)
         self.divider = False

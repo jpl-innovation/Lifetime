@@ -2,11 +2,15 @@
 import copy
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFormLayout, QVBoxLayout, QSizePolicy, QWidget, QToolButton, QLayout
+from PyQt6.QtWidgets import QFormLayout, QGridLayout, QHBoxLayout, QVBoxLayout, QSizePolicy, QWidget, QToolButton, QLayout
 from lifetime_i18n_qt import QFrame, QLabel
 from lifetime_i18n import tr, on_language_change, language
 from lifetime_glass import glass
 from lifetime_system import sections
+from lifetime_widgets_dashboard import Icon, Tile
+
+# One icon per section of lifetime_system.sections, in its order.
+SECTION_ICONS = ('cpu', 'memory', 'storage', 'network', 'graphics', 'board', 'os')
 
 
 class HardwarePanel(QFrame):
@@ -30,10 +34,12 @@ class HardwarePanel(QFrame):
         box.addWidget(note)
         self.body = QWidget()
         self.body.setMinimumWidth(0)
-        self.content = QVBoxLayout(self.body)
+        # Sections are cards with an icon, two to a row on a wide page, instead of one long list.
+        self.content = QGridLayout(self.body)
         self.content.setContentsMargins(0, 16, 0, 0)
-        self.content.setSpacing(0)
+        self.content.setSpacing(12)
         self.content.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.sections, self.columns = [], 0
         box.addWidget(self.body)
         self.fields, self.forms, self.data = [], [], {}
         self._expanded = {}
@@ -68,19 +74,14 @@ class HardwarePanel(QFrame):
             widget.hide()
             widget.setParent(None)
             widget.deleteLater()
-        self.fields, self.forms = [], []
+        self.fields, self.forms, self.sections, self.columns = [], [], [], 0
         for index, (heading, groups) in enumerate(sections(data, tr)):
-            section = QWidget()
+            section = Tile()
+            section.setObjectName('hardwareCard')
             section.setMinimumWidth(0)
             box = QVBoxLayout(section)
-            box.setContentsMargins(0, 0, 0, 0)
+            box.setContentsMargins(16, 12, 16, 4)
             box.setSpacing(0)
-            if index:
-                line = QFrame()
-                line.setFixedHeight(1)
-                line.setStyleSheet('background:#22345A; border:none;')
-                box.addWidget(line)
-                box.addSpacing(20)
             key = getattr(heading, 'key', str(heading))
             title = QToolButton()
             title.setText(str(heading).replace('&', '&&'))
@@ -90,7 +91,12 @@ class HardwarePanel(QFrame):
             title.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             title.setStyleSheet('QToolButton {background:transparent; font-size:16px; font-weight:600; border:1px solid transparent; padding:3px 0;} QToolButton:focus {border-color:#9FB0CC;}')
             title.setAccessibleName(heading)
-            box.addWidget(title)
+            header = QHBoxLayout()
+            header.setSpacing(8)
+            header.addWidget(Icon(SECTION_ICONS[index] if index < len(SECTION_ICONS) else 'list', 20))
+            header.addWidget(title)
+            header.addStretch(1)
+            box.addLayout(header)
             body = QWidget()
             body.setMinimumWidth(0)
             body_box = QVBoxLayout(body)
@@ -138,11 +144,22 @@ class HardwarePanel(QFrame):
                 explanation = self.text(tr('Unavailable readings: {reasons}', reasons='; '.join(reasons)), True)
                 explanation.setObjectName('hardwareUnavailable')
                 box.addWidget(explanation)
-            box.addSpacing(20)
-            self.content.addWidget(section)
+            box.addSpacing(12)
+            outer = section.layout()
+            outer.addStretch(1)
+            self.sections.append(section)
         self._fit_columns()
 
     def _fit_columns(self):
+        columns = 2 if self.width() >= 760 else 1
+        if columns != self.columns:
+            self.columns = columns
+            for section in self.sections:
+                self.content.removeWidget(section)
+            for index, section in enumerate(self.sections):
+                self.content.addWidget(section, index // columns, index % columns)
+            for column in range(2):
+                self.content.setColumnStretch(column, 1 if column < columns else 0)
         narrow = self.width() < 460
         policy = QFormLayout.RowWrapPolicy.WrapAllRows if narrow else QFormLayout.RowWrapPolicy.DontWrapRows
         for form in self.forms:
