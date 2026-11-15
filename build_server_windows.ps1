@@ -30,15 +30,25 @@ try {
     $creditLightImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png') + ';assets'
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
                 '--distpath', $output, '--workpath', $work, '--specpath', $work)
+    # Modules imported only inside functions. PyInstaller finds most of them by scanning the code, but they are named
+    # here so a build never leaves one out; test_installed_modules fails when the code gains one these lists lack.
+    $runtimeModules = @('lifetime_agent', 'lifetime_checks', 'lifetime_client', 'lifetime_connection', 'lifetime_daily',
+                        'lifetime_discovery', 'lifetime_health', 'lifetime_import', 'lifetime_import_windows', 'lifetime_live',
+                        'lifetime_monitor', 'lifetime_pipe', 'lifetime_reports', 'lifetime_signals', 'lifetime_system',
+                        'lifetime_wol', 'lifetime_ws_client', 'lifetime_ws_server') | ForEach-Object { '--hidden-import', $_ }
+    $dashboardModules = @('lifetime_connection', 'lifetime_daily', 'lifetime_import', 'lifetime_import_windows', 'lifetime_ledger',
+                          'lifetime_pipe', 'lifetime_reports', 'lifetime_server_export', 'lifetime_server_stream',
+                          'lifetime_signals', 'lifetime_tracker') | ForEach-Object { '--hidden-import', $_ }
     $ErrorActionPreference = 'Continue'
-    & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --collect-data tzdata --hidden-import lifetime_ws_server --exclude-module PyQt6 lifetime_server.py
+    # zoneinfo reads IANA time zones from the tzdata package through importlib on Windows: collect its modules and data.
+    & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --collect-all tzdata @runtimeModules --exclude-module PyQt6 lifetime_server.py
     if ($LASTEXITCODE -ne 0) { throw 'Runtime build failed.' }
-    & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 --hidden-import lifetime_server_stream --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage lifetime_server_gui.py
+    & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage lifetime_server_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
     & $Python -m PyInstaller @common --console --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
     if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }
     if ($IncludeServiceWrapper) {
-        & $Python -m PyInstaller @common --console --name LifetimeServerService --collect-all cryptography --collect-data tzdata --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
+        & $Python -m PyInstaller @common --console --name LifetimeServerService --collect-all cryptography --collect-all tzdata @runtimeModules --hidden-import lifetime_server --exclude-module PyQt6 --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
         if ($LASTEXITCODE -ne 0) { throw 'Experimental service-wrapper build failed.' }
     }
     $ErrorActionPreference = 'Stop'
