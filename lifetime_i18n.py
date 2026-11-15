@@ -2027,3 +2027,31 @@ for _key, _text in _UPDATES_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+# Dashboard widgets shared by both apps (lifetime_widgets_dashboard.py): chips, heartbeat, cards, health badge, empty states.
+_DASHBOARD_WIDGETS_VI = {
+    'Last 24 hours': '24 giờ qua',
+    'Last 24 hours: online in {online} of 24 hours': '24 giờ qua: trực tuyến {online} trên 24 giờ',
+    '{metric}, last 24 hours': '{metric}, 24 giờ qua',
+    'No current problems': 'Không có sự cố hiện tại',
+    'Nothing in this list': 'Danh sách này trống',
+    'No incidents match this filter.': 'Không có sự cố nào khớp bộ lọc này.',
+    'Memory & graphics': 'Bộ nhớ & đồ họa',
+    '{free} free of {total}': 'trống {free} trên {total}',
+    'No devices yet': 'Chưa có thiết bị',
+    'Add a computer with a one-time code; it shows here once you approve it.': 'Thêm máy tính bằng mã dùng một lần; máy sẽ hiện ở đây sau khi bạn phê duyệt.',
+    'No report yet': 'Chưa có báo cáo',
+    'No computers match': 'Không có máy tính phù hợp',
+    'No network checks yet': 'Chưa có kiểm tra mạng',
+    'Fill in a name and a printer, router or website below, then choose Save check.': 'Điền tên và máy in, bộ định tuyến hoặc trang web bên dưới, rồi chọn Lưu kiểm tra.',
+    'Health readings are off': 'Chỉ số sức khỏe đang tắt',
+    '{count} in 30 days': '{count} trong 30 ngày',
+    'Good': 'Tốt',
+    'Needs a look': 'Cần xem lại',
+    'Poor': 'Kém',
+    'Score: the average of the readings shown, each good 100, needs a look 50, poor 0. Stability counts unexpected shutdowns and crashes in the last 30 days: none is good, 1 or 2 needs a look, 3 or more is poor. Battery compares full charge with design capacity: 80% or more is good, 60 to 79% needs a look, below 60% is poor. A missing reading is left out; with none the score is unknown.':
+        'Điểm: trung bình các chỉ số hiển thị, tốt 100, cần xem lại 50, kém 0. Độ ổn định đếm số lần tắt máy bất thường và sự cố trong 30 ngày qua: không có là tốt, 1 hoặc 2 cần xem lại, từ 3 trở lên là kém. Pin so dung lượng sạc đầy với dung lượng thiết kế: từ 80% là tốt, 60 đến 79% cần xem lại, dưới 60% là kém. Chỉ số thiếu được bỏ qua; nếu không có chỉ số nào thì điểm là không xác định.',
+}
+for _key, _text in _DASHBOARD_WIDGETS_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

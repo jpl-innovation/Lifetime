@@ -456,6 +456,19 @@ def detail(data, now=None):
     return result
 
 
+def factors(events_30d, battery_health, has_battery=True):
+    """What the health badge scores, as (key, kind, value): kind is good / warning / danger, or None when the reading
+    is missing. Stability: unexpected shutdowns plus crashes in 30 days, 0 good, 1-2 warning, 3 or more danger.
+    Battery: full-charge capacity as a share of design, 80 % or more good, 60-79 % warning, below 60 % danger
+    (left out on a computer without a battery). The GUI only displays this; it invents nothing."""
+    result = [('stability', None if events_30d is None else 'good' if events_30d == 0 else
+               'warning' if events_30d <= 2 else 'danger', events_30d)]
+    if has_battery:
+        result.append(('battery', None if battery_health is None else 'good' if battery_health >= 80 else
+                       'warning' if battery_health >= 60 else 'danger', battery_health))
+    return result
+
+
 def summary(data, now=None):
     if data is None:
         return None

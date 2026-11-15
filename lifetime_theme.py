@@ -4,11 +4,11 @@ import weakref
 THEMES = {
     'dark': dict(bg='#0B1426', card='#12203A', text='#FFFFFF',
                  muted='#9FB0CC', border='#22345A', accent='#FFC93C', accent_hover='#FFD761', track='#1B2A46',
-                 bar='#3A5688', thumb='#2A3E66', line='#34445E', sidebar='#08101F', danger='#FF8A8A', bg2='#0F1A30', raise_='#243C63', skel_a='#263A60', skel_b='#34507F', tile='#182944', tile_hover='#1E3254', tile_border='#2A3E66', border2='#223959', good='#4CC38A', tab_on='#FFF0BF', sky='#2353A0', sky_mid='#15306A', ember_mid='#3A3220', ember='#8A6516', heat=('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')),
+                 bar='#3A5688', thumb='#2A3E66', line='#34445E', sidebar='#08101F', danger='#FF8A8A', bg2='#0F1A30', raise_='#243C63', skel_a='#263A60', skel_b='#34507F', tile='#182944', tile_hover='#1E3254', tile_border='#2A3E66', border2='#223959', good='#4CC38A', info='#7DB4FF', tab_on='#FFF0BF', sky='#2353A0', sky_mid='#15306A', ember_mid='#3A3220', ember='#8A6516', heat=('#3B3A32', '#6C5E35', '#9D8237', '#CEAA3A', '#FFC93C')),
     # Light mode: the same layout in a calm paper palette. The amber is darkened so it stays readable as text and lines.
     'light': dict(bg='#F3F4F1', card='#FCFCFA', text='#252D2D',
                   muted='#5F6B69', border='#D3D9D5', accent='#9A5B00', accent_hover='#7F4A00', track='#E1E6E1',
-                  bar='#B8C4D6', thumb='#FDFDFC', line='#C5CDC8', sidebar='#E8EBE6', danger='#B3261E', bg2='#ECEEEA', raise_='#DDE3EB', skel_a='#E4E7E2', skel_b='#D5DAD3', tile='#F7F8F5', tile_hover='#EEF0EB', tile_border='#CBD2CC', border2='#D3D9D5', good='#2E8B57', tab_on='#6B3F00', sky='#BFD3F2', sky_mid='#DDE6F3', ember_mid='#F2EBDA', ember='#F1D58C', heat=('#E9E5D6', '#E0CE98', '#D2B25A', '#B98A1F', '#9A5B00')),
+                  bar='#B8C4D6', thumb='#FDFDFC', line='#C5CDC8', sidebar='#E8EBE6', danger='#B3261E', bg2='#ECEEEA', raise_='#DDE3EB', skel_a='#E4E7E2', skel_b='#D5DAD3', tile='#F7F8F5', tile_hover='#EEF0EB', tile_border='#CBD2CC', border2='#D3D9D5', good='#2E8B57', info='#2B5DA8', tab_on='#6B3F00', sky='#BFD3F2', sky_mid='#DDE6F3', ember_mid='#F2EBDA', ember='#F1D58C', heat=('#E9E5D6', '#E0CE98', '#D2B25A', '#B98A1F', '#9A5B00')),
 }
 
 _active = 'dark'
