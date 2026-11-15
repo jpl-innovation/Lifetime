@@ -194,7 +194,7 @@ instead of being guessed. Totals and charts measure computer uptime, not human a
 The server treats all of this as untrusted input. Every field is validated for type, numeric range, string length and
 list size before it is stored (`lifetime_protocol.py`), a report with any field outside the allowed list is refused as a
 whole, requests are size-limited, and what is stored per computer is bounded. A computer that has not shared history or readings simply shows an empty state.
-Reading the data requires the loopback-only administrator API with its bearer token, as before. Appearance choices
+Reading the data requires the loopback-only administrator API (its bearer token, or on Windows a named account with a role; see below). Appearance choices
 (theme, language, style) are stored locally and are not sent anywhere. If you find a way to make the server accept or
 display data it should refuse, please report it as described below.
 
@@ -250,6 +250,60 @@ places the administrator did not intend (server-side request forgery):
   `server.sqlite` or any awake-time ledger. Check settings and results are part of the dashboard's monitoring backup.
   The dashboard reaches all of this only through the loopback-only, token-protected administration API, and every
   field is validated (kinds, host names, URLs, ports, status ranges, sizes, intervals, scopes).
+
+## Named administrators, roles and the audit trail
+
+**Identity.** On Windows the server serves its admin API on a local named pipe
+(`\\.\pipe\LifetimeServer-admin-<admin port>`) as well as on the loopback HTTP port. After a request arrives the
+server impersonates the client at *identification* level (the client opens the pipe with
+`SECURITY_IDENTIFICATION`, so the server can read the token but never act as the client), reads the token's user SID
+and enabled groups, and reverts. A request cannot name its own caller: anything but `operation` and `arguments` is
+refused, and the incident *acknowledged by* name is replaced with the Windows account. Groups that are deny-only are
+ignored, so an administrator who has not elevated (UAC) is not Admin through the Administrators group. The pipe is
+created first-instance (another program that took the name first makes the server log
+*Named administration channel unavailable* and run on the token channel only), refuses remote clients, denies
+network logons, and admits only SYSTEM, Administrators, the server's own account and the accounts and groups that
+hold a role; those get read/write access without the right to create pipe instances. The client refuses a pipe that
+is not owned by SYSTEM, Administrators or its own account before sending anything. Standard library only (ctypes).
+
+**Roles.** Admin (everything), Operator (view; acknowledge incidents; add and remove maintenance windows; refresh;
+sleep, restart, shutdown and Turn on for one computer at a time, still only where its owner turned on remote power),
+Auditor (view and the audit trail) and Viewer (view only). SYSTEM and elevated Administrators are always Admin and
+cannot be lowered, so the server cannot be locked out of its own administrators. Roles are enforced by the server for
+every request, on both channels, before the request's fields are even checked. Every admin operation belongs to
+exactly one permission class in `lifetime_access.py`; an operation in no class is refused to everyone, Admin
+included, and the tests fail until it is classified (default deny). The dashboard only greys out what the server
+would refuse.
+
+**The token channel.** The loopback HTTP API with `admin-token` stays for Linux and older dashboards. It cannot tell
+who is calling, so whoever can read the token (Administrators and SYSTEM, by the file's ACL) is Admin and is recorded
+as `admin-token`. Remote power is refused on it: it needs a named Windows account. On Linux there is no named channel,
+so the dashboard cannot send remote power commands there.
+
+**Remote power.** Besides the owner's consent on the computer: a named, authorised Windows account; the role is
+checked again under the same lock as role changes, so removing a role always wins against a command in flight, and
+removing or lowering a role that allowed power cancels every power command still waiting. Each command has an id and
+expires ten minutes after it was issued (the computer refuses it after that too). At most three power requests per
+computer and ten per account in ten minutes. One computer per request; there are no bulk power actions. The
+confirmation names the computer's name, group and ID.
+
+**Audit trail.** `access.sqlite` keeps an append-only record of every state-changing request and every refused
+request: the account's SID and name, role, action, target (identifier fields only, never passwords, webhook
+addresses or other values), result, UTC time and a correlation id (the command id for remote commands). Each row
+holds the SHA-256 of the previous row, so an edited, removed, reordered or truncated entry is reported by **Verify
+audit trail** (or `lifetime_server.py verify-audit --directory <data directory>`) with the first broken entry. At
+200,000 entries the oldest 20,000 are first written to a protected `audit-archive/audit-<first>-<last>.jsonl` and
+then removed; the chain continues from the last archived hash. Limits, honestly: a local administrator (or anything
+running as SYSTEM) can still rewrite `access.sqlite` and recompute every hash, or delete the file. The chain makes
+tampering detectable, not impossible; export the trail (CSV with hashes) and keep copies elsewhere for evidence that
+does not live on the server.
+
+**Backups.** The backup archive contains the server's private key, so it is created with an ACL for Administrators
+and SYSTEM only (0600 elsewhere); keep copies just as restricted. It never contains `admin-token` or
+`alert-secrets.bin`. Restore checks the archive's checksum, every file's hash, every database and that the key matches
+the certificate, and applies it only at the next start, before any listener opens; it keeps the current roles and
+audit trail, so a restore can never bring back an older trail or a role that was removed, and it invalidates every
+computer credential, code and polling token as before.
 
 ## Reporting a vulnerability
 

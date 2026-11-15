@@ -113,11 +113,103 @@ Not yet verified against real printers, routers, NAS boxes or websites, nor with
 
 Monitoring data lives in `monitoring.sqlite` in the data directory, written only by the running server: presence history (online, offline or unknown, with a reason), agentless checks with their last results, and incidents for 180 days, at most 64 MiB (the oldest closed history goes first), and the last 5,000 delivery log entries. Removing a computer also removes its monitoring history.
 
+## Named administrators and roles
+
+On Windows the dashboard signs in as the Windows account that opens it. The server reads the account from its local
+named pipe (`\\.\pipe\LifetimeServer-admin-<admin port>`); the dashboard cannot claim a name. **Administration >
+Roles and access** shows who is signed in and with which role.
+
+- **Admin**: everything. Members of Administrators running the dashboard *as administrator* and SYSTEM are always
+  Admin; an administrator who opens it without elevation counts only through a role given to their account or a group.
+- **Operator**: view everything; acknowledge incidents; add and remove maintenance windows; ask for a fresh report;
+  sleep, restart, shut down or turn on one computer at a time where its owner allowed remote power.
+- **Auditor**: view everything and the audit trail.
+- **Viewer**: view only.
+
+To give a role, an Admin types a Windows account or group (`SCHOOL\helpdesk`, `helpdesk`, a local group, or a SID)
+under **Roles and access**, chooses the role and clicks **Give role**; the server resolves it to a SID. A group role
+applies to its members at their next sign-in (Windows puts group membership in the logon token). Removing a role
+takes effect at that account's next request; removing or lowering a role that allowed remote power also cancels
+every power command still waiting. People with a role other than Admin run the dashboard without elevation:
+`LifetimeServerDashboard.exe --directory <data directory> --admin-port <port>` (or the source command); the Start menu
+shortcut asks for elevation, which only Administrators need.
+
+The older loopback channel with `admin-token` still works (Linux, older dashboards, an account the pipe does not
+admit). Whoever can read that file is Admin and appears as `admin-token` in the audit trail. Remote power is not
+available through it, because it cannot say who is asking; on Linux, send remote power from a Windows dashboard or
+not at all. If the server log shows *Named administration channel unavailable (token only)*, another program held the
+pipe name at start: find it, then restart the server.
+
+Remote power limits: at most three power commands (sleep, restart, shutdown, Turn on) per computer and ten per
+account in ten minutes; a command expires ten minutes after it was issued; one computer per request.
+
+## Audit trail
+
+**Administration > Audit trail** (Admin and Auditor) lists the latest entries: every change made through the
+dashboard or API and every remote command, plus every refused request, with the Windows account, role, action,
+target, result and time. **Verify audit trail** walks the hash chain and reports the first broken entry (changed,
+removed, reordered or newest entries removed); from a prompt on the server, `lifetime_server.py verify-audit
+--directory <data directory>` does the same without the dashboard (exit code 0 when intact). **Export CSV** saves the
+whole trail with each entry's hashes: keep exports outside the server, because a local administrator can rewrite the
+file and recompute the chain. The trail lives in `access.sqlite` with the roles. After 200,000 entries the oldest
+20,000 are written to `audit-archive\audit-<first>-<last>.jsonl` in the data directory (Administrators and SYSTEM
+only) and then removed; keep or copy those files under your retention policy.
+
 ## Backup and restore
 
-Stop the server registration before making a consistent backup. Copy the complete data directory, including `server.sqlite` and its SQLite sidecar files if present, `monitoring.sqlite` (alert history and settings) with its sidecar files and `alert-secrets.bin`, plus `server-key.pem` (the identity every computer pins), `server-cert.pem`, `admin-token`, and `server-install.json` from the install directory. `alert-secrets.bin` can be read only by the account that wrote it on that machine (normally SYSTEM): after moving to another machine, enter the mail password and webhook address again under **Notifications**. The dashboard's **Save backup** writes the database backup and, beside it, `<name>.monitoring.sqlite` with monitoring history, incidents, rules, schedules, maintenance windows, checks and notification settings (never `alert-secrets.bin`). **Restore backup** checks both files first and then restores both; history that was open when the backup was taken ends there and the time after it is unknown, and messages that were still waiting are marked interrupted rather than sent. Keep the two files together: without the monitoring file beside it, a restore brings back the database only and keeps the current monitoring data, and the dashboard says so. After restoring on another machine, enter the mail password and webhook address again. Keep copies access-controlled and separate from the server host. The database contains device reports and enrollment state; TLS identity and token are security-sensitive.
+**Save backup** (Admin) writes one archive, for example `lifetime-server-backup.zip`, and `lifetime-server-backup.zip.sha256`
+beside it. The archive holds consistent copies (SQLite backup API, taken while the server runs) of `server.sqlite`
+(computers, reports, settings), `monitoring.sqlite` (alert history, incidents, rules, schedules, maintenance windows,
+checks, notification settings) and `access.sqlite` (roles and the audit trail), the TLS identity (`server-key.pem`,
+`server-cert.pem`, `server-cert.previous.pem` when present), the server's configuration (address, ports, version and
+`server-install.json` when found), and a manifest with each file's SHA-256 and size. It never contains `admin-token`
+or `alert-secrets.bin` (the mail password and webhook address, which only the account that wrote them on that machine
+can read: enter them again after restoring on another machine). The archive is created readable only by
+Administrators and SYSTEM because it holds the private key every computer pins: store copies just as restricted, and
+separate from the server host. Keep the two files together.
 
-For a database restore, use **Administration > Restore backup** against the running local service. This validates the backup and atomically invalidates device credentials, codes and polling tokens; plan to re-enroll devices. A raw filesystem copy of an old database does **not** perform that invalidation and must not be used as the final restore step. For disaster recovery, first restore the TLS identity/configuration with the service stopped and restrictive ACLs, start a new empty server database, then use the dashboard restore operation on the saved database. Keep the newly generated local administrator token. Verify the dashboard and a test client before resuming collection. Do not merge unrelated histories.
+**Verify backup** checks an archive without changing anything: the `.sha256` file, the list of files, each file's
+hash, every database (it must be one this server version can restore), the audit chain inside it and that the key
+matches the certificate. `lifetime_server.py verify-backup --directory <data directory> --archive <file>` does the
+same from a prompt.
+
+**Restore backup** checks the archive the same way and stages it (`restore-staged.zip` in the data directory); it is
+applied the next time the server starts, before any computer or dashboard can connect: the key and certificate first
+(the replaced ones are kept as `*.before-restore.pem`), then the databases through the same validated restore as
+before, which invalidates every computer credential, pairing code and polling token (computers need a new code and
+approval). The current roles and audit trail are kept; the archive's `access.sqlite` is used only when the server has
+none (a new machine). Monitoring history that was open in the backup ends there and the time after it is unknown. If
+the staged archive no longer checks out at start, the server starts with its current data, renames it
+`restore-failed.zip` and logs *Staged backup refused at start*. To cancel a staged restore before the restart, delete
+`restore-staged.zip` from the data directory. Never copy an old `server.sqlite` over the live one by hand: that skips
+the credential invalidation.
+
+The older single-database **backup** and **restore** admin operations (and `<name>.monitoring.sqlite` files from
+earlier versions) still work for scripts, Admin only.
+
+### Restore drill
+
+Practise this on a spare machine or VM before you need it, and after each upgrade:
+
+1. On the live server, **Save backup** to removable or network storage that only administrators can read, then
+   **Verify backup** on the copy you will keep.
+2. On the drill machine, install the same Lifetime Server version (`install_server_windows.ps1`, same address if
+   possible) and do not pair any computer.
+3. From an elevated prompt in the install directory, stage the archive while the server is stopped:
+   `python lifetime_server.py restore --directory C:\ProgramData\Lifetime\Server --archive D:\backup\lifetime-server-backup.zip`
+   (packaged: `LifetimeServerRuntime.exe restore ...`). It prints a JSON report and exits 0 when staged.
+   Alternatively start the empty server, open the dashboard as administrator and use **Restore backup**, then
+   restart it with `restart_server_windows.ps1`.
+4. Start the server. **Administration > Server log** shows *Backup restored at start*; the **Audit trail** shows
+   `restore-applied`; **This Server** shows the restored key fingerprint; Devices lists the computers as
+   disconnected.
+5. Check **Verify audit trail**, the alert rules, schedules and checks, and re-enter the mail password and webhook
+   address under **Notifications**.
+6. Pair one test computer with a new code to prove the restored identity works, then discard the drill machine (or,
+   in a real recovery, re-pair the remaining computers).
+
+Not yet verified on a real Windows Server or with a real disaster: the drill above is covered by automated tests that
+back up, restart and restore a server on one Windows 11 PC.
 
 ## Retention, certificate and addresses, upgrade, rollback
 

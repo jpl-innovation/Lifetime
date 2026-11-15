@@ -331,10 +331,27 @@ readings that stop arriving show as "telemetry missing" on the computer, not as 
   [server operations](docs/SERVER_OPERATIONS.md#alerts-and-notifications).
 
 Monitoring keeps its own history (`monitoring.sqlite`) next to the server database, saved and restored with the
-dashboard's backup as a second file; time when the server itself was not running is shown as unknown, never as
+dashboard's backup archive; time when the server itself was not running is shown as unknown, never as
 offline. Time zone names such as `Asia/Ho_Chi_Minh` use the `tzdata` package from `requirements-server.txt`.
 Network checks are not yet verified against real devices or websites. Not yet verified with a real mail server or webhook service
 (tests use a local SMTP stub and a fake webhook).
+
+### Named administrators, roles and the audit trail
+
+On Windows the dashboard signs in as the Windows account that opens it: the server reads that account from its
+local named pipe (it cannot be typed in or faked by the dashboard) and applies its role. Administrators running as
+administrator and SYSTEM are always **Admin**; under **Administration > Roles and access** an Admin gives other
+Windows accounts or groups a role: **Operator** (view, acknowledge incidents, maintenance windows, refresh, and remote
+power for one computer at a time where its owner allowed it), **Auditor** (view and the audit trail) or **Viewer**
+(view only). The server checks the role on every request; the dashboard greys out what the role cannot do and says
+why. Whoever can read the `admin-token` file (Administrators and SYSTEM) is also Admin through the older loopback
+channel, which Linux and older dashboards use; remote power needs a named Windows account, so it is not available
+through the token. **Audit trail** records every change and every remote command with the Windows account, role,
+target, result and time, hash-chained so an edited or removed entry is detected (**Verify audit trail**, **Export
+CSV**). **Backup and restore** writes one protected `.zip` archive with a `.sha256` file and restores it at the next
+server start. See [server operations](docs/SERVER_OPERATIONS.md#named-administrators-and-roles) and
+[SECURITY](SECURITY.md#named-administrators-roles-and-the-audit-trail). Verified with tests on one Windows 11 PC
+only, not yet with domain accounts and groups on a real Windows Server.
 
 See [server protocol](docs/SERVER_PROTOCOL.md) and
 [server operations and deployment checks](docs/SERVER_OPERATIONS.md) for trust,
