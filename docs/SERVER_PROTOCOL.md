@@ -10,9 +10,9 @@ The advanced enrollment bundle contains the explicit HTTPS origin, expiring pair
 full self-signed certificate, and SHA-256 certificate fingerprint. Including the
 certificate allows normal hostname and strict chain verification on the very first
 connection, without an insecure certificate download. Clients check the peer
-**before sending credentials or a request body**: first the exact certificate
-fingerprint, then, after that certificate matched once, the SHA-256 of its public
-key (SPKI). The server renews its certificate from the same key (30 days before
+**before sending credentials or a request body**: the SHA-256 of the public key
+(SPKI) of the stored certificate, computed locally for bundles stored before key
+pins existed. The server renews its certificate from the same key (30 days before
 expiry, or when its names change), and clients accept a renewed certificate only
 with the pinned key and full verification. A new key requires re-pairing.
 Redirects and environment proxy discovery are not used.

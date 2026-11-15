@@ -493,15 +493,15 @@ class HTTPSIntegrationTests(RealTLSFixture):
                                         self.identity['fingerprint'])
                 finally:
                     connection.close()
-                with self.assertRaisesRegex(ssl.SSLCertVerificationError, 'fingerprint mismatch'):
+                with self.assertRaisesRegex(ssl.SSLCertVerificationError, 'pinned key'):
                     tls.request_json(self.bundle_for(self.identity, port), '/v1/ingest',
                                      {'code': 'pairing-secret'}, 'device-secret')
                 self.assertEqual(requests, [])
 
     def test_real_expired_certificate_rejected_before_request(self):
         with tempfile.TemporaryDirectory() as directory:
-            alternate = self.issued_identity(directory, expired=True)
-            with self.server(alternate) as (port, requests):
+            # Expired, even with the pinned key: dates are still checked.
+            with self.server(self.renewed(directory, days_ago=400)) as (port, requests):
                 with self.assertRaises(ssl.SSLCertVerificationError) as caught:
                     tls.request_json(self.bundle_for(self.identity, port), '/v1/ingest',
                                      {'code': 'pairing-secret'}, 'device-secret')
@@ -516,20 +516,22 @@ class HTTPSIntegrationTests(RealTLSFixture):
         path.write_text(pem)
         return dict(cert_file=str(path), key_file=self.identity['key_file'], certificate_pem=pem)
 
-    def test_legacy_pin_migrates_to_the_key_only_after_an_exact_match(self):
-        # Golden case 6: the old full-certificate pin is checked first; the key pin comes from that same certificate.
-        with self.server(self.identity) as (port, requests):
-            bundle = tls.decode_bundle(self.bundle_for(self.identity, port))
-            self.assertNotIn('spki', bundle)
-            tls.request_json(bundle, '/v1/sync', {'n': 1})
-            self.assertEqual(bundle['spki'], tls.spki_pin(ssl.PEM_cert_to_DER_cert(self.identity['certificate_pem'])))
-            self.assertEqual(bundle['certificate_pem'], self.identity['certificate_pem'])
-        # A legacy pin never learns anything, even a certificate from the same key: no trust on first use.
+    def test_certificate_only_pin_uses_the_key_of_its_own_stored_certificate(self):
+        # Golden case 6: a bundle stored before key pins existed gets the key of the certificate it already
+        # trusts (computed locally, nothing new is trusted), so it keeps working through the first renewal.
+        key = tls.spki_pin(ssl.PEM_cert_to_DER_cert(self.identity['certificate_pem']))
         with tempfile.TemporaryDirectory() as directory, self.server(self.renewed(directory)) as (port, requests):
             legacy = tls.decode_bundle(self.bundle_for(self.identity, port))
+            self.assertNotIn('spki', legacy)
+            tls.request_json(legacy, '/v1/sync', {'n': 1})
+            self.assertEqual(legacy['spki'], key)
+            self.assertEqual(len(requests), 1)
+        # ... and still refuses a different key, before any request.
+        with self.server(self.rotated_identity) as (port, requests):
+            legacy = tls.decode_bundle(self.bundle_for(self.identity, port))
             before = dict(legacy)
-            with self.assertRaises(ssl.SSLCertVerificationError):
-                tls.request_json(legacy, '/v1/sync', {'n': 2})
+            with self.assertRaisesRegex(ssl.SSLCertVerificationError, 'pinned key'):
+                tls.request_json(legacy, '/v1/sync', {'code': 'pairing-secret'}, 'device-secret')
             self.assertEqual((legacy, requests), (before, []))
 
     def test_key_pin_learns_a_renewed_certificate_but_never_another_key(self):

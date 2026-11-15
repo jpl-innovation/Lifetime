@@ -281,11 +281,10 @@ class RuntimeTests(unittest.TestCase):
         wrong = dict(self.bundle, address=self.runtime.public_address.replace('127.0.0.1', 'localhost'))
         with self.assertRaises(ssl.SSLCertVerificationError):
             tls.request_json(wrong, '/v1/enroll', {}, timeout=3)
-        with patch.object(tls.hashlib, 'sha256') as digest:
-            # Bundle verification uses the first hash, peer-pin check the second.
-            digest.side_effect = [Mock(hexdigest=lambda: self.bundle['fingerprint']),
-                                  Mock(hexdigest=lambda: '0' * 64)]
-            with self.assertRaises(ssl.SSLCertVerificationError):
+        key = tls.spki_pin(ssl.PEM_cert_to_DER_cert(self.pem))
+        with patch.object(tls, 'spki_pin', side_effect=[key, '0' * 64]):
+            # The stored certificate's key is the pin; the peer's key (second call) must equal it.
+            with self.assertRaisesRegex(ssl.SSLCertVerificationError, 'pinned key'):
                 tls.request_json(self.bundle, '/v1/enroll', {}, timeout=3)
 
     def test_clean_restart_reuses_identity_token_and_records(self):

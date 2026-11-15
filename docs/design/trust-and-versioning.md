@@ -10,8 +10,9 @@ Implementation notes (what was decided where the design left room):
 - Certificate names are the configured address plus the names and IPs the administrator adds; current IPs are not
   added automatically, because every renewal stops computers still on 1.1 (they pin the whole certificate) and
   invalidates outstanding codes, so renewals stay deliberate (30 days before expiry, or a name change).
-- Migration to the key pin happens only after the old certificate pin matched on a live connection, as designed;
-  a computer that updates after the server has already renewed must pair again.
+- Migration (decided after review): the key pin is computed locally from the certificate the computer already
+  stores. That certificate came through the authenticated pairing, so this is as secure as waiting for a live
+  match and lets a computer that has not reported since its update keep working through the first renewal.
 - Capabilities are announced only to computers that send `Lifetime-Accept: capabilities`, because 1.1 and 1.2
   computers reject unknown reply fields. The one-day 1.1 fallback after a 400 remains as a safety net.
 - Server visibility (Stage 0 item 4) added the `problem` capability: a computer's last failure category.

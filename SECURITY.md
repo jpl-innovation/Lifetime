@@ -54,13 +54,13 @@ Legacy bundle codes retain their original server-wide guessing budget.
 
 ## Pinning the server's key, renewal and rediscovery
 
-- **What is pinned.** A computer first trusts exactly the certificate it paired with
-  (full SHA-256 fingerprint, as before). On the first connection where that exact
-  certificate matches, it also stores the SHA-256 of the certificate's public key
-  (SubjectPublicKeyInfo, "key pin") and from then on checks the key. A computer
-  that still holds only a certificate pin never learns anything new: it moves to
-  the key pin only after its own certificate matched on a live connection. There
-  is no trust on first use at any point.
+- **What is pinned.** A computer pins the SHA-256 of the public key
+  (SubjectPublicKeyInfo, "key pin") of the certificate it paired with. A computer
+  paired before key pins existed stored only that certificate; it computes the key
+  pin locally from it. That certificate came through the authenticated pairing (code
+  commitment or out-of-band bundle), so this trusts nothing new, and such a computer
+  keeps working through the server's first renewal. There is no trust on first use
+  at any point: a key other than the pinned one is always refused.
 - **Renewal.** The server keeps one long-lived private key (`server-key.pem`) and
   issues itself a new self-signed certificate from that same key 30 days before
   expiry and whenever its names change: valid for 397 days, listing the configured

@@ -4,9 +4,9 @@ Clients use only the standard library. ``cryptography`` is imported only by the
 server-side certificate helpers. A bundle is a versioned, URL-safe string containing
 the explicit HTTPS origin, pairing code, certificate and its SHA-256 fingerprint.
 
-Pinning: a computer first trusts exactly the certificate it paired with. After that
-certificate has matched on a real connection, it also pins the certificate's public key
-(``spki``, SHA-256 of the SubjectPublicKeyInfo). The server renews its certificate from
+Pinning: a computer pins the public key (``spki``, SHA-256 of the SubjectPublicKeyInfo) of
+the certificate it paired with; for a bundle stored before key pins existed it is computed
+locally from that same, already trusted certificate. The server renews its certificate from
 the same key, so a renewed certificate (new dates or names) is accepted only when it
 carries the pinned key and passes the usual strict checks; a different key never is.
 """
@@ -349,18 +349,24 @@ def peer_certificate(host, port, timeout):
     return der
 
 
+def with_key_pin(value):
+    """Add the key pin of the stored certificate when the bundle has only the certificate (paired before 1.2).
+
+    That certificate came through the authenticated pairing, so its key is already trusted: computing the pin
+    locally trusts nothing new, and such a computer keeps working through the server's first renewal."""
+    if 'spki' in value:
+        return value
+    return dict(value, spki=spki_pin(ssl.PEM_cert_to_DER_cert(value['certificate_pem'])))
+
+
 def check_peer(der, value):
-    """Raise unless the server's certificate carries the pinned key, or for a legacy pin, is the pinned certificate."""
+    """Raise unless the server's certificate carries the pinned key."""
     try:
-        if 'spki' in value:
-            matches = hmac.compare_digest(spki_pin(der), value['spki'])
-        else:
-            matches = hmac.compare_digest(hashlib.sha256(der).hexdigest(), value['fingerprint'])
+        matches = hmac.compare_digest(spki_pin(der), with_key_pin(value)['spki'])
     except (TypeError, ValueError):
         matches = False
     if not matches:
-        raise ssl.SSLCertVerificationError('Server key does not match the pinned key' if 'spki' in value
-                                           else 'Server certificate fingerprint mismatch')
+        raise ssl.SSLCertVerificationError('Server key does not match the pinned key')
 
 
 def _connect(host, port, pem, timeout):
@@ -381,18 +387,16 @@ def _connect(host, port, pem, timeout):
 def _pinned(value, timeout):
     """Open a verified connection to the pinned server; return it and the trust material to keep.
 
-    The stored certificate is the only trust anchor, as before. With a key pin, a certificate the
-    server renewed from the same key is learned: one handshake without application data reads it,
-    it must carry the pinned key, and the connection is then made again, fully verified, trusting only
-    that certificate. A legacy certificate pin is compared exactly and becomes a key pin only after it
-    matched on this connection, so no key is ever trusted that was not trusted already.
+    The stored certificate is the only trust anchor, as before. A certificate the server renewed from
+    the pinned key is learned: one handshake without application data reads it, it must carry the
+    pinned key, and the connection is then made again, fully verified, trusting only that certificate.
+    The pin is the key of the stored certificate, so no key is ever trusted that was not trusted already.
     """
+    value = with_key_pin(value)
     _, host, port = _address(value['address'])
     try:
         connection = _connect(host, port, value['certificate_pem'], timeout)
     except ssl.SSLCertVerificationError:
-        if 'spki' not in value:
-            raise
         der = peer_certificate(host, port, timeout)
         check_peer(der, value)
         if hmac.compare_digest(hashlib.sha256(der).hexdigest(), value['fingerprint']):
@@ -403,9 +407,7 @@ def _pinned(value, timeout):
     try:
         der = connection.sock.getpeercert(binary_form=True)
         check_peer(der, value)
-        if 'spki' not in value:
-            value = dict(value, spki=spki_pin(der))
-        elif not hmac.compare_digest(hashlib.sha256(der).hexdigest(), value['fingerprint']):
+        if not hmac.compare_digest(hashlib.sha256(der).hexdigest(), value['fingerprint']):
             pem = ssl.DER_cert_to_PEM_cert(der)     # a renewed certificate that still chains to the stored one
             value = dict(value, certificate_pem=pem, fingerprint=_certificate(pem))
     except BaseException:

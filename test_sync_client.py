@@ -363,19 +363,31 @@ class TrustTests(RuntimeFixture):
         with self.machine._transaction() as state:
             state['bundle']['address'] = address
 
-    def test_pairing_migrates_to_the_key_pin_from_the_certificate_it_checked(self):
+    def test_certificate_only_pin_keeps_working_through_a_renewal_but_not_with_another_key(self):
         self.pair()
         bundle = self.machine._load()['bundle']
         der = ssl.PEM_cert_to_DER_cert((self.server_root / 'server-cert.pem').read_text())
-        self.assertEqual(bundle['spki'], tls.spki_pin(der))
-        # Golden case 6: a computer still holding only the old certificate pin is not moved to a renewed
-        # certificate, even one with the same key: it must first match its own pinned certificate.
+        key = tls.spki_pin(der)
+        self.assertEqual(bundle['spki'], key)
+        # Golden case 6: a computer that stored only the certificate (paired before key pins, and not reported
+        # since its update) uses that certificate's own key, so the first renewal does not stop it.
         with self.machine._transaction() as state:
             del state['bundle']['spki']
         self.admin.call('names', names=['localhost'])
+        self.assertEqual(self.connected()['status'], 'connected')
+        self.assertEqual(self.machine._load()['bundle']['spki'], key)
+        # A certificate-only pin still refuses a different key.
+        import lifetime_server as server
+        other = server.ServerRuntime(Path(self.temporary.name) / 'impostor', address='https://127.0.0.1:8443',
+                                     host='127.0.0.1', port=0)
+        other.start()
+        self.addCleanup(other.stop)
+        with self.machine._transaction() as state:
+            del state['bundle']['spki']
+            state['bundle']['address'] = other.public_address
         status = self.connected()
         self.assertEqual((status['status'], status['error']), ('unreachable', 'certificate'))
-        self.assertNotIn('spki', self.machine._load()['bundle'])
+        self.assertEqual(other._store.list_devices(), [])
 
     def test_renewal_30_days_before_expiry_keeps_reporting_without_a_new_code(self):
         self.pair()
