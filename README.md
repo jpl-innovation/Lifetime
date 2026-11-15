@@ -294,7 +294,9 @@ explicitly identified known subtotal, and missing data never becomes zero. Daily
 fleet rows sum matching saved device-local date labels, which can span different
 timezones. Baselines remain undated estimates outside selected-period totals.
 
-Certificate rotation requires re-pairing. Disabling a reporting category prevents
+The server renews its certificate from the same key and computers pin that key, so
+renewals and new server names need no re-pairing; only a new server key does.
+Disabling a reporting category prevents
 future collection/transmission and removes its server snapshot at the next permitted
 sync. Stopping reporting locally performs no further requests; the server's existing
 data then requires its administrator or retention policy to remove it. Previously

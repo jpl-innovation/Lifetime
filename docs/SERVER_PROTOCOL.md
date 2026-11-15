@@ -9,10 +9,20 @@ required. There are no remote command, restart, installation or control messages
 The advanced enrollment bundle contains the explicit HTTPS origin, expiring pairing code,
 full self-signed certificate, and SHA-256 certificate fingerprint. Including the
 certificate allows normal hostname and strict chain verification on the very first
-connection, without an insecure certificate download. Clients compare the actual
-peer fingerprint **before sending credentials or a request body**. Redirects and
-environment proxy discovery are not used. Changing the certificate requires
-re-pairing; do not replace a certificate silently.
+connection, without an insecure certificate download. Clients check the peer
+**before sending credentials or a request body**: first the exact certificate
+fingerprint, then, after that certificate matched once, the SHA-256 of its public
+key (SPKI). The server renews its certificate from the same key (30 days before
+expiry, or when its names change), and clients accept a renewed certificate only
+with the pinned key and full verification. A new key requires re-pairing.
+Redirects and environment proxy discovery are not used.
+
+Clients send `Lifetime-Accept: capabilities`; to those clients the server adds
+`capabilities` (for example `["history.detail", "health.detail", "hardware",
+"problem"]`) to enroll, claim and sync replies. Clients send only advertised
+optional parts; no list means the 1.1 format. `problem` allows an optional sync
+field `{"kind": <category>, "at": <timestamp>}` with the client's last failure
+category (`timeout`, `certificate`, `http-503`, ...), never error text.
 
 The easy connection path uses a checked Crockford code containing an invitation
 ID, secret and 40-bit certificate commitment. A TLS-only probe verifies that

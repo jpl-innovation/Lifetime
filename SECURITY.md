@@ -29,7 +29,8 @@ example is deliberate: the certificate commitment alone needs eight characters.
    the code, using `hmac.compare_digest`, before proceeding.
 3. The fetched certificate becomes the normal enrollment bundle. Subsequent
    connections use the existing strict CA/hostname/validity/extension checks
-   and compare the **full** SHA-256 fingerprint before sending an HTTP request.
+   (TLS 1.2 or newer, the stored certificate as the only trust anchor) and check
+   the pin before sending an HTTP request (see "Pinning the server's key" below).
    The name or IP supplied must match the certificate SAN. If a certificate
    names a DNS host, use that name and arrange normal DNS resolution over the
    VPN; an arbitrary IP alias does not bypass hostname validation.
@@ -37,16 +38,70 @@ example is deliberate: the certificate commitment alone needs eight characters.
    follow the existing protocol. A code never bypasses approval. Exact retries
    are idempotent. Re-enrollment preserves the original UUID/sequence namespace,
    server identity and history. Revocation requires a new invitation and approval
-   to resume reporting. Certificate rotation still requires explicit re-pairing.
+   to resume reporting. Certificate renewals and address changes do not need
+   re-pairing; only a new server key does.
+
+The commitment still covers the **whole certificate** (unchanged wire format, so
+older and newer computers and servers pair with each other). The certificate fixes
+its public key, so the key pin taken from it is exactly as authenticated as the
+certificate. A code commits to the certificate in use when it was created: after a
+renewal, codes created earlier no longer match and must be replaced (they fail
+closed with "this code does not match the server"); the server issues new codes
+against its current certificate.
 
 The advanced bundle import retains its original full out-of-band trust path.
 Legacy bundle codes retain their original server-wide guessing budget.
+
+## Pinning the server's key, renewal and rediscovery
+
+- **What is pinned.** A computer first trusts exactly the certificate it paired with
+  (full SHA-256 fingerprint, as before). On the first connection where that exact
+  certificate matches, it also stores the SHA-256 of the certificate's public key
+  (SubjectPublicKeyInfo, "key pin") and from then on checks the key. A computer
+  that still holds only a certificate pin never learns anything new: it moves to
+  the key pin only after its own certificate matched on a live connection. There
+  is no trust on first use at any point.
+- **Renewal.** The server keeps one long-lived private key (`server-key.pem`) and
+  issues itself a new self-signed certificate from that same key 30 days before
+  expiry and whenever its names change: valid for 397 days, listing the configured
+  address first and every extra name and IP added under **Administration > Other
+  server names and IPs**. The new certificate must pass the same loopback check as
+  at start (strict TLS, its name) before it replaces the old one, which is kept as
+  `server-cert.previous.pem`. If renewal fails, the current certificate stays in
+  use, the dashboard shows a warning and the hourly check tries again.
+- **Learning a renewed certificate.** When the stored certificate no longer
+  verifies (new dates or names), the computer reads the server's certificate in a
+  handshake that sends no application data, accepts it only if it carries the
+  pinned key, and then connects again with full verification (chain, dates, name,
+  strict X.509, TLS 1.2+) trusting only that certificate. A different key is
+  refused before any request ("The server's security certificate has changed").
+  An expired certificate, or one that does not list the address being used, is
+  refused even with the right key.
+- **Rediscovery.** If the stored address stops answering (or presents another
+  certificate) twice in a row, the computer asks local discovery (mDNS,
+  `_lifetime._tcp`) at most every ten minutes. A discovered name or IP, including
+  the address the answer came from, is only a hint: it is kept only if a fully
+  verified connection to it presents the pinned key and a certificate naming that
+  address. Nothing else is sent to a candidate.
+- **Key loss or theft** is the only case that needs re-pairing: create a new
+  identity on the server (see SERVER_OPERATIONS.md) and pair every computer again.
+  A signed hand-over from an old key to a new one is not built.
+
+## Mixed versions
+
+Computers ask for the server's capability list with the request header
+`Lifetime-Accept: capabilities`; a server lists the optional report parts it accepts
+only to computers that asked, so an older computer never meets an unknown reply
+field. A computer sends only advertised parts (a server without a list gets the 1.1
+format) and says on its Connect page when some details are not shared because the
+server is older. Server validation is unchanged: any field outside its allowed list
+still rejects the whole report.
 
 ## LAN attacker and guessing limits
 
 A LAN attacker can advertise a fake service/address/fingerprint prefix, observe
 public discovery traffic, block or relay traffic, or deny service. They cannot
-make the client send enrollment data to a different certificate merely by
+make the client send enrollment data, or reports, to a different key merely by
 spoofing discovery, DNS or the server address. The advertised ten-hex-character
 fingerprint prefix is for identification only; it is never the trust decision.
 An online MITM with a different certificate is rejected before HTTP is sent.
@@ -88,8 +143,14 @@ The public HTTPS API still accepts only enrollment, claim and sync. New fleet,
 invitation, organisation and approval queries use the separate authenticated
 loopback-only admin API. Existing request sizes, deadlines, connection limits,
 private-file ACLs, offline queue durability and redacted errors are retained.
-There are no request/access logs. Restore invalidates both legacy codes and
-new invitations, credentials and pending polling tokens.
+There are no request/access logs. The **Server log** keeps at most 500 entries
+(repeats within a minute are counted): starts and stops, certificate renewals and
+refused requests by category only, with no payloads, codes, credentials or IP
+addresses. A refused report is attached to a computer (its "Last problem") only
+when that computer's own credential came with it. A computer reports the category
+of its last failed attempt (the same word its Connect page shows, never error
+text) to servers that list the `problem` capability. Restore invalidates both
+legacy codes and new invitations, credentials and pending polling tokens.
 
 Daily dashboard values use only currently permitted dated client history.
 Missing dates are unavailable, known zeroes stay zero, and fleet subtotals name
@@ -99,7 +160,7 @@ computer is still awake. Totals and reporting do not measure human activity.
 
 ## Live channel (WebSocket)
 
-Computers keep one WebSocket to the server on the normal port, over the same pinned certificate and credential as the
+Computers keep one WebSocket to the server on the normal port, over the same pinned key and credential as the
 HTTPS sync. The credential travels in the upgrade request header and is checked before the connection is accepted; a bad
 or missing credential gets a 403 and no data is read. Frames are JSON, at most 8 KiB, and a computer sending more than
 40 frames a second is disconnected. Any request that carries an `Origin` header (that is, any browser) is refused, so a

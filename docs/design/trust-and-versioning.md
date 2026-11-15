@@ -1,6 +1,20 @@
 # Design: certificate renewal, address changes and mixed versions
 
-Status: **proposed** (Stage 0 design, not implemented). Baseline: `latest-main` after commit 7e218cf.
+Status: **approved and implemented** (Stage 0). Baseline: `latest-main` after commit 7e218cf.
+
+Implementation notes (what was decided where the design left room):
+
+- The pairing-code commitment still covers the whole certificate (wire format unchanged, so every version pairs
+  with every other). The certificate fixes its key, so the key pin taken from it is equally authenticated; a code
+  created before a renewal no longer matches and must be replaced.
+- Certificate names are the configured address plus the names and IPs the administrator adds; current IPs are not
+  added automatically, because every renewal stops computers still on 1.1 (they pin the whole certificate) and
+  invalidates outstanding codes, so renewals stay deliberate (30 days before expiry, or a name change).
+- Migration to the key pin happens only after the old certificate pin matched on a live connection, as designed;
+  a computer that updates after the server has already renewed must pair again.
+- Capabilities are announced only to computers that send `Lifetime-Accept: capabilities`, because 1.1 and 1.2
+  computers reject unknown reply fields. The one-day 1.1 fallback after a 400 remains as a safety net.
+- Server visibility (Stage 0 item 4) added the `problem` capability: a computer's last failure category.
 Goal: the server can renew its certificate and change address, and computers and servers of different versions can
 run side by side during an upgrade, **without re-pairing every computer and without ever trusting an unknown key**.
 
