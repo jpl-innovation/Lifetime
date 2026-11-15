@@ -1875,3 +1875,45 @@ for _key, _text in _REPORTS2_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+_CHECKS_VI = {
+    'Network checks': 'Kiểm tra mạng',
+    'Watch printers, routers, NAS and websites that do not run Lifetime. A check that fails as many times in a row as the Network check failing rule says opens one incident.': 'Theo dõi máy in, bộ định tuyến, NAS và trang web không chạy Lifetime. Một kiểm tra thất bại liên tiếp đủ số lần đặt trong quy tắc Kiểm tra mạng không thành công sẽ mở một sự cố.',
+    "Checks reach only these networks: private (LAN addresses), public (internet addresses) or ranges such as 192.168.10.0/24. Loopback and link-local addresses need an explicit range; cloud metadata addresses and this server's admin port are always blocked.": 'Các kiểm tra chỉ được truy cập những mạng này: private (địa chỉ mạng nội bộ), public (địa chỉ internet) hoặc dải như 192.168.10.0/24. Địa chỉ loopback và link-local cần một dải ghi rõ; địa chỉ metadata đám mây và cổng quản trị của máy chủ này luôn bị chặn.',
+    'Ping': 'Ping',
+    'TCP port': 'Cổng TCP',
+    'Web page (HTTP or HTTPS)': 'Trang web (HTTP hoặc HTTPS)',
+    'Up': 'Hoạt động',
+    'Name not found': 'Không tìm thấy tên',
+    'Blocked by the allowed networks': 'Bị chặn theo danh sách mạng được phép',
+    'No reply': 'Không phản hồi',
+    'Unexpected status {detail}': 'Mã trạng thái không mong đợi {detail}',
+    'Response too large': 'Phản hồi quá lớn',
+    'Keyword not found': 'Không thấy từ khóa',
+    'Check failed': 'Kiểm tra không thành công',
+    'Not checked yet': 'Chưa kiểm tra',
+    'New check': 'Kiểm tra mới',
+    'Save check': 'Lưu kiểm tra',
+    'Save networks': 'Lưu mạng',
+    'Allowed networks': 'Mạng được phép',
+    'Name or address, e.g. printer.local': 'Tên hoặc địa chỉ, ví dụ printer.local',
+    'Name': 'Tên',
+    'Target': 'Đích',
+    'Result': 'Kết quả',
+    'Latency': 'Độ trễ',
+    'Last checked': 'Kiểm tra lần cuối',
+    'Keyword (optional)': 'Từ khóa (không bắt buộc)',
+    'Group (optional)': 'Nhóm (không bắt buộc)',
+    'Kind': 'Loại',
+    'Method': 'Phương thức',
+    'Expected status from': 'Mã trạng thái mong đợi từ',
+    'Expected status to': 'Mã trạng thái mong đợi đến',
+    'Every': 'Mỗi',
+    'Timeout': 'Thời gian chờ',
+    'Verify certificate': 'Xác minh chứng chỉ',
+    '{count} in a row': '{count} lần liên tiếp',
+}
+for _key, _text in _CHECKS_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

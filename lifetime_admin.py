@@ -21,7 +21,8 @@ class AdminClient:
                              'acknowledge', 'alert_summary', 'schedules', 'set_schedule', 'delete_schedule', 'maintenance',
                              'add_maintenance', 'delete_maintenance', 'notifications', 'set_notifications',
                              'test_notification', 'deliveries', 'time_zones', 'availability', 'coverage_floor',
-                             'set_coverage_floor'):
+                             'set_coverage_floor', 'checks', 'save_check', 'delete_check', 'check_scopes',
+                             'set_check_scopes'):
             raise ValueError('Unknown administrative operation')
         token = (self.directory / 'admin-token').read_text(encoding='ascii').strip()
         if not 32 <= len(token) <= 256 or any(ord(c) < 33 or ord(c) > 126 for c in token):

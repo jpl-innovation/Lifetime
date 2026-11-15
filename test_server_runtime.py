@@ -306,6 +306,16 @@ class RuntimeTests(unittest.TestCase):
         measured = self.admin.call('availability', device_ids=[request['device_id']])['devices'][0]
         self.assertEqual((measured['device_id'], measured['bad_s']), (request['device_id'], 0))
         self.assertEqual(self.admin_raw('/v1/availability', {'device_ids': []})[0], 400)
+        saved = self.admin.call('save_check', check=dict(name='Printer', kind='tcp', host='192.168.1.50', port=9100))
+        self.assertEqual(saved[0]['name'], 'Printer')
+        self.assertEqual(self.runtime.checker._checks[saved[0]['id']]['port'], 9100)     # the worker has it
+        self.assertEqual(self.admin.call('set_check_scopes', scopes=['private', 'public']), ['private', 'public'])
+        self.assertEqual(self.runtime.checker.policy.refuse('127.0.0.1', self.runtime._servers[1].server_port),
+                         'admin-port')
+        self.assertIn(self.runtime._servers[1].server_port, self.runtime.checker.policy.blocked_ports)
+        self.assertEqual(self.admin_raw('/v1/save_check', {'check': {'name': 'x', 'kind': 'http',
+                                                                    'url': 'http://u:p@nas/'}})[0], 400)
+        self.assertEqual(self.admin.call('delete_check', check_id=saved[0]['id']), [])
         rules = self.admin.call('set_alert_rule', rule='disk_low', threshold=15)
         self.assertEqual(next(rule for rule in rules if rule['rule'] == 'disk_low')['threshold'], 15)
         self.assertEqual(self.admin_raw('/v1/set_alert_rule', {'rule': 'disk_low', 'threshold': 500})[0], 400)

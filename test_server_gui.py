@@ -46,6 +46,7 @@ class FakeAdmin:
         self.incidents = []
         self.alerts = None
         self.iana = True
+        self.checks = []
         self.gui_thread = threading.get_ident()
         self.lock = threading.Lock()
 
@@ -172,6 +173,21 @@ class FakeAdmin:
             return dict(iana=self.iana, message='')
         if operation == 'coverage_floor':
             return 80
+        if operation == 'checks':
+            return copy.deepcopy(self.checks)
+        if operation == 'check_scopes':
+            return ['private']
+        if operation == 'set_check_scopes':
+            return arguments['scopes']
+        if operation == 'save_check':
+            import lifetime_checks
+            check = dict(lifetime_checks.validate(arguments['check']), id=len(self.checks) + 1, failures=0, last_at=None,
+                         last_category=None, last_latency_ms=None, last_detail='', down_since=None)
+            self.checks.append(check)
+            return copy.deepcopy(self.checks)
+        if operation == 'delete_check':
+            self.checks = [item for item in self.checks if item['id'] != arguments['check_id']]
+            return copy.deepcopy(self.checks)
         if operation == 'set_coverage_floor':
             return dict(coverage_floor=arguments['percent'])
         if operation == 'test_notification':
@@ -1217,6 +1233,43 @@ class ServerGuiTests(unittest.TestCase):
         self.assertIn('múi giờ', alerts.zone_note.text())
         self.assertEqual(alerts.schedule_device.itemText(1), 'Computer 001 · Support')
         self.assertEqual(alerts.schedule_device.accessibleName(), 'Máy tính')
+
+
+    def test_network_checks_are_added_listed_with_latency_and_translated(self):
+        self.load([device(0)])
+        ui = self.window.alerts.checks_ui
+        self.assertTrue(ui.method.isHidden())       # TCP by default: no web fields
+        ui.kind.setCurrentIndex(ui.kind.findData('http'))
+        self.assertFalse(ui.method.isHidden())
+        ui.name.setText('Intranet')
+        ui.target.setText('https://intranet.school.local/')
+        ui.keyword.setText('Welcome')
+        ui.save()
+        self.wait_idle()
+        saved = next(arguments for operation, arguments, _ in self.api.calls if operation == 'save_check')
+        self.assertEqual((saved['check']['url'], saved['check']['keyword'], saved['check']['verify_tls']),
+                         ('https://intranet.school.local/', 'Welcome', True))
+        self.assertNotIn('check_id', saved)
+        self.api.checks[0].update(last_at='2026-11-07T12:00:00+00:00', last_category='ok', last_latency_ms=42.4)
+        self.window.refresh()
+        self.wait_idle()
+        self.assertEqual([ui.table.item(0, column).text() for column in (0, 2, 3)], ['Intranet', 'Up', '42 ms'])
+        ui.table.selectRow(0)
+        ui.save()
+        self.wait_idle()
+        self.assertEqual([a for o, a, _ in self.api.calls if o == 'save_check'][-1]['check_id'], 1)
+        ui.scopes.setText('private, 192.168.10.0/24')
+        ui.save_scopes()
+        self.wait_idle()
+        self.assertIn(('set_check_scopes', dict(scopes=['private', '192.168.10.0/24'])),
+                      [(o, a) for o, a, _ in self.api.calls])
+        self.api.checks[0].update(last_category='timeout', failures=4, last_latency_ms=None)
+        self.window.language = 'vi'
+        self.window.retranslate()
+        self.window.refresh()
+        self.wait_idle()
+        self.assertEqual(ui.table.item(0, 2).text(), self.window.t('No answer (timeout)') + ' · 4 lần liên tiếp')
+        self.assertEqual(ui.kind.itemText(2), 'Trang web (HTTP hoặc HTTPS)')
 
 
 class AddComputerSheetTests(unittest.TestCase):

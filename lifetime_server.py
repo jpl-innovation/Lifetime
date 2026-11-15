@@ -276,6 +276,11 @@ _ADMIN = {
     'availability': ('monitor.availability', ('device_ids',), ('start', 'end', 'as_of', 'daily')),
     'set_coverage_floor': ('monitor.set_coverage_floor', ('percent',), ()),
     'coverage_floor': ('monitor.coverage_floor', (), ()),
+    'checks': ('monitor.checks', (), ()),
+    'save_check': ('monitor.save_check', ('check',), ('check_id',)),
+    'delete_check': ('monitor.delete_check', ('check_id',), ()),
+    'check_scopes': ('monitor.check_scopes', (), ()),
+    'set_check_scopes': ('monitor.set_check_scopes', ('scopes',), ()),
 }
 
 
@@ -481,6 +486,7 @@ class ServerRuntime:
         self._maintenance_stop = threading.Event()
         self._watcher = None
         self.monitor = None
+        self.checker = None
         self.directory = Path(directory).absolute()
         self.address, self._hostname, _ = tls._address(address)
         for number in (port, admin_port):
@@ -583,6 +589,9 @@ class ServerRuntime:
                 authority = f'[{self._hostname}]' if ':' in self._hostname else self._hostname
                 self._public_address = f'https://{authority}:{public.server_port}'
                 self._admin_address = f'http://127.0.0.1:{admin.server_port}'
+                from lifetime_checks import Checker
+                self.monitor.blocked_ports = {admin.server_port}     # checks never reach the admin listener
+                self.checker = self.monitor.attach_checker(Checker()).start()
                 self._validate_certificate(context, bundle)
                 for server in self._servers:
                     thread = threading.Thread(target=server.serve_forever,
@@ -766,6 +775,9 @@ class ServerRuntime:
             if self._watcher is not None:
                 self._watcher.join()
                 self._watcher = None
+            if self.checker is not None:
+                self.checker.stop()
+                self.checker = None
             if self.hub is not None:
                 self.hub.stop()
                 self.hub = None

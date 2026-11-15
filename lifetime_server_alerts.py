@@ -13,12 +13,14 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateTimeE
                              QTimeEdit, QVBoxLayout, QWidget)
 
 from lifetime_layout import ControlRow
+from lifetime_server_checks import ChecksUI
 from lifetime_server_widgets import status_dot, table_action
 from lifetime_theme import T
 
 RULE_TEXT = {'offline': 'Computer offline', 'no_report': 'No report received', 'disk_low': 'Disk almost full',
              'cpu_high': 'Processor busy', 'memory_high': 'Memory almost full', 'battery_worn': 'Battery worn',
-             'temperature_high': 'Running hot', 'crashes': 'Repeated crashes', 'agent_outdated': 'Lifetime version too old'}
+             'temperature_high': 'Running hot', 'crashes': 'Repeated crashes', 'agent_outdated': 'Lifetime version too old',
+             'check_down': 'Network check failing'}
 UNIT = {'disk_low': '%', 'cpu_high': '%', 'memory_high': '%', 'battery_worn': '%', 'temperature_high': ' °C', 'crashes': ''}
 STATE_TEXT = {'pending': 'Starting', 'open': 'Needs attention', 'acknowledged': 'Acknowledged', 'resolved': 'Resolved',
               'suppressed': 'Paused by maintenance'}
@@ -137,6 +139,7 @@ class AlertsUI:
                         schedules=client.call('schedules'), maintenance=client.call('maintenance'),
                         notifications=client.call('notifications'), deliveries=client.call('deliveries', limit=50),
                         time_zones=client.call('time_zones'), coverage_floor=client.call('coverage_floor'),
+                        checks=client.call('checks'), check_scopes=client.call('check_scopes'),
                         # ponytail: first 500 approved computers for the pickers; page through if a fleet outgrows it
                         devices=[dict(device_id=d['device_id'], name=(d.get('identity') or {}).get('display_name') or d['device_id'],
                                       group=(d.get('identity') or {}).get('department') or '')
@@ -488,6 +491,8 @@ class AlertsUI:
         self.delivery_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         form.addRow(self.delivery_table)
         layout.addWidget(mail)
+        self.checks_ui = ChecksUI(self)
+        self.checks_ui.admin(layout)
 
     @staticmethod
     def _device_picker():
@@ -558,6 +563,7 @@ class AlertsUI:
         for box, key in ((self.summary_enabled, 'Daily summary'), (self.webhook_enabled, 'Webhook')):
             box.setAccessibleName(self.t(key))
         self.smtp_port.setAccessibleName(self.t('Port'))
+        self.checks_ui.retranslate()
         self.coverage_floor.setAccessibleName(self.t('Minimum coverage for availability'))
         self.summary_hour.setAccessibleName(self.t('Daily summary at'))
         self.webhook_url.setAccessibleName(self.t('Webhook (https://)'))
@@ -607,6 +613,7 @@ class AlertsUI:
             button.clicked.connect(lambda checked=False, identifier=window['id']:
                                    self._call('delete_maintenance', dict(window_id=identifier)))
             self.maintenance_table.setCellWidget(index, 4, table_action(button))
+        self.checks_ui.render(result)
         self.delivery_table.setRowCount(len(result['deliveries']))
         for index, delivery in enumerate(result['deliveries']):
             problem = self.t(RULE_TEXT.get(delivery.get('rule'), '')) if delivery.get('rule') else ''

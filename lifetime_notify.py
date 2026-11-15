@@ -242,6 +242,7 @@ RULE_TEXT = {
     'temperature_high': ('Running hot', 'Đang quá nóng'),
     'crashes': ('Repeated crashes', 'Lỗi hệ thống lặp lại'),
     'agent_outdated': ('Lifetime version too old', 'Phiên bản Lifetime quá cũ'),
+    'check_down': ('Network check failing', 'Kiểm tra mạng không thành công'),
 }
 UNITS = {'disk_low': '% free', 'cpu_high': '%', 'memory_high': '%', 'battery_worn': '%', 'temperature_high': ' °C',
          'crashes': ''}

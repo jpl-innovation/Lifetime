@@ -23,9 +23,10 @@ import uuid
 import zoneinfo
 
 import lifetime_availability as availability
+import lifetime_checks as checks
 import lifetime_notify as notify
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 APPLICATION_ID = 0x4C544D4E     # "LTMN"
 RETENTION_DAYS = 180
 QUOTA_BYTES = 64 * 1024 * 1024
@@ -35,7 +36,8 @@ PRESENCE = ('online', 'offline', 'unknown')
 BACKOFF = (60, 300, 900, 3600)  # seconds before the 2nd to 5th attempt; after the 5th the delivery has failed
 RECOVER_SECONDS = 300           # a problem must stay away this long before its incident resolves (no flapping storms)
 ACTIVE = ('pending', 'open', 'acknowledged', 'suppressed')
-BACKUP_TABLES = ('settings', 'schedules', 'maintenance', 'presence', 'incidents', 'timeline', 'deliveries')  # parents first
+BACKUP_TABLES = ('settings', 'schedules', 'maintenance', 'checks', 'presence', 'incidents', 'timeline', 'deliveries')  # parents first
+CHECK_RULES = ('check_down',)       # rules about agentless checks, never about computers
 
 # Built-in rules. ``threshold``/``minutes`` are the editable defaults with their allowed ranges; ``direction`` and
 # ``hysteresis`` make a reading inside the band keep the current state instead of flipping it.
@@ -54,6 +56,8 @@ RULES = {
                              direction='above', hysteresis=5, optional=True),
     'crashes': dict(enabled=True, threshold=3, range=(1, 1000), minutes=0, direction='atleast', hysteresis=0),
     'agent_outdated': dict(enabled=False, threshold=None, minutes=0, version=''),
+    # An agentless check (printer, router, website) that failed this many times in a row; minutes add a minimum time.
+    'check_down': dict(enabled=True, threshold=3, range=(1, 100), minutes=0, minutes_range=(0, 1440)),
 }
 VERSION = re.compile(r'[0-9]{1,6}(\.[0-9]{1,6}){0,3}')
 
@@ -86,6 +90,11 @@ MIGRATIONS = [
             status TEXT NOT NULL CHECK(status IN ('queued','sending','sent','failed')), attempts INTEGER NOT NULL DEFAULT 0,
             next_at TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(kind, channel, ref))''',
         'CREATE INDEX deliveries_due ON deliveries(status, next_at)',
+    ),
+    (   # 2: agentless checks; results arrive from the Checker and are written here only by the monitor
+        '''CREATE TABLE checks (id INTEGER PRIMARY KEY, config TEXT NOT NULL, failures INTEGER NOT NULL DEFAULT 0,
+            last_at TEXT, last_category TEXT, last_latency_ms REAL, last_detail TEXT NOT NULL DEFAULT '', down_since TEXT,
+            created_at TEXT NOT NULL)''',
     ),
 ]
 
@@ -276,6 +285,7 @@ class Monitor:
         self._delivering = threading.Lock()
         self.quota, self.retention = quota, dt.timedelta(days=retention_days)
         self.started_at = None
+        self.checker, self.blocked_ports = None, set()
         self._housekeeping_at = None
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(path), timeout=15, isolation_level=None, check_same_thread=False)
@@ -386,6 +396,8 @@ class Monitor:
                 paused = self._paused(db, device, now)
                 missing = []
                 for name, rule in rules.items():
+                    if name in CHECK_RULES:
+                        continue
                     row = self._active(db, device['device_id'], name)
                     verdict, began, value = self._evaluate(name, rule, device, (state, since), expected, window, now,
                                                            bool(row and row['clear_since'] is None))
@@ -394,6 +406,7 @@ class Monitor:
                     self._step(db, device, name, rule, row, verdict, began, value, paused, now)
                 status[device['device_id']] = dict(presence=state, reason=reason, expected=expected, paused=paused,
                                                    missing=missing)
+            self._tick_checks(db, rules, status, now)
             for row in db.execute('SELECT id,device_id FROM presence WHERE end_at IS NULL').fetchall():
                 if row['device_id'] not in status:      # no longer approved or removed: its history simply ends
                     db.execute('UPDATE presence SET end_at=? WHERE id=?', (_stamp(now), row['id']))
@@ -878,6 +891,119 @@ class Monitor:
                 f'SELECT * FROM incidents{clause} ORDER BY started_at DESC,id DESC LIMIT ? OFFSET ?',   # nosec B608
                 (*parameters, limit, offset))]
 
+    # ---- agentless checks ----
+
+    def attach_checker(self, checker):
+        """The runtime's Checker: it gets the enabled checks and the network policy, and its results come back
+        through ``tick`` (so monitoring.sqlite keeps one writer)."""
+        self.checker = checker
+        self._push_checks()
+        return checker
+
+    def _push_checks(self):
+        if self.checker is None:
+            return
+        with self._lock:
+            configured = {row['id']: json.loads(row['config']) for row in self._db.execute('SELECT id,config FROM checks')}
+            scopes = json.loads(self._setting(self._db, 'check_scopes') or '["private"]')
+        self.checker.configure(configured, checks.Policy(scopes, self.blocked_ports))
+
+    def checks(self):
+        """Every check with its last result, for the dashboard."""
+        with self._lock:
+            return [dict(json.loads(row['config']), id=row['id'], failures=row['failures'], last_at=row['last_at'],
+                         last_category=row['last_category'], last_latency_ms=row['last_latency_ms'],
+                         last_detail=row['last_detail'], down_since=row['down_since'])
+                    for row in self._db.execute('SELECT * FROM checks ORDER BY id')]
+
+    def save_check(self, check, check_id=None):
+        """Add a check, or change one (its result history starts again when what it checks changes)."""
+        try:
+            value = checks.validate(check)
+        except checks.CheckError as error:
+            raise MonitorError(str(error)) from None
+        if check_id is not None and type(check_id) is not int:
+            raise MonitorError('Invalid check')
+        with self._transaction() as db:
+            if check_id is None:
+                if db.execute('SELECT COUNT(*) FROM checks').fetchone()[0] >= checks.MAX_CHECKS:
+                    raise MonitorError('Too many checks')
+                db.execute('INSERT INTO checks(config,created_at) VALUES (?,?)', (json.dumps(value, sort_keys=True),
+                                                                                  _stamp(self.clock())))
+            else:
+                row = db.execute('SELECT config FROM checks WHERE id=?', (check_id,)).fetchone()
+                if not row:
+                    raise MonitorError('Unknown check')
+                old = json.loads(row['config'])
+                same = {k: v for k, v in old.items() if k not in ('name', 'group', 'enabled')} == \
+                    {k: v for k, v in value.items() if k not in ('name', 'group', 'enabled')}
+                db.execute('UPDATE checks SET config=? WHERE id=?', (json.dumps(value, sort_keys=True), check_id))
+                if not same:
+                    db.execute("UPDATE checks SET failures=0,last_at=NULL,last_category=NULL,last_latency_ms=NULL,"
+                               "last_detail='',down_since=NULL WHERE id=?", (check_id,))
+        self._push_checks()
+        return self.checks()
+
+    def delete_check(self, check_id):
+        if type(check_id) is not int:
+            raise MonitorError('Invalid check')
+        with self._transaction() as db:
+            db.execute('DELETE FROM checks WHERE id=?', (check_id,))
+            db.execute('DELETE FROM incidents WHERE device_id=?', (f'check:{check_id}',))
+        self._push_checks()
+        return self.checks()
+
+    def check_scopes(self):
+        with self._lock:
+            return json.loads(self._setting(self._db, 'check_scopes') or '["private"]')
+
+    def set_check_scopes(self, scopes):
+        """The networks checks may reach: 'private', 'public' and CIDRs such as 192.168.10.0/24."""
+        try:
+            value = checks.validate_scopes(scopes)
+        except checks.CheckError as error:
+            raise MonitorError(str(error)) from None
+        with self._transaction() as db:
+            self._setting(db, 'check_scopes', json.dumps(value))
+        self._push_checks()
+        return value
+
+    def _tick_checks(self, db, rules, status, now):
+        """Write the Checker's results, then one incident per check that has failed N times in a row."""
+        for result in (self.checker.drain() if self.checker is not None else []):
+            if result.get('category') not in checks.CATEGORIES:
+                continue
+            if result['ok']:
+                db.execute('''UPDATE checks SET failures=0,down_since=NULL,last_at=?,last_category='ok',last_latency_ms=?,
+                    last_detail=? WHERE id=?''', (result['at'], result['latency_ms'], result['detail'][:40], result['check_id']))
+            else:
+                db.execute('''UPDATE checks SET failures=failures+1,down_since=COALESCE(down_since,?),last_at=?,
+                    last_category=?,last_latency_ms=NULL,last_detail=? WHERE id=?''',
+                           (result['at'], result['at'], result['category'], result['detail'][:40], result['check_id']))
+        rule = rules.get('check_down')
+        for row in db.execute('SELECT * FROM checks').fetchall():
+            config = json.loads(row['config'])
+            if not config['enabled']:
+                continue
+            device = dict(device_id=f"check:{row['id']}", name=config['name'], group=config['group'])
+            paused = self._paused(db, device, now)
+            status[device['device_id']] = dict(presence='online' if row['last_category'] == 'ok' else
+                                               'unknown' if row['last_category'] is None else 'offline',
+                                               reason=row['last_category'] or 'not-checked', expected=True, paused=paused,
+                                               missing=[])
+            if rule is None:
+                continue
+            active = self._active(db, device['device_id'], 'check_down')
+            holding = bool(active and active['clear_since'] is None)
+            if row['last_category'] is None:
+                verdict = 'idle'
+            elif row['failures'] >= rule['threshold'] or (holding and row['failures']):
+                verdict = 'bad'         # once open, a single success is needed to start recovering
+            else:
+                verdict = 'clear'
+            began = _time(row['down_since']) if row['down_since'] else None
+            self._step(db, device, 'check_down', rule, active, verdict, began, row['failures'] or None, paused, now)
+
     # ---- availability (read-only, from the presence history) ----
 
     def coverage_floor(self):
@@ -1056,6 +1182,7 @@ class Monitor:
         with self._lock:
             self.status = {}
             self.started_at = now       # like a restart: a computer must report again before it counts as down
+        self._push_checks()
         return dict(restored=True)
 
     # ---- retention and size ----
