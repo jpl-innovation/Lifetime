@@ -353,6 +353,22 @@ server start. See [server operations](docs/SERVER_OPERATIONS.md#named-administra
 [SECURITY](SECURITY.md#named-administrators-roles-and-the-audit-trail). Verified with tests on one Windows 11 PC
 only, not yet with domain accounts and groups on a real Windows Server.
 
+### Agent updates
+
+Under **Administration > Agent updates** an Admin uploads an approved agent package with its published SHA-256 and
+version, offers it to a share of computers (start with 10 %), and can pause or roll back. Only computers whose owner
+switched on *Get Lifetime updates approved by the server* take part (off by default). They download the package over
+their pinned connection, check its SHA-256 and, on Windows, its signature when it has one, keep it ready and report
+back; they never run it. `install_agent_windows.ps1 -StagedUpdate` installs it, for example from a startup script at
+the next restart. See [server operations](docs/SERVER_OPERATIONS.md#agent-updates-staged). Not yet verified from a
+real GPO or Intune startup script.
+
+### Tested size
+
+One simulated fleet of 50 computers ran against a test server on one Windows 11 PC
+([docs/benchmarks](docs/benchmarks/README.md)). Supported size = tested size: larger fleets are not claimed until
+`tools/fleet_simulator.py` has been run at that size.
+
 See [server protocol](docs/SERVER_PROTOCOL.md) and
 [server operations and deployment checks](docs/SERVER_OPERATIONS.md) for trust,
 administrator access, installation, firewall choices, retention, backups, restore,
