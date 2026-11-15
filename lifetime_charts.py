@@ -1144,4 +1144,16 @@ class LiveSparklines(QWidget):
             if value is None and not any(v is not None for _, _, v in chart.buffer.samples):
                 chart.message = ''
             self.cards[key].subtitle.setText(tr('Not available') if value is None else tr('live.latest', value=value, unit=chart.unit))
+        if self.isVisible():
+            self.refresh_tables()
+
+    def refresh_tables(self):
+        """Build the optional data tables only when opened, keeping samples live while hidden."""
+        for key, chart in self.charts.items():
+            if self.cards[key].isHidden():
+                continue
             self.cards[key].set_table([tr('Local time'), chart.unit], [(date_text(wall.date())+' '+time_text(wall, seconds=True), f'{v:.3f}' if v is not None else tr('Unavailable')) for _, wall, v in chart.buffer.samples])
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_tables()

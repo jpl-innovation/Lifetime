@@ -8,6 +8,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import signal
 import shutil
 import sys
@@ -45,8 +46,36 @@ def boot_id():
         status = ctypes.windll.ntdll.NtQuerySystemInformation(90, buffer, len(buffer), None)
         if status < 0:
             raise OSError(f'Cannot read Windows boot identity: NTSTATUS {status:#x}')
-        return buffer.raw[:16].hex()
+        identity = buffer.raw[:16].hex()
+        # Some Windows VMs retain this GUID across actual OS starts. The local
+        # Windows boot sequence distinguishes those starts without wall time.
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r'SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters',
+                                0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                sequence, kind = winreg.QueryValueEx(key, 'BootId')
+            if kind == winreg.REG_DWORD and type(sequence) is int and sequence >= 0:
+                return f'{identity}:windows-boot:{sequence}'
+        except OSError:
+            pass
+        return identity
     return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+
+
+def same_boot_identity(left, right):
+    """Recognize a legacy Windows GUID without treating upgrade as a reboot.
+
+    Two explicit Windows sequences must match. A missing sequence is unknown,
+    not evidence of a reboot; sample() separately guards counter rollback.
+    """
+    if left == right:
+        return True
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    pattern = r'([0-9a-f]{32})(?::windows-boot:([0-9]+))?'
+    a, b = re.fullmatch(pattern, left), re.fullmatch(pattern, right)
+    return bool(a and b and a[1] == b[1] and (a[2] is None or b[2] is None))
 
 
 def estimate_first_seen(with_source=False):
@@ -188,9 +217,18 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     previous = ledger.get('last_clock')
     delta = tick - previous if previous is not None else None
     changed_boot = (previous is None or
-                    (identity is not None and ledger.get('boot_id') is not None and identity != ledger.get('boot_id')) or
+                    (identity is not None and ledger.get('boot_id') is not None and not same_boot_identity(identity, ledger.get('boot_id'))) or
                     (identity is None and delta is not None and delta < 0))
+    # Never use cumulative boot_accounted_seconds as a clock watermark: legacy
+    # ledgers may have accumulated several counter epochs under a reused GUID.
+    high_water = max(ledger.get('awake_clock_high_water', 0.0), previous if previous is not None else 0.0)
+    if not changed_boot and same_boot_identity(identity, ledger.get('boot_id')):
+        if ':windows-boot:' in (ledger.get('boot_id') or '') and ':windows-boot:' not in (identity or ''):
+            identity = ledger['boot_id']  # retain the stronger identity on read failure
+        if same_boot_identity(ledger.get('boot_credited_for'), identity):
+            ledger['boot_credited_for'] = identity
     if changed_boot:
+        high_water = 0.0
         ledger['boots'] += 1
         ledger['current_session_seconds'] = 0.0
         ledger['boot_accounted_seconds'] = 0.0
@@ -201,7 +239,18 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
         ledger['sessions'].append(dict(start=local.isoformat(), seconds=0.0))
     added = 0.0
     accounted = ledger.get('boot_accounted_seconds', ledger['current_session_seconds'])
-    if changed_boot or (credit_current and ledger.get('boot_credited_for') != token):
+    rollback = not changed_boot and delta is not None and delta < 0
+    if rollback:
+        # A decreasing counter with no proven new boot is ambiguous. Preserve
+        # totals and the prior watermark, including when history is disabled.
+        ledger['awake_clock_rollbacks'] = ledger.get('awake_clock_rollbacks', 0) + 1
+        ledger['current_session_seconds'] = 0.0
+        if history:
+            ledger.setdefault('coverage_gaps', []).append(dict(start=ledger.get('last_update'), end=stamp,
+                                                              reason='awake_clock_rollback'))
+            ledger['coverage_gaps'] = ledger['coverage_gaps'][-100:]
+            ledger['sessions'].append(dict(start=local.isoformat(), seconds=0.0))
+    elif changed_boot or (credit_current and ledger.get('boot_credited_for') != token and tick >= high_water):
         credit = max(0.0, min(tick, MAX_BOOT_CREDIT) - accounted)
         ledger['total_seconds'] += credit
         ledger['current_session_seconds'] += credit
@@ -218,15 +267,16 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
             ledger['unattributed_seconds'] += credit
         ledger['boot_credited_for'] = token
     elif delta is not None and 0 <= delta <= MAX_DELTA:
-        ledger['total_seconds'] += delta
-        ledger['current_session_seconds'] += delta
-        accounted += delta
-        added = delta
-        if history and delta:
+        # Only the tail above the highest observed counter is new evidence.
+        added = max(0.0, tick - max(previous, high_water))
+        ledger['total_seconds'] += added
+        ledger['current_session_seconds'] += added
+        accounted += added
+        if history and added:
             from lifetime_daily import distribute
             end = local.timestamp()
-            distribute(delta, end, ledger['daily'], ledger['hourly'],
-                       (end-delta, [(end-delta, end)], False), dated=ledger.setdefault('dated_hourly', {}))
+            distribute(added, end, ledger['daily'], ledger['hourly'],
+                       (end-added, [(end-added, end)], False), dated=ledger.setdefault('dated_hourly', {}))
     elif delta is not None:
         if history:
             ledger.setdefault('coverage_gaps', []).append(dict(start=ledger.get('last_update'), end=stamp, reason='awake_clock_discontinuity'))
@@ -247,6 +297,7 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
         if elapsed_wall < 0 or (not changed_boot and delta is not None and elapsed_wall+2 < delta):
             ledger['clock_note_count'] = ledger.get('clock_note_count', 0)+1
     ledger['boot_accounted_seconds'] = accounted
+    ledger['awake_clock_high_water'] = max(high_water, tick)
     ledger['longest_session_seconds'] = max(ledger['longest_session_seconds'], ledger['current_session_seconds'])
     ledger.update(last_clock=tick, boot_id=identity, last_update=stamp)
     return ledger
