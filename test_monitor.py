@@ -28,6 +28,11 @@ def stamp(value):
     return value.isoformat()
 
 
+def zoneinfo_missing():
+    import zoneinfo
+    return zoneinfo.ZoneInfoNotFoundError('No time zone found')
+
+
 class Fleet:
     """Stands in for Store.monitor_snapshot: one dict per approved computer."""
     def __init__(self):
@@ -369,6 +374,31 @@ class CalendarTests(MonitorCase):
         self.assertEqual(self.monitor.schedules()[0]['kind'], 'always')
         self.monitor.delete_schedule('default')
         self.assertEqual(self.monitor.schedules()[0]['kind'], 'auto')
+
+    def test_without_a_time_zone_database_names_are_refused_readably_and_offsets_still_work(self):
+        missing = zoneinfo_missing()
+        with patch.object(monitoring, 'iana_available', return_value=False), \
+                patch.object(monitoring.zoneinfo, 'ZoneInfo', side_effect=missing):
+            with self.assertRaisesRegex(monitoring.MonitorError, 'tzdata'):
+                self.monitor.set_schedule('default', 'business', timezone='Asia/Ho_Chi_Minh')
+            self.monitor.set_schedule('group', 'business', key='Sales', timezone='+07:00')
+            self.assertEqual(self.monitor.time_zones(), dict(iana=False, message=monitoring.NO_TZDATA))
+            # A name saved while tzdata was installed: monitoring carries on in server time and says so.
+            with self.monitor._transaction() as db:
+                db.execute("UPDATE schedules SET value=json_set(value,'$.timezone','Asia/Ho_Chi_Minh') WHERE scope='group'")
+            self.fleet.add()
+            self.monitor.tick()
+            self.assertIn('expected', self.monitor.status[ID])
+            self.assertFalse(next(row for row in self.monitor.schedules() if row['scope'] == 'group')['zone_ok'])
+        self.assertEqual(monitoring.schedule_zone(dict(timezone='+07:00'))[0].utcoffset(None), dt.timedelta(hours=7))
+
+    @unittest.skipUnless(monitoring.iana_available(), 'no IANA time zone data here (install tzdata from requirements-server.txt)')
+    def test_iana_names_when_the_database_is_available(self):
+        self.monitor.set_schedule('default', 'business', timezone='Asia/Ho_Chi_Minh', start='08:00', end='17:00')
+        schedule = self.monitor.schedules()[0]
+        self.assertTrue(schedule['zone_ok'])
+        self.assertEqual(monitoring.expected(schedule, None, dt.datetime(2026, 11, 16, 1, 30, tzinfo=dt.timezone.utc)),
+                         (True, dt.datetime(2026, 11, 16, 1, 0, tzinfo=dt.timezone.utc)))
 
     def test_maintenance_pauses_alerts_and_an_ongoing_problem_opens_when_it_ends(self):
         self.fleet.add()

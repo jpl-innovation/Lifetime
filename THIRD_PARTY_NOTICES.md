@@ -22,6 +22,7 @@ its own copyright and license; versions in a given release may be newer.
 | cryptography | Server certificates and TLS identity | Apache-2.0 OR BSD-3-Clause (used under BSD-3-Clause) | <https://cryptography.io/> |
 | cffi, pycparser | Needed by cryptography | MIT-0; BSD-3-Clause | <https://cffi.readthedocs.io/> |
 | websockets | Live connection between computers and the server | BSD-3-Clause | <https://websockets.readthedocs.io/> |
+| tzdata (server) | IANA time zone data for schedules and availability | Apache-2.0 (data: public domain) | <https://github.com/python/tzdata> |
 | pywin32 (server on Windows) | Windows service support | PSF-2.0 | <https://github.com/mhammond/pywin32> |
 | Python | Runtime | PSF-2.0 | <https://www.python.org/> |
 | PyInstaller (build tool) | Packaging the Windows programs | GPL-2.0-or-later with an exception that leaves bundled programs under their own license | <https://pyinstaller.org/> |

@@ -266,6 +266,7 @@ _ADMIN = {
         'summary_enabled', 'summary_hour', 'language', 'password', 'webhook_url')),
     'test_notification': ('monitor.test_notification', ('channel',), ()),
     'deliveries': ('monitor.deliveries', (), ('limit', 'offset')),
+    'time_zones': ('monitor.time_zones', (), ()),
 }
 
 

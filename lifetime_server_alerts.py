@@ -37,6 +37,8 @@ ERROR_TEXT = {'connect': 'Could not connect', 'timeout': 'No answer (timeout)', 
 KINDS = (('auto', 'Automatic (desktops always, laptops never)'), ('always', 'Always'),
          ('business', 'Business hours'), ('never', 'Never'))
 SCOPES = (('default', 'Everyone'), ('group', 'Group'), ('device', 'Computer'))
+NO_TZDATA = ('Time zone names such as Asia/Ho_Chi_Minh need the tzdata package on this server (install '
+             'requirements-server.txt). Use local, UTC or a fixed offset such as +07:00 meanwhile.')
 
 
 class AlertsUI:
@@ -133,7 +135,12 @@ class AlertsUI:
         def work():
             return dict(incidents=client.call('incidents', state=state, limit=200), rules=client.call('alert_rules'),
                         schedules=client.call('schedules'), maintenance=client.call('maintenance'),
-                        notifications=client.call('notifications'), deliveries=client.call('deliveries', limit=50))
+                        notifications=client.call('notifications'), deliveries=client.call('deliveries', limit=50),
+                        time_zones=client.call('time_zones'),
+                        # ponytail: first 500 approved computers for the pickers; page through if a fleet outgrows it
+                        devices=[dict(device_id=d['device_id'], name=(d.get('identity') or {}).get('display_name') or d['device_id'],
+                                      group=(d.get('identity') or {}).get('department') or '')
+                                 for d in client.call('devices', status='approved', limit=500)])
         if not self.w._submit(work, self._loaded, quiet=True):
             self._busy = False
 
@@ -344,15 +351,22 @@ class AlertsUI:
         for code, _ in KINDS:
             self.schedule_kind.addItem('', code)
         self.schedule_key = QLineEdit()
+        self.schedule_device = self._device_picker()
+        self.schedule_scope.currentIndexChanged.connect(self._scopes_changed)
         self.schedule_zone = QLineEdit('local')
         self.schedule_zone.setMaximumWidth(140)
         self.schedule_start, self.schedule_end = QTimeEdit(QTime(8, 0)), QTimeEdit(QTime(18, 0))
         for control in (self.schedule_start, self.schedule_end):
             control.setDisplayFormat('HH:mm')
-        for control in (self.schedule_scope, self.schedule_key, self.schedule_kind, self.schedule_zone,
+        for control in (self.schedule_scope, self.schedule_key, self.schedule_device, self.schedule_kind, self.schedule_zone,
                         self.schedule_start, self.schedule_end):
             editor.addWidget(control)
         content.addLayout(editor)
+        self.zone_note = QLabel()
+        self.zone_note.setWordWrap(True)
+        self.zone_note.setStyleSheet('color: #FFC93C;')
+        self.zone_note.hide()
+        content.addWidget(self.zone_note)
         days = ControlRow()
         self.weekday_boxes = []
         for day in range(7):
@@ -385,6 +399,8 @@ class AlertsUI:
         for code in ('all', 'group', 'device'):
             self.window_scope.addItem('', code)
         self.window_key = QLineEdit()
+        self.window_device = self._device_picker()
+        self.window_scope.currentIndexChanged.connect(self._scopes_changed)
         now = QDateTime.currentDateTime()
         self.window_start, self.window_end = QDateTimeEdit(now), QDateTimeEdit(now.addSecs(7200))
         for control in (self.window_start, self.window_end):
@@ -393,9 +409,11 @@ class AlertsUI:
         self.window_note = QLineEdit()
         self.window_note.setMaxLength(200)
         self.window_add = w.button('Add window', self.add_window)
-        for control in (self.window_scope, self.window_key, self.window_start, self.window_end, self.window_note, self.window_add):
+        for control in (self.window_scope, self.window_key, self.window_device, self.window_start, self.window_end,
+                        self.window_note, self.window_add):
             add.addWidget(control)
         content.addLayout(add)
+        self._scopes_changed()
         layout.addWidget(windows)
 
         mail, form = w._form_section('Notifications')
@@ -458,6 +476,38 @@ class AlertsUI:
         form.addRow(self.delivery_table)
         layout.addWidget(mail)
 
+    @staticmethod
+    def _device_picker():
+        picker = QComboBox()
+        picker.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        picker.setMinimumContentsLength(20)
+        return picker
+
+    def _scopes_changed(self, *unused):
+        """A group is typed; a computer is picked from the known computers."""
+        for scope, key, picker in ((self.schedule_scope, self.schedule_key, self.schedule_device),
+                                   (self.window_scope, self.window_key, self.window_device)):
+            key.setVisible(scope.currentData() == 'group')
+            picker.setVisible(scope.currentData() == 'device')
+
+    def _fill_devices(self, devices):
+        for picker in (self.schedule_device, self.window_device):
+            chosen = picker.currentData()
+            picker.blockSignals(True)
+            picker.clear()
+            for device in sorted(devices, key=lambda d: (d['name'].casefold(), d['device_id'])):
+                picker.addItem(f"{device['name']} · {device['group'] or self.t('No group')}", device['device_id'])
+                picker.setItemData(picker.count() - 1, device['device_id'], Qt.ItemDataRole.ToolTipRole)
+            if chosen and picker.findData(chosen) < 0:      # a removed computer still named by a saved schedule
+                picker.addItem(self._device_name(chosen), chosen)
+            picker.setCurrentIndex(picker.findData(chosen) if chosen else (0 if picker.count() else -1))
+            picker.blockSignals(False)
+
+    def _key(self, scope, line, picker):
+        if scope == 'group':
+            return line.text().strip()
+        return (picker.currentData() or '') if scope == 'device' else ''
+
     def _table(self, columns, height):
         table = QTableWidget(0, columns)
         self.w._style_table(table)
@@ -477,11 +527,14 @@ class AlertsUI:
             self.window_scope.setItemText(index, self.t(key))
         for day, box in enumerate(self.weekday_boxes):
             box.setText(self.t(f'weekday.{day}'))
-        for control, key in ((self.schedule_key, 'Group name or computer ID'), (self.schedule_zone, 'Time zone'),
+        for control, key in ((self.schedule_key, 'Group name'), (self.schedule_zone, 'Time zone: local, UTC, +07:00 or Asia/Ho_Chi_Minh'),
                              (self.schedule_holidays, 'Holidays (YYYY-MM-DD, comma separated)'),
-                             (self.window_key, 'Group name or computer ID'), (self.window_note, 'Note')):
+                             (self.window_key, 'Group name'), (self.window_note, 'Note')):
             control.setPlaceholderText(self.t(key))
             control.setAccessibleName(self.t(key))
+        for picker in (self.schedule_device, self.window_device):
+            picker.setPlaceholderText(self.t('No approved computers yet'))
+            picker.setAccessibleName(self.t('Computer'))
         for control, key in ((self.schedule_scope, 'Applies to'), (self.schedule_kind, 'Hours'),
                              (self.schedule_start, 'Opens at'), (self.schedule_end, 'Closes at'),
                              (self.window_scope, 'Applies to'), (self.window_start, 'From'), (self.window_end, 'Until')):
@@ -516,6 +569,10 @@ class AlertsUI:
         if self._fresh['notifications']:
             self._render_notifications(result['notifications'])
             self._fresh['notifications'] = False
+        self._fill_devices(result.get('devices') or [])
+        zones = result.get('time_zones') or {}
+        self.zone_note.setText(self.t(NO_TZDATA))
+        self.zone_note.setVisible(not zones.get('iana', True))
         self.schedule_table.setRowCount(len(result['schedules']))
         for index, schedule in enumerate(result['schedules']):
             for column, value in enumerate((self._scope_text(schedule['scope'], schedule['key']), self._hours_text(schedule))):
@@ -567,6 +624,8 @@ class AlertsUI:
                       zone=self.t('server time') if schedule['timezone'] == 'local' else schedule['timezone'])
         if schedule['holidays']:
             text += ' · ' + self.t('{count} holidays', count=len(schedule['holidays']))
+        if not schedule.get('zone_ok', True):
+            text += ' · ' + self.t('time zone unavailable, using server time')
         return text
 
     def _render_rules(self, rules):
@@ -645,7 +704,12 @@ class AlertsUI:
             return
         schedule = self.schedule_table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
         self.schedule_scope.setCurrentIndex(self.schedule_scope.findData(schedule['scope']))
-        self.schedule_key.setText(schedule['key'])
+        if schedule['scope'] == 'device':
+            if self.schedule_device.findData(schedule['key']) < 0:
+                self.schedule_device.addItem(self._device_name(schedule['key']), schedule['key'])
+            self.schedule_device.setCurrentIndex(self.schedule_device.findData(schedule['key']))
+        else:
+            self.schedule_key.setText(schedule['key'])
         self.schedule_kind.setCurrentIndex(self.schedule_kind.findData(schedule['kind']))
         self.schedule_zone.setText(schedule['timezone'])
         self.schedule_start.setTime(QTime.fromString(schedule['start'], 'HH:mm'))
@@ -656,9 +720,17 @@ class AlertsUI:
 
     def save_schedule(self):
         scope = self.schedule_scope.currentData()
+        zone = self.schedule_zone.text().strip() or 'local'
+        if '/' in zone and not ((self.result or {}).get('time_zones') or {}).get('iana', True):
+            self.w.status_label.setText(self.t(NO_TZDATA))     # say why instead of a bare refusal
+            return
+        key = self._key(scope, self.schedule_key, self.schedule_device)
+        if scope != 'default' and not key:
+            self.w.status_label.setText(self.t('Choose a computer' if scope == 'device' else 'Enter a group name'))
+            return
         self._call('set_schedule', dict(
-            scope=scope, key='' if scope == 'default' else self.schedule_key.text().strip(),
-            kind=self.schedule_kind.currentData(), timezone=self.schedule_zone.text().strip() or 'local',
+            scope=scope, key=key,
+            kind=self.schedule_kind.currentData(), timezone=zone,
             start=self.schedule_start.time().toString('HH:mm'), end=self.schedule_end.time().toString('HH:mm'),
             weekdays=[day for day, box in enumerate(self.weekday_boxes) if box.isChecked()],
             holidays=[part.strip() for part in self.schedule_holidays.text().split(',') if part.strip()]), self.schedule_save)
@@ -674,7 +746,11 @@ class AlertsUI:
         start = self.window_start.dateTime().toSecsSinceEpoch()
         end = self.window_end.dateTime().toSecsSinceEpoch()
         stamp = lambda seconds: dt.datetime.fromtimestamp(seconds, dt.timezone.utc).isoformat()
-        self._call('add_maintenance', dict(scope=scope, key='' if scope == 'all' else self.window_key.text().strip(),
+        key = self._key(scope, self.window_key, self.window_device)
+        if scope != 'all' and not key:
+            self.w.status_label.setText(self.t('Choose a computer' if scope == 'device' else 'Enter a group name'))
+            return
+        self._call('add_maintenance', dict(scope=scope, key=key,
                                            start=stamp(start), end=stamp(end), note=self.window_note.text().strip()),
                    self.window_add)
 

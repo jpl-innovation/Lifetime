@@ -11,6 +11,7 @@ size (QUOTA_BYTES), checked every hour.
 """
 import contextlib
 import datetime as dt
+import functools
 import json
 from pathlib import Path
 import re
@@ -134,8 +135,24 @@ DEFAULT_SCHEDULE = dict(kind='auto', timezone='local', start='08:00', end='18:00
 SCHEDULE_KINDS = ('auto', 'always', 'business', 'never')   # auto: always for desktops, never for laptops
 
 
+NO_TZDATA = ('Time zone names such as Asia/Ho_Chi_Minh need the tzdata package on this server (install '
+             'requirements-server.txt). Use local, UTC or a fixed offset such as +07:00 meanwhile.')
+
+
+@functools.lru_cache(maxsize=1)
+def iana_available():
+    """True when zoneinfo can load IANA names. Windows Python has no system database: it needs ``tzdata``."""
+    try:
+        zoneinfo.ZoneInfo('Etc/UTC')
+        return True
+    except (ValueError, OSError, KeyError):     # KeyError: ZoneInfoNotFoundError
+        return False
+
+
 def _zone(name):
-    """'local' (the server's zone, None), 'UTC', a fixed offset '+07:00', or an IANA name where the system knows it."""
+    """'local' (the server's zone, None), 'UTC', a fixed offset '+07:00', or an IANA name where the system knows it.
+
+    Without a time zone database an IANA name is refused with NO_TZDATA; offsets keep working."""
     if name == 'local':
         return None
     if name == 'UTC':
@@ -146,12 +163,21 @@ def _zone(name):
         if offset > dt.timedelta(hours=14):
             raise MonitorError('Unknown time zone')
         return dt.timezone(-offset if match.group(1) == '-' else offset)
+    if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_+\-/]{1,64}', name):
+        raise MonitorError('Unknown time zone')
     try:
-        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_+\-/]{1,64}', name):
-            raise ValueError()
         return zoneinfo.ZoneInfo(name)
     except (ValueError, OSError, KeyError):     # KeyError: ZoneInfoNotFoundError (no tz data on this system)
-        raise MonitorError('Unknown time zone') from None
+        raise MonitorError('Unknown time zone' if iana_available() else NO_TZDATA) from None
+
+
+def schedule_zone(schedule):
+    """(tzinfo or None for server local, True when the saved zone loaded). A saved IANA name that this system can
+    no longer load (tzdata removed) falls back to server time instead of stopping monitoring."""
+    try:
+        return _zone(schedule['timezone']), True
+    except MonitorError:
+        return None, False
 
 
 def _clock_time(value):
@@ -192,7 +218,7 @@ def expected(schedule, laptop, now):
         kind = 'always' if laptop is False else 'never'
     if kind != 'business':
         return kind == 'always', None
-    zone = _zone(schedule['timezone'])
+    zone, _ = schedule_zone(schedule)
     local = now.astimezone(zone) if zone else now.astimezone()
     start, end = _clock_time(schedule['start']), _clock_time(schedule['end'])
 
@@ -460,7 +486,14 @@ class Monitor:
                     for row in self._db.execute('SELECT * FROM schedules ORDER BY scope,key')]
         if not any(row['scope'] == 'default' for row in rows):
             rows.insert(0, dict(DEFAULT_SCHEDULE, scope='default', key=''))
+        for row in rows:
+            row['zone_ok'] = schedule_zone(row)[1]
         return rows
+
+    @staticmethod
+    def time_zones():
+        """Whether IANA names work here; the dashboard shows the message when they do not."""
+        return dict(iana=iana_available(), message='' if iana_available() else NO_TZDATA)
 
     def set_schedule(self, scope, kind, key='', timezone='local', start='08:00', end='18:00', weekdays=(0, 1, 2, 3, 4),
                      holidays=()):

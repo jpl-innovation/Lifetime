@@ -1,4 +1,6 @@
 # Server edition only. Desktop and client require no additional packages.
 cryptography>=43
 websockets>=15
+# IANA time zone names (Asia/Ho_Chi_Minh) for alert schedules and availability; pure data, no native code.
+tzdata>=2024.1
 pywin32>=306; sys_platform == "win32"

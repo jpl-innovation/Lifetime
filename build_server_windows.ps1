@@ -31,14 +31,14 @@ try {
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
                 '--distpath', $output, '--workpath', $work, '--specpath', $work)
     $ErrorActionPreference = 'Continue'
-    & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --hidden-import lifetime_ws_server --exclude-module PyQt6 lifetime_server.py
+    & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --collect-data tzdata --hidden-import lifetime_ws_server --exclude-module PyQt6 lifetime_server.py
     if ($LASTEXITCODE -ne 0) { throw 'Runtime build failed.' }
     & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 --hidden-import lifetime_server_stream --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage lifetime_server_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
     & $Python -m PyInstaller @common --console --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
     if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }
     if ($IncludeServiceWrapper) {
-        & $Python -m PyInstaller @common --console --name LifetimeServerService --collect-all cryptography --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
+        & $Python -m PyInstaller @common --console --name LifetimeServerService --collect-all cryptography --collect-data tzdata --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
         if ($LASTEXITCODE -ne 0) { throw 'Experimental service-wrapper build failed.' }
     }
     $ErrorActionPreference = 'Stop'

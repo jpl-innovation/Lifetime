@@ -45,6 +45,7 @@ class FakeAdmin:
         self.retained_before = None
         self.incidents = []
         self.alerts = None
+        self.iana = True
         self.gui_thread = threading.get_ident()
         self.lock = threading.Lock()
 
@@ -167,6 +168,8 @@ class FakeAdmin:
         if operation == 'notifications':
             import lifetime_notify
             return dict(lifetime_notify.DEFAULTS, password_set=True, webhook='', secrets_unreadable=False)
+        if operation == 'time_zones':
+            return dict(iana=self.iana, message='')
         if operation == 'test_notification':
             return dict(channel=arguments['channel'], status='failed', error='tls')
         if operation in ('set_alert_rule', 'set_schedule', 'delete_schedule', 'add_maintenance', 'delete_maintenance',
@@ -1143,6 +1146,23 @@ class ServerGuiTests(unittest.TestCase):
         changes = [arguments for operation, arguments, _ in self.api.calls if operation == 'set_alert_rule']
         self.assertEqual(changes, [dict(rule='disk_low', enabled=True, minutes=30, threshold=20),
                                    dict(rule='agent_outdated', enabled=False, minutes=0, version='1.2.0')])
+        # A computer is picked by name and group, never typed as an ID.
+        self.assertTrue(alerts.schedule_device.isHidden())
+        alerts.schedule_scope.setCurrentIndex(alerts.schedule_scope.findData('device'))
+        self.assertFalse(alerts.schedule_device.isHidden())
+        self.assertTrue(alerts.schedule_key.isHidden())
+        self.assertEqual(alerts.schedule_device.currentText(), 'Computer 000 · Sales')
+        alerts.save_schedule()
+        self.wait_idle()
+        schedule = next(arguments for operation, arguments, _ in self.api.calls if operation == 'set_schedule')
+        self.assertEqual((schedule['scope'], schedule['key']), ('device', device(0)['device_id']))
+        self.api.calls.clear()
+        alerts.window_scope.setCurrentIndex(alerts.window_scope.findData('device'))
+        alerts.add_window()
+        self.wait_idle()
+        window = next(arguments for operation, arguments, _ in self.api.calls if operation == 'add_maintenance')
+        self.assertEqual((window['scope'], window['key']), ('device', device(0)['device_id']))
+        self.api.calls.clear()
         alerts.schedule_scope.setCurrentIndex(alerts.schedule_scope.findData('group'))
         alerts.schedule_key.setText('Sales')
         alerts.schedule_kind.setCurrentIndex(alerts.schedule_kind.findData('business'))
@@ -1170,6 +1190,25 @@ class ServerGuiTests(unittest.TestCase):
         alerts.send_test('email')
         self.wait_idle()
         self.assertEqual(alerts.test_result.text(), 'Test message failed: Secure connection failed')
+
+    def test_time_zone_names_without_tzdata_say_why_and_vietnamese_picker(self):
+        self.api.iana = False
+        self.load([device(0), device(1)])
+        alerts = self.window.alerts
+        self.assertFalse(alerts.zone_note.isHidden())
+        self.assertIn('tzdata', alerts.zone_note.text())
+        alerts.schedule_scope.setCurrentIndex(alerts.schedule_scope.findData('default'))
+        alerts.schedule_zone.setText('Asia/Ho_Chi_Minh')
+        alerts.save_schedule()
+        self.wait_idle()
+        self.assertFalse(any(operation == 'set_schedule' for operation, _, _ in self.api.calls))
+        self.assertIn('+07:00', self.window.status_label.text())
+        self.window.language = 'vi'
+        self.window.retranslate()
+        self.assertIn('tzdata', alerts.zone_note.text())
+        self.assertIn('múi giờ', alerts.zone_note.text())
+        self.assertEqual(alerts.schedule_device.itemText(1), 'Computer 001 · Support')
+        self.assertEqual(alerts.schedule_device.accessibleName(), 'Máy tính')
 
 
 class AddComputerSheetTests(unittest.TestCase):

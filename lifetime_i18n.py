@@ -1798,6 +1798,14 @@ _ALERTS_VI = {
     'Interrupted by a server stop': 'Bị gián đoạn do máy chủ dừng',
     'Mail server error': 'Lỗi máy chủ thư',
     'Incident removed': 'Sự cố đã bị xóa',
+    'Time zone names such as Asia/Ho_Chi_Minh need the tzdata package on this server (install requirements-server.txt). Use local, UTC or a fixed offset such as +07:00 meanwhile.':
+        'Tên múi giờ như Asia/Ho_Chi_Minh cần gói tzdata trên máy chủ này (cài đặt requirements-server.txt). Trong lúc chờ, hãy dùng local, UTC hoặc độ lệch cố định như +07:00.',
+    'time zone unavailable, using server time': 'không tải được múi giờ, đang dùng giờ máy chủ',
+    'Group name': 'Tên nhóm',
+    'No approved computers yet': 'Chưa có máy tính nào được duyệt',
+    'Choose a computer': 'Hãy chọn một máy tính',
+    'Enter a group name': 'Hãy nhập tên nhóm',
+    'Time zone: local, UTC, +07:00 or Asia/Ho_Chi_Minh': 'Múi giờ: local, UTC, +07:00 hoặc Asia/Ho_Chi_Minh',
 }
 for _key, _text in _ALERTS_VI.items():
     EN.setdefault(_key, _key)
