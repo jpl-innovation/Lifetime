@@ -302,6 +302,31 @@ sync. Stopping reporting locally performs no further requests; the server's exis
 data then requires its administrator or retention policy to remove it. Previously
 exported files are outside that policy. Reports are never uploaded or shared.
 
+### Alerts and incidents
+
+Lifetime Server tells you when something is wrong, using only what the computers already send. Built-in rules
+(each can be turned off, with its own threshold and duration under **Administration > Alert rules**): computer
+offline longer than N minutes during its expected online hours, no report for N minutes, disk free below X %,
+processor or memory above X %, battery health below X %, temperature above X °C (only where a sensor reports one),
+repeated crashes (from Health, only when the computer shares Health) and a Lifetime version older than a minimum you
+set. A problem must last the whole duration before an incident opens and stay away five minutes before it resolves,
+so short spikes and flapping do not flood anyone. A computer that does not share a reading is never alerted on it;
+readings that stop arriving show as "telemetry missing" on the computer, not as a failure.
+
+- **Incidents** lists current and past problems: one incident per continuous problem, with its timeline, who
+  acknowledged it and when, and when it recovered. The header shows the number of open alerts.
+- **Expected online hours** (everyone, a group or one computer): always, never, or business hours with a time zone,
+  weekdays and holidays. The default expects desktops always and laptops never, so a laptop asleep after work
+  raises nothing. **Maintenance windows** pause alerts.
+- **Notifications**: one email when an incident opens and one when it recovers (SMTP with STARTTLS or TLS), retried
+  and logged; an optional daily summary and an optional webhook for Teams, Slack or Telegram bridges, both off by
+  default. Messages name the computer and the problem only. See
+  [server operations](docs/SERVER_OPERATIONS.md#alerts-and-notifications).
+
+Monitoring keeps its own history (`monitoring.sqlite`) next to the server database; time when the server itself was
+not running is shown as unknown, never as offline. Not yet verified with a real mail server or webhook service
+(tests use a local SMTP stub and a fake webhook).
+
 See [server protocol](docs/SERVER_PROTOCOL.md) and
 [server operations and deployment checks](docs/SERVER_OPERATIONS.md) for trust,
 administrator access, installation, firewall choices, retention, backups, restore,

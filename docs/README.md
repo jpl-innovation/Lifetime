@@ -2,7 +2,7 @@
 
 | Document | What it covers |
 | --- | --- |
-| [SERVER_OPERATIONS.md](SERVER_OPERATIONS.md) | Installing and running Lifetime Server, ports and firewall |
+| [SERVER_OPERATIONS.md](SERVER_OPERATIONS.md) | Installing and running Lifetime Server, ports and firewall, alerts and notifications |
 | [SERVER_PROTOCOL.md](SERVER_PROTOCOL.md) | Enrollment, claim and sync (HTTPS) |
 | [live-channel.md](live-channel.md) | The persistent live WebSocket: rates, commands, acks, fallback |
 | [connecting.md](connecting.md) | The one-code connecting flow |

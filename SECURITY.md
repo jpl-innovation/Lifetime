@@ -198,6 +198,32 @@ Reading the data requires the loopback-only administrator API with its bearer to
 (theme, language, style) are stored locally and are not sent anywhere. If you find a way to make the server accept or
 display data it should refuse, please report it as described below.
 
+## Alerts, notifications and the mail password
+
+Alert rules run inside the server on data it already holds and apply a rule only to data the computer's policy lets
+it share (reading rules need Readings, crash rules need Health). Monitoring writes its own `monitoring.sqlite`, never
+`server.sqlite` and never any computer's awake-time ledger. Its admin routes are on the same loopback-only, token
+protected administration API, and every setting is validated (ranges, time zones, dates, e-mail addresses, an
+`https://` webhook without a user name or password in it).
+
+- **SMTP password and webhook address.** They are secrets (a webhook URL often contains its own token) and are kept
+  out of `monitoring.sqlite`, replies, logs and exports, in `alert-secrets.bin` in the data directory. On Windows
+  the file is encrypted with DPAPI (`CryptProtectData` through ctypes, for the account that runs the server,
+  normally SYSTEM, with an application-specific entropy) and its ACL is reset to Administrators and SYSTEM before
+  anything is written. On other systems DPAPI does not exist, so the file is plain JSON protected only by 0600
+  permissions on a 0700 data directory: protect the server account and backups accordingly. The dashboard shows only
+  whether a password is set and the webhook's host. A file written by another account (for example after copying
+  the data directory to another machine) cannot be decrypted and is reported as unreadable: enter the secrets again.
+- **Transport.** Mail uses only the standard library (`smtplib`, `ssl`) with STARTTLS or implicit TLS, certificate
+  and host name checks from the system's trusted roots, and never falls back to a plain connection: a server that
+  does not offer STARTTLS receives nothing, not even the user name. Webhooks are HTTPS POSTs that follow no
+  redirects.
+- **Message content.** Messages name the computer and its group, the problem, its last reading and times. They never
+  contain activity or readings history, IP or MAC addresses, codes, credentials or the server's certificate details.
+  The delivery log stores a status and an error category, never message text or server replies.
+- A test message never creates an incident. Retries are bounded (five attempts), and a message interrupted by a
+  server stop is never sent twice.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem. Use GitHub's private vulnerability reporting on this repository
