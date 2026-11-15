@@ -234,12 +234,27 @@ data toggle reveals accessible tables with second-resolution timestamps; consent
 revocation clears the affected samples and tables. Multiple GPUs use an explicit
 total-power row for the aggregate series.
 
-Each detailed card has a group title followed by left-aligned field labels and right-aligned values. Percentage meters appear only for available percentage readings. Thin yellow meters supplement the displayed value; they never stand in for missing data. Unavailable values use the same row structure and a muted textual state.
+Each detailed card has an icon and a group title followed by left-aligned field labels and right-aligned values. Percentage meters appear only for available percentage readings. Thin blue meters supplement the displayed value; RAM and disk meters turn amber under 15 % free and red under 5 % free. They never stand in for missing data. Unavailable values use the same row structure and a muted textual state.
 
 ### Total, charts, and motion
 
 Overview gives the lifetime total the strongest type hierarchy. Activity uses native QPainter charts with one shared 30-day, 90-day, calendar-year, or All filter. Six titled cards cover the calendar, daily hours with a white 7-day average, cumulative lifetime hours, local hour profile, weekday averages, and session lengths. The leading calendar/daily pair uses 330px panels; four supporting charts use
 280px panels and quieter blue marks in two columns. Compact views use one column. Longer calendars scroll horizontally inside their card, preserving legible day cells. Cards retain a consistent height, sparse muted axes, thin marks, generous hover lanes, and one keyboard-accessible page-level Show data toggle. Missing dates remain unknown, and recorded zeroes remain zero. The five-step calendar scale increases in lightness toward brand yellow and saturates at 24 hours, preserving larger boot credits in tooltips and tables. Cumulative totals retain the opening balance and mark the original live tracking boundary. Short-range hourly profiles use retained imported awake intervals and explicitly describe partial coverage; undated all-time hourly totals are never presented as a complete filtered profile. Existing entrance and numeric transitions are brief; `LIFETIME_REDUCE_MOTION=1` disables motion. Busy feedback must remain understandable without animation.
+
+### Shared dashboard widgets
+
+`lifetime_widgets_dashboard.py` holds the visual pieces both apps share, painted with QPainter from theme tokens (Glass/Classic, dark/light follow automatically). Five state colours only: good (`good`), warning (the amber `accent`), danger (`danger`), info (`info`, a blue added for this) and neutral (`muted`). Every state carries a glyph and words, never colour alone.
+
+- **Status chip**: a pill with a glyph (check, bang, cross, i, dash) and the state's words. Server tables draw it from the item's `VISUAL_ROLE` through the row delegate, so the item text, sorting and tests are unchanged.
+- **Heartbeat bar**: one tick per hour (device detail, last 24 hours, from the monitoring presence history); an hour with no record is an outline, not a colour; hovering a tick says the hour and state.
+- **Capacity bar**: used against total with the exact figures in words; blue normally, amber under 15 % free, red under 5 %.
+- **Summary strip**: the fleet's states as one proportional bar plus a chip per state; a chip opens Devices filtered to that state.
+- **Info card / tile**: a titled group of readings with an icon (server specifications, hardware details on both apps).
+- **Health badge**: a 0-100 score in a ring with one chip per factor and the rule in its caption and tooltip (`lifetime_health.factors`): stability (unexpected shutdowns plus crashes in 30 days: 0 good, 1-2 warning, 3+ danger) and battery (full charge vs design: 80 % good, 60-79 % warning, below danger). Missing readings are left out; with none the score is a dash ("Unknown").
+- **Event rail**: an incident's timeline as dots and words, newest first.
+- **Empty state**: why a list is empty (all clear, not set up, nothing matches, switched off) with at most one action.
+
+Nothing in the module animates, repaints on a timer or uses a graphics effect; widgets repaint only when their data changes, and painted paths are kept per size.
 
 ## Do's and Don'ts
 
