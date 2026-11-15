@@ -248,6 +248,15 @@ _ADMIN = {
     'server_log': ('server_log', (), ('limit', 'offset')),
     # Monitoring (alerts): methods of the runtime's Monitor, the only writer of monitoring.sqlite.
     'presence': ('monitor.presence', ('device_id',), ('limit',)),
+    'alert_rules': ('monitor.rules', (), ()),
+    'set_alert_rule': ('monitor.set_rule', ('rule',), ('enabled', 'threshold', 'minutes', 'version')),
+    'incidents': ('monitor.incidents', (), ('state', 'device_id', 'limit', 'offset')),
+    'schedules': ('monitor.schedules', (), ()),
+    'set_schedule': ('monitor.set_schedule', ('scope', 'kind'), ('key', 'timezone', 'start', 'end', 'weekdays', 'holidays')),
+    'delete_schedule': ('monitor.delete_schedule', ('scope',), ('key',)),
+    'maintenance': ('monitor.maintenance', (), ('include_past',)),
+    'add_maintenance': ('monitor.add_maintenance', ('scope', 'start', 'end'), ('key', 'note')),
+    'delete_maintenance': ('monitor.delete_maintenance', ('window_id',), ()),
 }
 
 

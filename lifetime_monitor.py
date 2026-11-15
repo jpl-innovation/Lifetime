@@ -15,6 +15,7 @@ import json
 import re
 import sqlite3
 import threading
+import zoneinfo
 
 SCHEMA_VERSION = 1
 APPLICATION_ID = 0x4C544D4E     # "LTMN"
@@ -122,6 +123,86 @@ def _compare(rule, value, threshold, active):
     else:
         bad, clear = value >= threshold, value < threshold
     return 'bad' if bad else 'clear' if clear else ('bad' if active else 'clear')
+
+
+DEFAULT_SCHEDULE = dict(kind='auto', timezone='local', start='08:00', end='18:00', weekdays=[0, 1, 2, 3, 4], holidays=[])
+SCHEDULE_KINDS = ('auto', 'always', 'business', 'never')   # auto: always for desktops, never for laptops
+
+
+def _zone(name):
+    """'local' (the server's zone, None), 'UTC', a fixed offset '+07:00', or an IANA name where the system knows it."""
+    if name == 'local':
+        return None
+    if name == 'UTC':
+        return dt.timezone.utc
+    match = re.fullmatch(r'([+-])([01][0-9]|2[0-3]):([0-5][0-9])', name) if isinstance(name, str) else None
+    if match:
+        offset = dt.timedelta(hours=int(match.group(2)), minutes=int(match.group(3)))
+        if offset > dt.timedelta(hours=14):
+            raise MonitorError('Unknown time zone')
+        return dt.timezone(-offset if match.group(1) == '-' else offset)
+    try:
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_+\-/]{1,64}', name):
+            raise ValueError()
+        return zoneinfo.ZoneInfo(name)
+    except (ValueError, OSError, KeyError):     # KeyError: ZoneInfoNotFoundError (no tz data on this system)
+        raise MonitorError('Unknown time zone') from None
+
+
+def _clock_time(value):
+    if not isinstance(value, str) or not re.fullmatch(r'([01][0-9]|2[0-3]):[0-5][0-9]', value):
+        raise MonitorError('Expected a time as HH:MM')
+    return dt.time.fromisoformat(value)
+
+
+def _schedule(value):
+    if value.get('kind') not in SCHEDULE_KINDS:
+        raise MonitorError('Invalid schedule kind')
+    _zone(value['timezone'])
+    if _clock_time(value['start']) == _clock_time(value['end']):
+        raise MonitorError('Opening and closing times must differ')
+    weekdays = value['weekdays']
+    if (not isinstance(weekdays, list) or len(set(weekdays)) != len(weekdays)
+            or any(type(day) is not int or not 0 <= day <= 6 for day in weekdays)):
+        raise MonitorError('Invalid weekdays')
+    holidays = value['holidays']
+    if not isinstance(holidays, list) or len(holidays) > 366:
+        raise MonitorError('Invalid holidays')
+    for day in holidays:
+        try:
+            if not isinstance(day, str) or dt.date.fromisoformat(day).isoformat() != day:
+                raise ValueError()
+        except ValueError:
+            raise MonitorError('Invalid holiday date') from None
+    return dict(value, weekdays=sorted(weekdays), holidays=sorted(set(holidays)))
+
+
+def expected(schedule, laptop, now):
+    """(expected online at ``now``, start of the current expected window or None) for one schedule.
+
+    'auto' expects desktops always and laptops (or computers whose kind is unknown) never, so a laptop asleep
+    outside its hours never raises an alert. Business hours may run over midnight (end before start)."""
+    kind = schedule['kind']
+    if kind == 'auto':
+        kind = 'always' if laptop is False else 'never'
+    if kind != 'business':
+        return kind == 'always', None
+    zone = _zone(schedule['timezone'])
+    local = now.astimezone(zone) if zone else now.astimezone()
+    start, end = _clock_time(schedule['start']), _clock_time(schedule['end'])
+
+    def opened(day):
+        if day.weekday() not in schedule['weekdays'] or day.isoformat() in schedule['holidays']:
+            return None
+        return dt.datetime.combine(day, start, tzinfo=zone or local.tzinfo)
+    today, moment = local.date(), local.time()
+    if start < end:
+        window = opened(today) if start <= moment < end else None
+    elif moment >= start:
+        window = opened(today)
+    else:
+        window = opened(today - dt.timedelta(days=1)) if moment < end else None
+    return window is not None, window and window.astimezone(dt.timezone.utc)
 
 
 def _migrate(db):
@@ -338,31 +419,104 @@ class Monitor:
             self._setting(db, 'rules', json.dumps(saved, sort_keys=True))
         return self.rules()
 
+    # ---- calendars: expected-online schedules and maintenance windows ----
+
+    def _schedule_for(self, db, device):
+        for scope, key in (('device', device['device_id']), ('group', (device.get('group') or '').casefold()), ('default', '')):
+            row = db.execute('SELECT value FROM schedules WHERE scope=? AND key=?', (scope, key)).fetchone()
+            if row and (scope != 'group' or key):
+                return dict(json.loads(row[0]), scope=scope)
+        return dict(DEFAULT_SCHEDULE, scope='default')
+
     def _expected(self, db, device, now):
         """(expected online now, when the current expected window began or None)."""
-        return True, None
+        return expected(self._schedule_for(db, device), device.get('laptop'), now)
 
-    def _paused(self, db, device, now):
-        """True while a maintenance window covers this computer."""
-        return False
+    @staticmethod
+    def _paused(db, device, now):
+        """True while a maintenance window covers this computer (PAUSED: no alert opens)."""
+        moment = _stamp(now)
+        return bool(db.execute('''SELECT 1 FROM maintenance WHERE start_at<=? AND end_at>? AND (scope='all'
+            OR (scope='group' AND key=?) OR (scope='device' AND key=?))''',
+                               (moment, moment, (device.get('group') or '').casefold(), device['device_id'])).fetchone())
+
+    def schedules(self):
+        with self._lock:
+            rows = [dict(json.loads(row['value']), scope=row['scope'], key=row['key'])
+                    for row in self._db.execute('SELECT * FROM schedules ORDER BY scope,key')]
+        if not any(row['scope'] == 'default' for row in rows):
+            rows.insert(0, dict(DEFAULT_SCHEDULE, scope='default', key=''))
+        return rows
+
+    def set_schedule(self, scope, kind, key='', timezone='local', start='08:00', end='18:00', weekdays=(0, 1, 2, 3, 4),
+                     holidays=()):
+        """Expected-online hours for everyone (default), a group (department) or one computer."""
+        if scope not in ('default', 'group', 'device') or not isinstance(key, str) or len(key) > 128 \
+                or (scope == 'default') != (key == '') or any(ord(c) < 32 for c in key):
+            raise MonitorError('Invalid schedule scope')
+        value = _schedule(dict(kind=kind, timezone=timezone, start=start, end=end, weekdays=list(weekdays),
+                               holidays=list(holidays)))
+        key = key.casefold() if scope == 'group' else key
+        with self._transaction() as db:
+            if scope != 'default' and db.execute('SELECT COUNT(*) FROM schedules').fetchone()[0] >= 1000:
+                raise MonitorError('Too many schedules')
+            db.execute('INSERT OR REPLACE INTO schedules VALUES (?,?,?)', (scope, key, json.dumps(value, sort_keys=True)))
+        return self.schedules()
+
+    def delete_schedule(self, scope, key=''):
+        with self._transaction() as db:
+            db.execute('DELETE FROM schedules WHERE scope=? AND key=?', (scope, key.casefold() if scope == 'group' else key))
+        return self.schedules()
+
+    def maintenance(self, include_past=False):
+        if type(include_past) is not bool:
+            raise MonitorError('Invalid filter')
+        with self._lock:
+            return [dict(row) for row in self._db.execute(
+                'SELECT * FROM maintenance WHERE end_at>? ORDER BY start_at,id',
+                ('' if include_past else _stamp(self.clock()),))]
+
+    def add_maintenance(self, scope, start, end, key='', note=''):
+        """A window during which no alert opens for everyone, a group or one computer (problems stay suppressed)."""
+        if scope not in ('all', 'group', 'device') or not isinstance(key, str) or len(key) > 128 \
+                or (scope == 'all') != (key == '') or any(ord(c) < 32 for c in key):
+            raise MonitorError('Invalid maintenance scope')
+        if not isinstance(note, str) or len(note) > 200 or any(ord(c) < 32 for c in note):
+            raise MonitorError('Invalid maintenance note')
+        begin, finish = _time(start), _time(end)
+        if not dt.timedelta(minutes=1) <= finish - begin <= dt.timedelta(days=31):
+            raise MonitorError('A maintenance window lasts from one minute to 31 days')
+        with self._transaction() as db:
+            if db.execute('SELECT COUNT(*) FROM maintenance').fetchone()[0] >= 500:
+                raise MonitorError('Too many maintenance windows')
+            db.execute('INSERT INTO maintenance(scope,key,start_at,end_at,note) VALUES (?,?,?,?,?)',
+                       (scope, key.casefold() if scope == 'group' else key, _stamp(begin), _stamp(finish), note.strip()))
+        return self.maintenance()
+
+    def delete_maintenance(self, window_id):
+        if type(window_id) is not int:
+            raise MonitorError('Invalid maintenance window')
+        with self._transaction() as db:
+            db.execute('DELETE FROM maintenance WHERE id=?', (window_id,))
+        return self.maintenance()
 
     def _evaluate(self, name, rule, device, presence, expected, window, now, active=False):
         """(verdict, since, value). The verdict is bad, clear, missing (telemetry absent: a separate condition),
         idle (nothing to judge now: outside its hours, or offline for a reading rule) or na (not shared, no sensor,
         rule not configured). Missing or idle data never fires a rule and never resolves an open incident."""
         floor = max(filter(None, (window, self.started_at)), default=None)
-        if name == 'offline':
+        if name == 'offline':       # back online counts at any hour; being away counts only inside its hours
             state, since = presence
-            if not expected or state == 'unknown':
-                return 'idle', None, None
             if state == 'online':
                 return 'clear', None, None
+            if not expected or state == 'unknown':
+                return 'idle', None, None
             return 'bad', max(filter(None, (since, floor))), None
         if name == 'no_report':
-            if not expected:
-                return 'idle', None, None
             last = max(filter(None, (_time(device.get('last_report') or device['created_at']), floor)))
-            return ('bad' if (now - last).total_seconds() >= rule['minutes'] * 60 else 'clear'), last, None
+            if (now - last).total_seconds() < rule['minutes'] * 60:
+                return 'clear', None, None
+            return ('bad' if expected else 'idle'), last, None
         if name == 'agent_outdated':
             minimum = _version(rule.get('version') or '')
             if not minimum:

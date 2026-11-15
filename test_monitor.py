@@ -269,6 +269,108 @@ class RuleTests(MonitorCase):
         self.assertEqual(self.monitor.incidents()[0]['resolution'], 'not-monitored')
 
 
+class CalendarTests(MonitorCase):
+    def states(self):
+        return [(row['rule'], row['state']) for row in self.monitor.incidents()]
+
+    def test_laptop_asleep_outside_its_schedule_never_creates_an_incident(self):
+        for laptop in (True, None):     # a laptop, and a computer whose kind is unknown (no readings shared)
+            self.fleet.devices.clear()
+            self.fleet.add(laptop=laptop)
+            self.monitor.tick()
+            self.fleet.offline(self.clock.now)
+            self.run_for(48 * 60, step=30)
+            self.assertEqual(self.states(), [])
+            self.assertFalse(self.monitor.status[ID]['expected'])
+
+    def test_business_hours_with_weekdays_holidays_and_time_zone(self):
+        self.monitor.set_schedule('group', 'business', key='SALES', timezone='+07:00', start='08:00', end='17:00',
+                                  holidays=['2026-11-17'])
+        self.fleet.add(laptop=True)     # a group schedule applies to laptops too
+        self.clock.now = dt.datetime(2026, 11, 16, 9, 30, tzinfo=dt.timezone.utc)       # 16:30 in +07:00, Monday
+        self.monitor.tick()
+        self.fleet.offline(self.clock.now)
+        self.run_for(29)        # 16:59 local: offline 29 minutes inside the hours
+        self.assertEqual(self.states(), [('offline', 'open')])
+        self.fleet.online(self.clock.now)
+        self.run_for(6)
+        self.fleet.offline(self.clock.now)      # off at 17:05 local: outside the hours
+        self.run_for(16 * 60, step=10)          # Tuesday is a holiday
+        self.assertEqual(self.states(), [('offline', 'resolved')])
+        self.clock.now = dt.datetime(2026, 11, 18, 1, 5, tzinfo=dt.timezone.utc)        # Wednesday 08:05 local
+        self.monitor.tick()
+        pending = self.monitor.incidents('pending')[0]
+        self.assertEqual(pending['started_at'], '2026-11-18T01:00:00+00:00')         # counted from the opening time
+        self.run_for(10)
+        self.assertEqual(self.monitor.incidents()[0]['state'], 'open')
+
+    def test_expected_handles_overnight_windows_and_the_auto_default(self):
+        schedule = dict(monitoring.DEFAULT_SCHEDULE, kind='business', timezone='UTC', start='22:00', end='06:00')
+        late = dt.datetime(2026, 11, 16, 23, 0, tzinfo=dt.timezone.utc)
+        self.assertEqual(monitoring.expected(schedule, None, late), (True, late.replace(hour=22)))
+        early = dt.datetime(2026, 11, 17, 5, 0, tzinfo=dt.timezone.utc)
+        self.assertEqual(monitoring.expected(schedule, None, early), (True, late.replace(hour=22)))
+        self.assertEqual(monitoring.expected(schedule, None, early.replace(hour=7)), (False, None))
+        saturday = dt.datetime(2026, 11, 21, 23, 0, tzinfo=dt.timezone.utc)
+        self.assertEqual(monitoring.expected(schedule, None, saturday), (False, None))
+        auto = monitoring.DEFAULT_SCHEDULE
+        self.assertEqual(monitoring.expected(auto, False, T0), (True, None))
+        self.assertEqual(monitoring.expected(auto, True, T0), (False, None))
+        self.assertEqual(monitoring.expected(dict(auto, kind='always'), True, T0), (True, None))
+
+    def test_schedule_and_maintenance_input_is_validated(self):
+        for arguments in (dict(scope='group', kind='business'), dict(scope='default', key='x', kind='always'),
+                          dict(scope='default', kind='sometimes'), dict(scope='default', kind='business', start='8:00'),
+                          dict(scope='default', kind='business', start='08:00', end='08:00'),
+                          dict(scope='default', kind='business', timezone='Mars/Base'),
+                          dict(scope='default', kind='business', timezone='+15:00'),
+                          dict(scope='default', kind='business', weekdays=[7]),
+                          dict(scope='default', kind='business', weekdays=[1, 1]),
+                          dict(scope='default', kind='business', holidays=['2026-02-30'])):
+            with self.assertRaises(monitoring.MonitorError, msg=arguments):
+                self.monitor.set_schedule(**arguments)
+        start = stamp(T0)
+        for arguments in (dict(scope='all', key='x', start=start, end=stamp(T0 + dt.timedelta(hours=1))),
+                          dict(scope='group', start=start, end=stamp(T0 + dt.timedelta(hours=1))),
+                          dict(scope='all', start=start, end=start),
+                          dict(scope='all', start=start, end=stamp(T0 + dt.timedelta(days=32))),
+                          dict(scope='all', start='2026-11-16T09:00:00', end=stamp(T0 + dt.timedelta(hours=1))),
+                          dict(scope='all', start=start, end=stamp(T0 + dt.timedelta(hours=1)), note='a\nb')):
+            with self.assertRaises(monitoring.MonitorError, msg=arguments):
+                self.monitor.add_maintenance(**arguments)
+        self.monitor.set_schedule('default', 'always')
+        self.assertEqual(self.monitor.schedules()[0]['kind'], 'always')
+        self.monitor.delete_schedule('default')
+        self.assertEqual(self.monitor.schedules()[0]['kind'], 'auto')
+
+    def test_maintenance_pauses_alerts_and_an_ongoing_problem_opens_when_it_ends(self):
+        self.fleet.add()
+        self.monitor.add_maintenance('group', stamp(T0), stamp(T0 + dt.timedelta(hours=2)), key='sales', note='Updates')
+        self.monitor.tick()
+        self.assertTrue(self.monitor.status[ID]['paused'])
+        self.fleet.offline(self.clock.now)
+        self.run_for(60)
+        self.assertEqual(self.states(), [('offline', 'suppressed')])
+        self.run_for(61)
+        self.assertEqual(self.states(), [('offline', 'open')])
+        opened = self.monitor.incidents()[0]['opened_at']
+        self.assertEqual(opened, monitoring._stamp(T0 + dt.timedelta(hours=2)))
+        # A problem that clears inside the window resolves quietly: it was never announced.
+        self.monitor.add_maintenance('device', stamp(self.clock.now), stamp(self.clock.now + dt.timedelta(hours=1)), key=ID)
+        self.fleet.add('00000000-0000-0000-0000-000000000009', group='Lab')
+        self.fleet.online(self.clock.now)
+        self.fleet.devices[ID]['metrics']['cpu_percent'] = 100
+        self.run_for(20)
+        self.assertIn(('cpu_high', 'suppressed'), self.states())
+        self.fleet.devices[ID]['metrics']['cpu_percent'] = 5
+        self.monitor.tick()
+        cpu = next(row for row in self.monitor.incidents() if row['rule'] == 'cpu_high')
+        self.assertEqual((cpu['state'], cpu['notified']), ('resolved', 0))
+        self.assertEqual(len(self.monitor.maintenance()), 1)
+        self.monitor.delete_maintenance(self.monitor.maintenance()[0]['id'])
+        self.assertEqual(self.monitor.maintenance(), [])
+
+
 class SnapshotTests(unittest.TestCase):
     """Store.monitor_snapshot hands the rules only what each computer's policy shares."""
     def test_policy_filters_readings_and_health(self):
