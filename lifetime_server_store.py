@@ -17,6 +17,7 @@ import secrets
 import sqlite3
 import tempfile
 import threading
+import time
 import uuid
 
 from lifetime_protocol import ProtocolError, number, validate_identity, validate_problem, validate_sync, validate_performance
@@ -35,6 +36,7 @@ LIVE_SILENCE_SECONDS = 30   # a computer that has been reporting live and goes q
 MAX_PAGE = 500
 DELTA_FIELDS = ('awake_seconds', 'measured_seconds', 'imported_seconds')
 MAX_LOG = 500
+SAMPLE_TRIM_SECONDS = 3600  # how often week-old performance samples of computers that stopped reporting are removed
 # Server log: what happened, never request bodies, codes or credentials. Refusals carry only a category.
 LOG_KINDS = {'server-started': (None,), 'server-stopped': (None,), 'names-changed': (None,),
              'certificate-renewed': ('expiry', 'names'), 'certificate-renewal-failed': (None,),
@@ -307,6 +309,7 @@ class Store:
         self._live_demand = {}
         self._ws_down = {}      # device_id -> True while its live socket is closed; cleared when the computer speaks again
         self.hooks = {}         # clear / nudge / command, set by the live hub
+        self._samples_trimmed_at = 0.0     # monotonic time of the next whole-table performance sample trim
         self.path = Path(path).resolve()
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(self.path), timeout=15, isolation_level=None,
@@ -1515,11 +1518,16 @@ class Store:
             db.execute('UPDATE devices SET refresh_requested=1 WHERE device_id=?', (device_id,))
             return dict(device_id=device_id, refresh_requested=True)
 
-    @staticmethod
-    def _performance_insert(db, device_id, readings):
+    def _performance_insert(self, db, device_id, readings):
         now = _now()
         cutoff = _stamp(now-dt.timedelta(days=7))
-        db.execute('DELETE FROM performance_samples WHERE observed_at<?', (cutoff,))
+        # This computer's samples older than a week go through its index on every reading. Computers that stopped
+        # reporting are trimmed by the whole-table delete, at most hourly: it reads every row, and doing it on each
+        # sync made every report cost O(fleet x week).
+        db.execute('DELETE FROM performance_samples WHERE device_id=? AND observed_at<?', (device_id, cutoff))
+        if time.monotonic() >= self._samples_trimmed_at:
+            db.execute('DELETE FROM performance_samples WHERE observed_at<?', (cutoff,))
+            self._samples_trimmed_at = time.monotonic() + SAMPLE_TRIM_SECONDS
         perf, specs = readings.get('performance'), readings.get('specs', {})
         if not perf:
             return
@@ -1576,12 +1584,22 @@ class Store:
                 for waiting in db.execute("SELECT command_id FROM commands WHERE device_id=? AND action!='refresh' AND status='pending'", (device_id,)).fetchall():
                     db.execute("UPDATE commands SET status='cancelled',updated_at=? WHERE command_id=?", (_stamp(_now()), waiting['command_id']))
                     self._event(db, device_id, 'command-cancelled')
-            command = db.execute("SELECT * FROM commands WHERE device_id=? AND status='pending'", (device_id,)).fetchone()
-            if not command:
+            # The same condition as the partial index of active commands, so this is an index lookup, not a scan of
+            # every command ever sent; at most one is active per computer.
+            command = db.execute("SELECT * FROM commands WHERE device_id=? AND status IN ('pending','delivered')",
+                                 (device_id,)).fetchone()
+            if not command or command['status'] != 'pending':
                 return None
             db.execute("UPDATE commands SET status='delivered',updated_at=? WHERE command_id=?", (_stamp(_now()), command['command_id']))
             self._event(db, device_id, 'command-delivered')
             return dict(id=command['command_id'], action=command['action'], issued_at=command['created_at'])
+
+    def pending_command_devices(self):
+        """The computers with a command waiting to be sent: one read of the active-command index, so the live hub's
+        periodic pass does not open a write transaction per connected computer."""
+        with self._lock:
+            return {row[0] for row in self._db.execute(
+                "SELECT device_id FROM commands WHERE status IN ('pending','delivered') AND status='pending'")}
 
     def requeue_command(self, command_id):
         with self._transaction() as db:

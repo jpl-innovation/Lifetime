@@ -1028,6 +1028,55 @@ class SpecsControlTests(unittest.TestCase):
         self.assertNotIn('command', reply)
         self.assertEqual(self.store.get_device(self.device)['commands'][0]['status'], 'cancelled')
 
+    def test_reports_and_command_checks_read_indexes_not_whole_tables(self):
+        """A sync with readings, and the live hub's command checks, must not read every performance sample or every
+        command ever sent: at 500 computers a week of samples is a million rows, read on every report."""
+        self.online()
+        self.store.send_command(self.device, 'refresh')
+        self.store._samples_trimmed_at = float('inf')      # the hourly whole-table trim is the deliberate exception
+        statements = []
+        self.store._db.set_trace_callback(statements.append)
+        try:
+            self.assertEqual(self.store.pending_command_devices(), {self.device})
+            self.assertEqual(self.store.take_command(self.device)['action'], 'refresh')
+            self.assertEqual(self.store.pending_command_devices(), set())    # delivered: no longer waiting
+            self.assertIsNone(self.store.take_command(self.device))
+            perf = dict(cpu_percent=1.0, ram_used_bytes=1, disk_free_bytes=1)
+            self.sync(readings=dict(observed_at=NOW.isoformat(), performance=perf))
+        finally:
+            self.store._db.set_trace_callback(None)
+        checked, scans = 0, []
+        for sql in statements:
+            if sql.lstrip().upper().startswith(('SELECT', 'DELETE', 'UPDATE')) and (
+                    'performance_samples' in sql or 'commands' in sql):
+                checked += 1
+                plan = [row[3] for row in self.store._db.execute('EXPLAIN QUERY PLAN ' + sql)]
+                if 'SCAN performance_samples' in plan or 'SCAN commands' in plan:
+                    scans.append(sql)
+        self.assertGreater(checked, 3)
+        self.assertEqual(scans, [])
+
+    def test_week_old_samples_go_per_computer_and_silent_computers_at_the_hourly_trim(self):
+        self.online()
+        silent, _ = self.pair(policy=self.policy)
+        insert = 'INSERT INTO performance_samples(device_id,observed_at,cpu_percent) VALUES (?,?,1)'
+        old = storage._stamp(NOW - dt.timedelta(days=8))
+        perf = dict(cpu_percent=1.0, ram_used_bytes=1, disk_free_bytes=1)
+        count = lambda device: self.store._db.execute(
+            'SELECT count(*) FROM performance_samples WHERE device_id=?', (device,)).fetchone()[0]
+        self.sync(readings=dict(observed_at=NOW.isoformat(), performance=perf))     # the first report trims everything
+        for device in (self.device, silent['device_id']):
+            self.store._db.execute(insert, (device, old))
+        later = NOW + dt.timedelta(minutes=10)
+        with patch.object(storage, '_now', return_value=later):
+            self.sync(readings=dict(observed_at=later.isoformat(), performance=perf))
+        self.assertEqual((count(self.device), count(silent['device_id'])), (2, 1))   # own week-old sample gone at once
+        self.store._samples_trimmed_at = 0.0                                          # an hour later
+        later = NOW + dt.timedelta(minutes=20)
+        with patch.object(storage, '_now', return_value=later):
+            self.sync(readings=dict(observed_at=later.isoformat(), performance=perf))
+        self.assertEqual(count(silent['device_id']), 0)
+
     def test_history_downsample_prune_attention_and_hours(self):
         self.online()
         specs = dict(cpu_name='CPU', ram_bytes=1000, disks=[dict(name='/', total_bytes=1000, free_bytes=50)],

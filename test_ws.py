@@ -182,6 +182,35 @@ class SocketTests(SocketFixture):
         return False    # the server has no hub, so nothing can be connected; samples arrived over HTTPS
 
 
+class HubPassTests(unittest.TestCase):
+    def test_the_periodic_pass_asks_once_and_delivers_only_where_a_command_waits(self):
+        """Every 10 s the hub used to open a write transaction per connected computer; now it asks once."""
+        import sqlite3
+        from lifetime_ws_server import LiveHub
+        store = Mock(hooks={})
+        store.live_rate_ms.return_value = 10000
+        store.pending_command_devices.return_value = {'a'}
+        store.take_command.return_value = None
+        hub = LiveHub(store)
+        hub.stop()
+        hub.ticker.join(5)
+        hub.links = {name: Mock(device_id=name, rate_ms=10000) for name in ('a', 'b', 'c')}
+        hub._pass(3)
+        store.take_command.assert_not_called()
+        store.pending_command_devices.assert_not_called()
+        hub._pass(10)
+        store.pending_command_devices.assert_called_once_with()
+        store.take_command.assert_called_once_with('a')
+        store.take_command.reset_mock()
+        hub.dirty = {'c'}                                       # a command was just created for c
+        hub._pass(11)
+        store.take_command.assert_called_once_with('c')
+        store.take_command.reset_mock()
+        store.pending_command_devices.side_effect = sqlite3.OperationalError('database is locked')
+        hub._pass(20)                                           # cannot tell: every computer is asked, as before
+        self.assertEqual(sorted(call.args[0] for call in store.take_command.call_args_list), ['a', 'b', 'c'])
+
+
 class AdminStreamTests(SocketFixture):
 
     def test_the_server_window_stream_pushes_samples_and_online_changes(self):

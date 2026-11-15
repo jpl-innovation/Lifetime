@@ -260,16 +260,28 @@ class LiveHub:
             self.nudge.wait(1.0)
             self.nudge.clear()
             beat += 1
-            with self.lock:
-                links = dict(self.links)
-            dirty, self.dirty = self.dirty, set()
-            for device_id, link in links.items():
-                try:
-                    self._rate(link)
-                    if device_id in dirty or beat % 10 == 0:
-                        self._deliver(link)
-                except Exception:
-                    link.kill()
+            self._pass(beat)
+
+    def _pass(self, beat):
+        """Push rate changes; deliver new commands now and, every 10th beat, any command still waiting (a safety net
+        for one that could not be sent). The safety net asks the store once which computers have one waiting,
+        instead of a write transaction per connected computer."""
+        with self.lock:
+            links = dict(self.links)
+        dirty, self.dirty = self.dirty, set()
+        waiting = set()
+        if beat % 10 == 0:
+            try:
+                waiting = self.store.pending_command_devices()
+            except Exception:
+                waiting = set(links)        # cannot tell: try every computer, as before
+        for device_id, link in links.items():
+            try:
+                self._rate(link)
+                if device_id in dirty or device_id in waiting:
+                    self._deliver(link)
+            except Exception:
+                link.kill()
 
     def stop(self):
         self.stopping.set()
