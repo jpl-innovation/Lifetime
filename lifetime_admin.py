@@ -19,7 +19,7 @@ OPERATIONS = frozenset((
     'delete_maintenance', 'notifications', 'set_notifications', 'test_notification', 'deliveries', 'time_zones',
     'availability', 'coverage_floor', 'set_coverage_floor', 'checks', 'save_check', 'delete_check', 'check_scopes',
     'set_check_scopes', 'whoami', 'roles', 'set_role', 'delete_role', 'audit', 'verify_audit', 'backup_archive',
-    'verify_backup', 'stage_restore'))
+    'verify_backup', 'stage_restore', 'updates', 'upload_update', 'set_update', 'rollback_update'))
 
 
 class NotAllowed(ValueError):

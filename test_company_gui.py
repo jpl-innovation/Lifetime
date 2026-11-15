@@ -169,7 +169,8 @@ class ConnectTests(unittest.TestCase):
             self.page.control.setChecked(True)
             QTest.keyClick(self.page.finish_button, Qt.Key.Key_Return)
             self.page.tasks.jobs[-1]()
-            self.assertEqual(run.call_args.args[1], dict(history=False, resources=True, health=False, control=True))
+            self.assertEqual(run.call_args.args[1], dict(history=False, resources=True, health=False, control=True,
+                                                         updates=False))     # updates stay off unless chosen
         self.page.tasks.resolve(dict(enabled=True, status='pending', phase='pending', server='https://server.test:8443'))
         self.assertEqual(self.page.step, 4)
         self.page.poll()
@@ -184,6 +185,23 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(self.page.step, 3)
         self.assertTrue(self.page.history.isChecked())
         self.assertFalse(self.page.control.isChecked())
+
+    def test_update_consent_is_its_own_switch_and_shows_when_on(self):
+        self.find()
+        self.assertFalse(self.page.updates.isChecked())
+        self.page.updates.setChecked(True)
+        self.assertTrue(self.page.policy()['updates'])
+        self.page._operation = 'status'
+        up = dict(enabled=True, status='connected', phase='approved', reported=True, server='https://server.test:8443',
+                  policy=dict(history=True), updates=True)
+        self.page.completed(0, up)
+        self.assertIn('Get Lifetime updates approved by the server', self.page.summary.text())
+        self.page.change_policy()
+        self.assertTrue(self.page.updates.isChecked())
+        self.page.completed(0, dict(up, updates=False))
+        self.page.change_policy()
+        self.assertFalse(self.page.updates.isChecked())
+        self.assertNotIn('approved by the server', self.page.summary.text())
 
     def test_local_health_limits_consent(self):
         with patch('lifetime_connect.read_settings', return_value=dict(completed=True, health=True)):

@@ -403,6 +403,16 @@ class Store:
                 raise AuthenticationError('Invalid device credential')
             self._live_credentials[device_id] = cached
 
+    def authenticate_device(self, device_id, credential):
+        """An approved computer's own credential, for requests that are not reports (agent updates)."""
+        digest = _hash(_secret(credential))
+        with self._lock:
+            row = self._db.execute('SELECT status,credential_hash FROM devices WHERE device_id=?',
+                                   (_identifier(device_id),)).fetchone()
+        if (not row or row['status'] != 'approved' or not row['credential_hash']
+                or not hmac.compare_digest(row['credential_hash'], digest)):
+            raise AuthenticationError('Invalid device credential')
+
     def _last_seen(self, row):
         samples = self._live_samples.get(row['device_id'])
         if row['status'] == 'approved' and samples and (_now()-_time(samples[-1]['observed_at'])).total_seconds() < 20:

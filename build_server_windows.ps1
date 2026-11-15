@@ -35,7 +35,7 @@ try {
     $runtimeModules = @('lifetime_agent', 'lifetime_checks', 'lifetime_client', 'lifetime_connection', 'lifetime_daily',
                         'lifetime_discovery', 'lifetime_health', 'lifetime_import', 'lifetime_import_windows', 'lifetime_live',
                         'lifetime_monitor', 'lifetime_pipe', 'lifetime_reports', 'lifetime_signals', 'lifetime_system',
-                        'lifetime_wol', 'lifetime_ws_client', 'lifetime_ws_server') | ForEach-Object { '--hidden-import', $_ }
+                        'lifetime_updates', 'lifetime_wol', 'lifetime_ws_client', 'lifetime_ws_server') | ForEach-Object { '--hidden-import', $_ }
     $dashboardModules = @('lifetime_connection', 'lifetime_daily', 'lifetime_import', 'lifetime_import_windows', 'lifetime_ledger',
                           'lifetime_pipe', 'lifetime_reports', 'lifetime_server_export', 'lifetime_server_stream',
                           'lifetime_signals', 'lifetime_tracker') | ForEach-Object { '--hidden-import', $_ }

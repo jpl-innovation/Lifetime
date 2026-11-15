@@ -298,6 +298,11 @@ _ADMIN = {
     'backup_archive': (None, ('path',), ()),
     'verify_backup': (None, ('path',), ()),
     'stage_restore': (None, ('path',), ()),
+    # Staged agent updates (lifetime_updates): one approved package, its rollout share, pause and rollback.
+    'updates': ('updates.summary', (), ()),
+    'upload_update': ('updates.upload', ('path', 'version', 'sha256'), ()),
+    'set_update': ('updates.set_rollout', (), ('percent', 'paused')),
+    'rollback_update': ('updates.rollback', (), ()),
 }
 
 
@@ -379,7 +384,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not re.fullmatch(r'[0-9]{1,10}', lengths[0]):
             raise _HTTPError(400)
         length = int(lengths[0])
-        if length > (4096 if self.path == '/v1/live' else MAX_BYTES):
+        if length > (4096 if self.path in ('/v1/live', '/v1/update') else MAX_BYTES):
             raise _HTTPError(413)
         if (self.headers.get_content_type() != 'application/json'
                 or len(self.headers.get_all('Content-Type', [])) != 1
@@ -397,7 +402,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _refused(self, category, credential, value):
         """Note a refused computer request in the server log: a category only, never the payload or a secret."""
-        if self.server.admin or self.path not in ('/v1/enroll', '/v1/claim', '/v1/sync', '/v1/live', '/v1/leave'):
+        if self.server.admin or self.path not in ('/v1/enroll', '/v1/claim', '/v1/sync', '/v1/live', '/v1/leave', '/v1/update'):
             return
         if category == 'credential' and self.path in ('/v1/enroll', '/v1/claim'):
             category = 'code'
@@ -429,11 +434,11 @@ class _Handler(BaseHTTPRequestHandler):
                     raise _HTTPError(404)       # an older server or a disabled channel: the computer falls back to HTTPS
                 runtime.hub.upgrade(self)
                 return
-            elif self.path not in ('/v1/enroll', '/v1/claim', '/v1/sync', '/v1/live', '/v1/leave'):
+            elif self.path not in ('/v1/enroll', '/v1/claim', '/v1/sync', '/v1/live', '/v1/leave', '/v1/update'):
                 raise _HTTPError(404)
             if self.command != 'POST':
                 raise _HTTPError(405)
-            credential = self._bearer() if not self.server.admin and self.path in ('/v1/sync', '/v1/live', '/v1/leave') else None
+            credential = self._bearer() if not self.server.admin and self.path in ('/v1/sync', '/v1/live', '/v1/leave', '/v1/update') else None
             value = self._body()
             if self.server.admin:
                 result = runtime.admin_call(operation, value, access.TOKEN_ACTOR)
@@ -445,7 +450,10 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 if 'device_id' not in value:
                     raise ProtocolError('Missing device ID')
-                if self.path == '/v1/leave':
+                if self.path == '/v1/update':
+                    runtime._store.authenticate_device(value['device_id'], credential)
+                    result = runtime.updates.handle(value['device_id'], value)
+                elif self.path == '/v1/leave':
                     _fields(value, ('device_id',))
                     result = runtime._store.leave(value['device_id'], credential)
                 else:
@@ -495,6 +503,7 @@ class ServerRuntime:
         self._watcher = None
         self.monitor = None
         self.checker = None
+        self.updates = None
         self.access = None
         self._pipe = None
         self._access_lock = threading.Lock()     # role changes and power commands: a revocation is never overtaken
@@ -541,6 +550,15 @@ class ServerRuntime:
                    (path.exists() and item.exists() and os.path.samefile(path, item))
                    for item in protected):
                 raise ProtocolError('Reserved runtime path')
+
+    def _check_package_path(self, value):
+        """An update package is read from outside the server's data directory, so no key, token or database can ever
+        be offered to computers as a package."""
+        if not isinstance(value, str) or not value or '\x00' in value:
+            raise ProtocolError('Invalid package path')
+        path, directory = Path(value).resolve(), self.directory.resolve()
+        if path == directory or directory in path.parents:
+            raise ProtocolError('Reserved runtime path')
 
     def backup(self, path):
         """The server database, and monitoring history and alert settings beside it (never alert-secrets.bin)."""
@@ -647,6 +665,11 @@ class ServerRuntime:
             if operation == 'verify_backup':
                 return archive.verify(value['path'], self.directory)
             return archive.stage(self.directory, value['path'])
+        if method.startswith('updates.'):
+            if operation == 'upload_update':
+                self._check_package_path(value['path'])
+                return self.updates.upload(**value, by=identity.get('name') or 'admin')
+            return getattr(self.updates, method[8:])(**value)
         if method.startswith('monitor.'):
             return getattr(self.monitor, method[8:])(**value)
         result = getattr(self._store, method)(**value)
@@ -718,6 +741,8 @@ class ServerRuntime:
                         tls.protect_private(path)
                 self.access = access.Access(self.directory / 'access.sqlite')
                 self._store = Store(self.directory / 'server.sqlite')
+                from lifetime_updates import Updates
+                self.updates = Updates(self.directory)
                 from lifetime_monitor import Monitor
                 self.monitor = Monitor(self.directory / 'monitoring.sqlite', self._store, clock=self.clock,
                                        server_name=socket.gethostname()[:63]).start()

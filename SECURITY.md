@@ -198,6 +198,20 @@ Reading the data requires the loopback-only administrator API (its bearer token,
 (theme, language, style) are stored locally and are not sent anywhere. If you find a way to make the server accept or
 display data it should refuse, please report it as described below.
 
+## Agent updates
+
+A computer takes an agent update only when its owner switched updates on (off by default, kept on the computer, not
+part of what it shares). Only an Admin can upload a package, and the server accepts the file only when its SHA-256
+equals the one the administrator typed (from the release's published checksums); files inside the server's data
+directory (key, token, databases) are refused. The computer asks only its pinned server, with its own credential,
+downloads in bounded pieces, and keeps the file only if the size and SHA-256 match what the server stated and, on
+Windows, an Authenticode signature, when present, verifies (checked offline; an invalid or untrusted signature is
+refused). It refuses an older version unless the server marks the offer as a rollback. **The agent never runs the
+package.** The administrator's installer (`install_agent_windows.ps1 -StagedUpdate`, as SYSTEM) checks the SHA-256 again
+before replacing the program and keeps the previous one. The trust root is the pinned server and the administrator who
+approved the checksum: a compromised server administrator could offer a malicious package with a matching checksum,
+which the signature check stops only for signed releases. Lifetime releases are not yet code-signed.
+
 ## Alerts, notifications and the mail password
 
 Alert rules run inside the server on data it already holds and apply a rule only to data the computer's policy lets

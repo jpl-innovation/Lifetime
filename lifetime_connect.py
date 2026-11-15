@@ -25,6 +25,8 @@ from lifetime_glass import solid
 NO_SERVER = 'No server found with this code. Check that the server is on and that this computer is on the same network.'
 PERMISSION = 'Windows permission is needed to finish.'
 TRIMMED = 'The server runs an older version of Lifetime, so some details are not shared until it is updated.'
+UPDATES = 'Get Lifetime updates approved by the server'
+UPDATES_DETAIL = 'Downloaded and checked, then installed by your IT team. Off unless you turn it on.'
 
 
 def locate_server(value):
@@ -88,7 +90,8 @@ def run_agent(action, policy, bundle=None, directory=None, display_name=None):
             if action == 'finish' and installer.is_file() and sys.platform == 'win32':
                 command = ['powershell.exe', '-NoProfile', '-File', str(installer), '-Mode', 'Packaged',
                            '-EnableReporting', '-BundleFile', str(path), '-Start', '-DisplayName', display_name or socket.gethostname()]
-                for key, flag in dict(history='TrackHistory', resources='ResourceReadings', health='HealthReadings', control='PowerControl').items():
+                for key, flag in dict(history='TrackHistory', resources='ResourceReadings', health='HealthReadings', control='PowerControl',
+                                      updates='AllowUpdates').items():
                     if policy.get(key):
                         command.append('-' + flag)
         else:
@@ -335,6 +338,7 @@ class ConnectPage(QWidget):
         self.health = self.choice(f, 'Health and crashes', 'Health summaries and crash counts.', self.health_allowed)
         self.health.setEnabled(self.health_allowed)
         self.control = self.choice(f, 'Let the server sleep or restart this computer', 'You get a one minute warning first.', False)
+        self.updates = self.choice(f, UPDATES, UPDATES_DETAIL, False)
         self.review_error = self.note(f, '')
         self.review_error.hide()
         self.finish_button = self.button(f, 'Finish', self.finish, True)
@@ -542,7 +546,8 @@ class ConnectPage(QWidget):
 
     def policy(self):
         return dict(history=self.history.isChecked(), resources=self.resources.isChecked(),
-                    health=self.health.isChecked() and self.health_allowed, control=self.control.isChecked())
+                    health=self.health.isChecked() and self.health_allowed, control=self.control.isChecked(),
+                    updates=self.updates.isChecked())       # kept on this computer; not part of what is shared
 
     def finish(self):
         if self._busy:
@@ -569,6 +574,7 @@ class ConnectPage(QWidget):
         policy = self.status.get('policy') or {}
         for key in ('history', 'resources', 'health', 'control'):
             getattr(self, key).setChecked(bool(policy.get(key)) and (key != 'health' or self.health_allowed))
+        self.updates.setChecked(bool(self.status.get('updates')))
         self.editing = True
         self.review_title.setText(self.t('Connected to {server}', server=self.server_name))
         self.review_address.setText(self.server_address)
@@ -642,6 +648,8 @@ class ConnectPage(QWidget):
                            ('health', 'Health and crashes'), ('control', 'Let the server sleep or restart this computer')):
             if (self.status.get('policy') or {}).get(key):
                 names.append(title)
+        if self.status.get('updates'):
+            names.append(UPDATES)
         self.summary.setText(self.server_name + '\n' + self.server_address + '\n' +
                              self.t('Last report: {time}', time=self._local_time(self.status.get('last_sync')) or self.t('Not available')) +
                              '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)) +

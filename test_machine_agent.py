@@ -217,7 +217,7 @@ class MachineTests(AgentFixture):
             self.machine.write_status()
             public = agent.status_path()
         self.assertEqual(public.parent, self.root.parent)
-        self.assertEqual(set(json.loads(public.read_text())), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at', 'trimmed'})
+        self.assertEqual(set(json.loads(public.read_text())), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at', 'trimmed', 'updates'})
         if sys.platform == 'win32':
             self.assertEqual(acl.call_args_list[0].args[2][-1], '*S-1-5-32-545:(RX)')
             self.assertEqual(acl.call_args_list[1].args[2][-1], '*S-1-5-32-545:(R)')
@@ -235,7 +235,7 @@ class MachineTests(AgentFixture):
         self.sample()
         status = json.loads(agent.status_path(self.root).read_text())
         # error is a fixed category word (see lifetime_client.error_kind), never exception text
-        self.assertEqual(set(status), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at', 'trimmed'})
+        self.assertEqual(set(status), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at', 'trimmed', 'updates'})
         self.assertNotIn(self.machine.device_id, json.dumps(status))
 
     def test_disable_reporting_keeps_uuid_stock_and_core_queue(self):
@@ -579,8 +579,30 @@ class ConnectionCliTests(unittest.TestCase):
         with patch.object(agent, 'MachineAgent', return_value=machine):
             agent.main(['--directory', '.', '--set-policy', '--policy-history'])
             machine.set_policy.assert_called_once_with(dict(history=True, resources=False, health=False, control=False))
+            machine.set_update_consent.assert_called_once_with(False)     # off unless named
+            agent.main(['--directory', '.', '--set-policy', '--policy-updates'])
+            machine.set_update_consent.assert_called_with(True)
+            self.assertEqual(machine.set_policy.call_args.args[0], dict(history=False, resources=False, health=False,
+                                                                         control=False))   # never part of what is shared
             agent.main(['--directory', '.', '--disable-reporting'])
             machine.disable_reporting.assert_called_once()
+        with self.assertRaises(SystemExit):
+            agent.main(['--directory', '.', '--policy-updates'])           # consent goes with enrollment or --set-policy
+
+    def test_update_consent_is_local_off_by_default_and_cleared_by_disconnect(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(agent, 'protect_root'):
+            machine = agent.MachineAgent.initialize(Path(root) / 'a')
+            try:
+                self.assertFalse(machine.status()['updates'])
+                machine.set_update_consent(True)
+                self.assertTrue(machine.status()['updates'])
+                self.assertNotIn('updates', machine._load()['policy'])
+                with self.assertRaises(ValueError):
+                    machine.set_update_consent('yes')
+                machine.disable_reporting()
+                self.assertFalse(machine.status()['updates'])
+            finally:
+                machine.close()
 
 
 if __name__ == '__main__':

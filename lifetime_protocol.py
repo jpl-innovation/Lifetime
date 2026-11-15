@@ -293,7 +293,8 @@ def validate_health_detail(detail):
 # reply ("capabilities"), but only to a computer that asked for the list with the request header
 # "Lifetime-Accept: capabilities", so an older computer never sees an unknown reply field.
 # A server that sends no list accepts the 1.1 format only.
-CAPABILITIES = ('history.detail', 'health.detail', 'hardware', 'problem')
+# 'update' is not a sync part: it says the server answers POST /v1/update (staged agent updates, lifetime_updates).
+CAPABILITIES = ('history.detail', 'health.detail', 'hardware', 'problem', 'update')
 
 
 def validate_capabilities(value):

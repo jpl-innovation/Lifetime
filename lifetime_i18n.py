@@ -1983,3 +1983,47 @@ for _key, _text in _ACCESS_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+
+# Stage 4: staged agent updates (Lifetime Server dashboard and the desktop Connect page).
+_UPDATES_VI = {
+    'Get Lifetime updates approved by the server': 'Nhận bản cập nhật Lifetime do máy chủ phê duyệt',
+    'Downloaded and checked, then installed by your IT team. Off unless you turn it on.': 'Được tải về và kiểm tra, sau đó bộ phận IT cài đặt. Tắt cho đến khi bạn bật.',
+    'Agent updates': 'Cập nhật tác nhân',
+    'Offer an approved Lifetime agent package to computers whose owner allowed updates. They download it over their secure connection, check its SHA-256 (and its signature when it has one) and keep it ready; install_agent_windows.ps1 -StagedUpdate installs it, for example from a startup script. Start with a small share.': 'Cung cấp gói tác nhân Lifetime đã phê duyệt cho các máy mà chủ máy cho phép cập nhật. Máy tải gói qua kết nối bảo mật, kiểm tra SHA-256 (và chữ ký nếu có) rồi giữ sẵn; install_agent_windows.ps1 -StagedUpdate sẽ cài đặt, ví dụ từ tập lệnh khởi động. Hãy bắt đầu với một tỷ lệ nhỏ.',
+    'Choose file': 'Chọn tệp',
+    'Upload package': 'Tải gói lên',
+    'Save share': 'Lưu tỷ lệ',
+    'Pause': 'Tạm dừng',
+    'Resume': 'Tiếp tục',
+    'Paused': 'Đang tạm dừng',
+    'Roll back': 'Quay lại bản trước',
+    'Offered to': 'Cung cấp cho',
+    'Package file': 'Tệp gói',
+    'Version, e.g. 1.3.0': 'Phiên bản, ví dụ 1.3.0',
+    'Published SHA-256 of the file': 'SHA-256 đã công bố của tệp',
+    'Computer': 'Máy tính',
+    'Status': 'Trạng thái',
+    'Version': 'Phiên bản',
+    'Reported': 'Thời điểm báo cáo',
+    'Package {version} · {size} MB · SHA-256 {sha256}': 'Gói {version} · {size} MB · SHA-256 {sha256}',
+    'rolled back': 'đã quay lại bản trước',
+    'No package uploaded.': 'Chưa tải gói nào lên.',
+    'Ready to install: {staged} · Installed: {installed} · Failed: {failed}': 'Sẵn sàng cài đặt: {staged} · Đã cài đặt: {installed} · Thất bại: {failed}',
+    'Ready to install': 'Sẵn sàng cài đặt',
+    'Installed': 'Đã cài đặt',
+    'Failed': 'Thất bại',
+    'download failed': 'tải về không thành công',
+    'wrong size': 'sai kích thước',
+    'SHA-256 did not match': 'SHA-256 không khớp',
+    'signature not valid': 'chữ ký không hợp lệ',
+    'older version refused': 'đã từ chối phiên bản cũ hơn',
+    'could not be saved': 'không lưu được',
+    'earlier package': 'gói trước đó',
+    'Agent packages (*.exe *.zip *.msi)': 'Gói tác nhân (*.exe *.zip *.msi)',
+    'Roll back the agent update? Computers are offered the previous package again, or nothing if there is none, and drop a downloaded copy they have not installed.': 'Quay lại bản cập nhật tác nhân trước? Các máy sẽ được cung cấp lại gói trước đó, hoặc không gì nếu không có, và xóa bản đã tải nhưng chưa cài đặt.',
+}
+for _key, _text in _UPDATES_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

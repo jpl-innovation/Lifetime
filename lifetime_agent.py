@@ -365,7 +365,7 @@ class MachineAgent:
                         dropped=state['dropped'], policy=dict(state['policy']),
                         server_name=state.get('server_name'), phase=state['phase'],
                         error=state.get('last_error'), error_at=state.get('last_error_at'),
-                        trimmed=bool(state.get('trimmed')))
+                        trimmed=bool(state.get('trimmed')), updates=bool(state.get('updates')))
 
     def write_status(self):
         with self._lock:
@@ -461,7 +461,7 @@ class MachineAgent:
             with self._transaction() as state:
                 self._set_policy(state, dict(DEFAULT_POLICY))
                 state.update(enabled=False, phase='disabled', status='disabled', credential=None,
-                             enrollment=None, enrollment_sent=False, next_attempt=0, failures=0)
+                             enrollment=None, enrollment_sent=False, next_attempt=0, failures=0, updates=False)
                 if state['bundle'] is not None:
                     # Keep only public trust/address material, not the old pairing code.
                     state['bundle']['code'] = 'disabled'
@@ -625,6 +625,16 @@ class MachineAgent:
                     self._set_policy(state, dict(state['policy'], control=enabled))
             self.write_status()
 
+    def set_update_consent(self, enabled):
+        """Owner consent for agent updates the server offers (off by default). Local only: the server's sharing
+        policy is unchanged, and switching it off discards a downloaded package at the next check."""
+        if type(enabled) is not bool:
+            raise ValueError('Update consent must be boolean')
+        with self.reporting_lock():
+            with self._transaction() as state:
+                state['updates'] = enabled
+            self.write_status()
+
     def import_ledger(self, path, *, tick=None, boot=None, timestamp=None):
         """Explicit one-time transfer, before sampling, preserving the boot boundary.
 
@@ -744,6 +754,16 @@ class MachineAgent:
                     wake.wait(1)
             sync_thread = threading.Thread(target=synchronize, name='lifetime-sync', daemon=True)
             sync_thread.start()
+
+            def check_updates():
+                from lifetime_updates import CHECK_EVERY, Updater
+                updater, delay = Updater(self), 60      # after the first report has told this computer what the server takes
+                while not stop.wait(delay):
+                    with contextlib.suppress(Exception):    # unreachable or refused: tried again at the next check
+                        updater.tick()
+                    delay = CHECK_EVERY
+            updates_thread = threading.Thread(target=check_updates, name='lifetime-updates', daemon=True)
+            updates_thread.start()
             try:
                 while not stop.is_set():
                     self.sample()
@@ -761,6 +781,7 @@ class MachineAgent:
                 wake.set()
                 thread.join(timeout=4)
                 sync_thread.join()
+                updates_thread.join(timeout=4)
 
     def close(self):
         if hasattr(self, '_inventory_reader'):
@@ -814,6 +835,8 @@ def main(argv=None, stdin=None):
     parser.add_argument('--policy-resources', action='store_true')
     parser.add_argument('--policy-health', action='store_true')
     parser.add_argument('--policy-control', action='store_true')
+    parser.add_argument('--policy-updates', action='store_true',
+                        help='install agent updates the server approves (kept on this computer; not shared)')
     parser.add_argument('--display-name', default=__import__('socket').gethostname())
     parser.add_argument('--background', action='store_true')
     parser.add_argument('--disable-reporting', action='store_true')
@@ -821,7 +844,8 @@ def main(argv=None, stdin=None):
     parser.add_argument('--import-ledger', type=Path)
     args = parser.parse_args(argv)
     enrolling = bool(args.enroll_bundle_file or args.connection_stdin)
-    if (args.policy_history or args.policy_resources or args.policy_health or args.policy_control) and not (enrolling or args.set_policy):
+    if (args.policy_history or args.policy_resources or args.policy_health or args.policy_control
+            or args.policy_updates) and not (enrolling or args.set_policy):
         parser.error('Optional reporting permissions require explicit enrollment')
     if args.enroll_bundle_file and args.connection_stdin:
         parser.error('Use either a bundle file or a connection line, not both')
@@ -854,6 +878,7 @@ def main(argv=None, stdin=None):
         policy.update(health=args.policy_health, control=args.policy_control)
         if enrolling or args.set_policy:
             agent.set_policy(policy)
+            agent.set_update_consent(args.policy_updates)
         if args.disable_reporting:
             agent.disable_reporting()
         if args.import_ledger:

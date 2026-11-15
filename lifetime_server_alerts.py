@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateTimeE
 
 from lifetime_layout import ControlRow
 from lifetime_server_checks import ChecksUI
+from lifetime_server_updates import UpdatesUI
 from lifetime_server_widgets import status_dot, table_action
 from lifetime_theme import T
 
@@ -135,7 +136,12 @@ class AlertsUI:
         client, state = self.w.client, self.filter.currentData() if self.filter.currentData() is not None else 'active'
 
         def work():
+            try:
+                updates = client.call('updates')
+            except ValueError:      # a server without agent updates
+                updates = None
             return dict(incidents=client.call('incidents', state=state, limit=200), rules=client.call('alert_rules'),
+                        updates=updates,
                         schedules=client.call('schedules'), maintenance=client.call('maintenance'),
                         notifications=client.call('notifications'), deliveries=client.call('deliveries', limit=50),
                         time_zones=client.call('time_zones'), coverage_floor=client.call('coverage_floor'),
@@ -499,6 +505,8 @@ class AlertsUI:
         layout.addWidget(mail)
         self.checks_ui = ChecksUI(self)
         self.checks_ui.admin(layout)
+        self.updates_ui = UpdatesUI(self)
+        self.updates_ui.admin(layout)
 
     @staticmethod
     def _device_picker():
@@ -570,6 +578,7 @@ class AlertsUI:
             box.setAccessibleName(self.t(key))
         self.smtp_port.setAccessibleName(self.t('Port'))
         self.checks_ui.retranslate()
+        self.updates_ui.retranslate()
         self.coverage_floor.setAccessibleName(self.t('Minimum coverage for availability'))
         self.summary_hour.setAccessibleName(self.t('Daily summary at'))
         self.webhook_url.setAccessibleName(self.t('Webhook (https://)'))
@@ -620,6 +629,7 @@ class AlertsUI:
                                    self._call('delete_maintenance', dict(window_id=identifier)))
             self.maintenance_table.setCellWidget(index, 4, table_action(button))
         self.checks_ui.render(result)
+        self.updates_ui.render(result)
         self.delivery_table.setRowCount(len(result['deliveries']))
         for index, delivery in enumerate(result['deliveries']):
             problem = self.t(RULE_TEXT.get(delivery.get('rule'), '')) if delivery.get('rule') else ''

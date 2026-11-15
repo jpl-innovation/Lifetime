@@ -48,6 +48,7 @@ class FakeAdmin:
         self.alerts = None
         self.iana = True
         self.checks = []
+        self.updates = None         # None: a server without agent updates
         self.whoami = None          # None: an older server without roles (whoami is unknown)
         self.roles, self.audit = [], []
         self.gui_thread = threading.get_ident()
@@ -209,6 +210,10 @@ class FakeAdmin:
         if operation == 'delete_check':
             self.checks = [item for item in self.checks if item['id'] != arguments['check_id']]
             return copy.deepcopy(self.checks)
+        if operation in ('updates', 'upload_update', 'set_update', 'rollback_update') and self.updates is not None:
+            if operation == 'set_update':
+                self.updates.update(arguments)
+            return copy.deepcopy(self.updates)
         if operation == 'set_coverage_floor':
             return dict(coverage_floor=arguments['percent'])
         if operation == 'test_notification':
@@ -1378,6 +1383,53 @@ class ServerGuiTests(unittest.TestCase):
         self.wait_idle()
         self.assertEqual(ui.table.item(0, 2).text(), self.window.t('No answer (timeout)') + ' · 4 lần liên tiếp')
         self.assertEqual(ui.kind.itemText(2), 'Trang web (HTTP hoặc HTTPS)')
+
+    def test_agent_updates_upload_share_pause_rollback_and_reports_translated(self):
+        self.load([device(0)])
+        ui = self.window.alerts.updates_ui
+        self.assertEqual(ui.package_label.text(), 'Not available')       # a server without agent updates
+        self.api.updates = dict(current=None, previous=None, percent=0, paused=False, rollback=False,
+                                counts=dict(staged=0, installed=0, failed=0), reports=[])
+        self.window.refresh()
+        self.wait_idle()
+        self.assertEqual(ui.package_label.text(), 'No package uploaded.')
+        self.assertFalse(ui.save_button.isEnabled())
+        ui.path.setText('D:/packages/LifetimeAgent.exe')
+        ui.version.setText('1.3.0')
+        ui.sha256.setText('ab' * 32)
+        ui.upload()
+        self.wait_idle()
+        self.assertIn(('upload_update', dict(path='D:/packages/LifetimeAgent.exe', version='1.3.0', sha256='ab' * 32)),
+                      [(o, a) for o, a, _ in self.api.calls])
+        self.api.updates.update(current=dict(version='1.3.0', sha256='ab' * 32, size=15 * 1048576, name='LifetimeAgent.exe',
+                                             uploaded_at='2026-11-07T11:00:00+00:00', uploaded_by='SCHOOL\\admin'),
+                                counts=dict(staged=1, installed=0, failed=1),
+                                reports=[dict(device_id=device(0)['device_id'], sha256='ab' * 32, status='failed',
+                                              version='1.2.0', category='checksum', at='2026-11-07T12:00:00+00:00')])
+        self.window.refresh()
+        self.wait_idle()
+        self.assertIn('Package 1.3.0 · 15.0 MB', ui.package_label.text())
+        self.assertEqual(ui.counts.text(), 'Ready to install: 1 · Installed: 0 · Failed: 1')
+        self.assertEqual([ui.table.item(0, column).text() for column in (0, 1, 2)],
+                         ['Computer 000', 'Failed · SHA-256 did not match', '1.2.0'])
+        ui.percent.setValue(10)
+        ui.save()
+        self.wait_idle()
+        ui.pause()
+        self.wait_idle()
+        self.assertEqual(ui.pause_button.text(), 'Resume')
+        with patch.object(self.window, '_confirm', return_value=False):
+            ui.rollback()                                                   # declined: nothing is sent
+        with patch.object(self.window, '_confirm', return_value=True):
+            ui.rollback()
+        self.wait_idle()
+        sent = [(o, a) for o, a, _ in self.api.calls if o in ('set_update', 'rollback_update')]
+        self.assertEqual(sent, [('set_update', dict(percent=10)), ('set_update', dict(paused=True)), ('rollback_update', {})])
+        self.window.language = 'vi'
+        self.window.retranslate()
+        self.wait_idle()
+        self.assertEqual(ui.table.item(0, 1).text(), 'Không thành công · SHA-256 không khớp')
+        self.assertEqual(ui.pause_button.text(), 'Tiếp tục')
 
 
 class AddComputerSheetTests(unittest.TestCase):

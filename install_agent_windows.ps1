@@ -19,9 +19,11 @@ param(
     [switch]$ResourceReadings,
     [switch]$HealthReadings,
     [switch]$PowerControl,
+    [switch]$AllowUpdates,
     [string]$DisplayName = $env:COMPUTERNAME,
     [string]$ImportLedger,
-    [switch]$Start
+    [switch]$Start,
+    [switch]$StagedUpdate
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -68,6 +70,42 @@ function Invoke-Agent([string]$Executable, [string[]]$Arguments, [string]$Secret
     if ($Secret) { $Secret | & $Executable @Arguments | Out-Host } else { & $Executable @Arguments | Out-Host }
     return $LASTEXITCODE
 }
+function Install-StagedUpdate {
+    # Installs an agent update that the agent itself downloaded from its server and checked (Lifetime Server, Agent
+    # updates): only a LifetimeAgent .exe for a Packaged install, only when its SHA-256 still matches, and, when the
+    # agent found a valid signature, only while that signature is still valid. Run it from a computer startup script
+    # (GPO or Intune, as SYSTEM) so the update is installed at the next restart without prompts.
+    if ($EnableReporting -or $BundleFile -or $ConnectionLine -or $PairingCode -or $ImportLedger -or $AllowUpdates) { Stop-Install 2 '-StagedUpdate is used on its own.' }
+    $data = [IO.Path]::GetFullPath($DataDirectory)
+    if (Test-Path -LiteralPath $data -PathType Container) { $script:LogDirectory = $data }
+    $recordPath = Join-Path $data 'updates\staged.json'
+    if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf)) { Write-Log 'No staged agent update; nothing was changed.'; return }
+    $record = Get-Content -LiteralPath $recordPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([string]$record.name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.exe$' -or [string]$record.sha256 -cnotmatch '^[0-9a-f]{64}$') { Stop-Install 2 'The staged update is not an agent program (.exe); install it with the full package instead.' }
+    $package = Join-Path $data ('updates\package-' + $record.name)
+    if ((Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $record.sha256) { Stop-Install 2 'The staged update no longer matches its SHA-256; nothing was changed.' }
+    if ($record.signature -eq 'valid' -and (Get-AuthenticodeSignature -LiteralPath $package).Status -ne 'Valid') { Stop-Install 2 'The staged update signature is no longer valid; nothing was changed.' }
+    $target = Join-Path ([IO.Path]::GetFullPath($InstallDirectory)) 'LifetimeAgent.exe'
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { Stop-Install 2 'Staged updates apply to Packaged agent installations (LifetimeAgent.exe).' }
+    if (-not (Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent -ErrorAction SilentlyContinue)) { Stop-Install 2 'No installed Lifetime agent to update.' }
+    Stop-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent
+    $deadline = (Get-Date).AddSeconds(30)
+    while (@(Get-Process -Name LifetimeAgent -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $target }).Count) {
+        if ((Get-Date) -gt $deadline) { Start-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent; Stop-Install 1 'The running agent did not stop; nothing was changed.' }
+        Start-Sleep -Milliseconds 500
+    }
+    $previous = Join-Path ([IO.Path]::GetFullPath($InstallDirectory)) 'LifetimeAgent.previous.exe'
+    Copy-Item -LiteralPath $target -Destination $previous -Force
+    try {
+        Copy-Item -LiteralPath $package -Destination $target -Force
+    } catch {
+        Copy-Item -LiteralPath $previous -Destination $target -Force
+        Start-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent
+        Stop-Install 1 'The update could not be copied; the previous agent was put back.'
+    }
+    Start-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent
+    Write-Log "Installed staged agent update $($record.version) (SHA-256 $($record.sha256)). The previous program is kept as LifetimeAgent.previous.exe."
+}
 function Stop-ForAgent([int]$Code, [string]$Step) {
     switch ($Code) {
         2 { Stop-Install 2 "$Step refused the input: check the connection line or code, server address, bundle and display name." }
@@ -81,6 +119,7 @@ try {
     if ($env:OS -ne 'Windows_NT') { Stop-Install 5 'This installer requires Windows.' }
     $administrator = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $administrator.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Stop-Install 5 'Run this installer as Administrator (or as SYSTEM from a deployment tool).' }
+    if ($StagedUpdate) { Install-StagedUpdate; return }     # the finally block below still saves the log
 
     # Strict parameter checks before anything is changed. Owner consent stays explicit: reporting needs
     # -EnableReporting and exactly one way to reach the server; every optional category is off unless named.
@@ -88,7 +127,7 @@ try {
     if ($sources.Count -gt 1) { Stop-Install 2 'Use only one of -BundleFile, -ConnectionLine or -PairingCode.' }
     if ([bool]$EnableReporting -ne ($sources.Count -eq 1)) { Stop-Install 2 'Reporting requires -EnableReporting together with -ConnectionLine, -PairingCode and -Server, or -BundleFile, from the selected company server.' }
     if ([bool]$PairingCode -ne [bool]$Server) { Stop-Install 2 '-PairingCode and -Server are used together.' }
-    if (($TrackHistory -or $ResourceReadings -or $HealthReadings -or $PowerControl) -and -not $EnableReporting) { Stop-Install 2 'Optional reporting categories require explicit server enrollment.' }
+    if (($TrackHistory -or $ResourceReadings -or $HealthReadings -or $PowerControl -or $AllowUpdates) -and -not $EnableReporting) { Stop-Install 2 'Optional reporting categories require explicit server enrollment.' }
     if ($ConnectionLine -and ($ConnectionLine.Length -gt 2300 -or $ConnectionLine -notmatch '^\s*lifetime-connect-v1:https://[A-Za-z0-9.\-\[\]:]+ +[A-Za-z0-9\- ]{20,40}\s*$')) { Stop-Install 2 'The connection line is not valid. Copy it again from Lifetime Server (Add device).' }
     if ($PairingCode -and $PairingCode -notmatch '^\s*[A-Za-z0-9\- ]{20,40}\s*$') { Stop-Install 2 'The pairing code is not valid.' }
     if ($Server -and $Server -notmatch '^(https://)?([A-Za-z0-9.\-]{1,253}|\[[0-9A-Fa-f:.]{2,45}\])(:[0-9]{1,5})?/?$') { Stop-Install 2 'The server address is not valid. Use a name or IP address, optionally with :port.' }
@@ -97,7 +136,7 @@ try {
     if ($ImportLedger -and -not (Test-Path -LiteralPath $ImportLedger -PathType Leaf)) { Stop-Install 2 'The ledger to import does not exist.' }
     $secret = if ($ConnectionLine) { $ConnectionLine.Trim() } elseif ($PairingCode) { $PairingCode.Trim() } else { $null }
     $method = if ($ConnectionLine) { 'connection line' } elseif ($PairingCode) { "pairing code for $Server" } elseif ($BundleFile) { 'bundle file' } else { 'none (not reporting)' }
-    Write-Log "Lifetime agent install: mode $Mode; reporting: $method; history $([bool]$TrackHistory), readings $([bool]$ResourceReadings), health $([bool]$HealthReadings), power control $([bool]$PowerControl)."
+    Write-Log "Lifetime agent install: mode $Mode; reporting: $method; history $([bool]$TrackHistory), readings $([bool]$ResourceReadings), health $([bool]$HealthReadings), power control $([bool]$PowerControl), updates $([bool]$AllowUpdates)."
 
     if (Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent -ErrorAction SilentlyContinue) { Stop-Install 6 'A Lifetime agent is already installed; nothing was changed. Uninstall it first to change its settings (data is preserved).' }
     foreach ($path in @($InstallDirectory, $DataDirectory)) {
@@ -138,6 +177,7 @@ try {
         if ($ResourceReadings) { $enrollArguments += '--policy-resources' }
         if ($HealthReadings) { $enrollArguments += '--policy-health' }
         if ($PowerControl) { $enrollArguments += '--policy-control' }
+        if ($AllowUpdates) { $enrollArguments += '--policy-updates' }
         $enrollArguments += @('--display-name', $DisplayName)
     }
     $code = Invoke-Agent $checker (@($checkerPrefix) + @('--check') + $enrollArguments) $secret
