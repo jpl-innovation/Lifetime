@@ -367,6 +367,22 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.admin.call('names', names=[])['server_names'], [])
         self.assertEqual(self.admin.call('server_info')['certificate']['names'], ['127.0.0.1'])
 
+    def test_capabilities_only_for_computers_that_ask_and_validation_stays_strict(self):
+        from lifetime_protocol import CAPABILITIES
+        self.assertEqual(self.public('enroll', self.enrollment())['capabilities'], list(CAPABILITIES))
+        request, credential = self.pair()
+        self.assertEqual(self.public('sync', self.message(request), credential)['capabilities'], list(CAPABILITIES))
+        # An older computer does not ask, so its strict reply check never meets the new field.
+        raw = canonical(self.message(request, seq=2))
+        status, body, _ = self.wire(('POST /v1/sync HTTP/1.1\r\nHost: 127.0.0.1\r\n'
+                                     f'Authorization: Bearer {credential}\r\nContent-Type: application/json\r\n'
+                                     f'Content-Length: {len(raw)}\r\n\r\n').encode() + raw)
+        self.assertEqual(status, 200)
+        self.assertEqual(decode(body)['accepted'], [2])
+        self.assertNotIn('capabilities', decode(body))
+        # Advertising never loosens validation: an unknown field is still refused as a whole.
+        self.status(400, 'sync', dict(self.message(request, seq=3), unknown=True), credential)
+
     def test_failed_renewal_keeps_the_current_certificate_and_warns(self):
         now = dt.datetime.now(dt.timezone.utc)
         self.runtime.clock = lambda: now + dt.timedelta(days=370)   # 27 days left: renewal is due ...

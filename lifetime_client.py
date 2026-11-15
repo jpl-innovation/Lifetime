@@ -133,7 +133,7 @@ class SyncClient:
                     self.agent._set_policy(state, policy)
                     state.update(reported=False, bundle=trust, credential=None, enabled=True,
                                  phase='enrolling', status='enrolling', enrollment_sent=False,
-                                 failures=0, next_attempt=0,
+                                 failures=0, next_attempt=0, capabilities=[], trimmed=False, legacy_server_until=0,
                                  enrollment=dict(version=1, request_id=str(uuid.uuid4()),
                                                  device_id=state['device_id'], code=trust['code'],
                                                  poll_token=secrets.token_urlsafe(32),
@@ -146,8 +146,9 @@ class SyncClient:
 
     def _enrollment_reply(self, response, state, *, claim):
         required = {'request_id', 'device_id', 'status'}
-        allowed = required | ({'credential'} if claim else set())
+        allowed = required | {'capabilities'} | ({'credential'} if claim else set())
         _fields(response, allowed, required)
+        self._capabilities(response)
         if (response['device_id'] != state['device_id']
                 or response['request_id'] != state['enrollment']['request_id']
                 or response['status'] not in ('pending', 'approved', 'denied', 'revoked')):
@@ -160,7 +161,8 @@ class SyncClient:
 
     def _ack_reply(self, response, state, message):
         required = {'device_id', 'accepted', 'duplicates', 'retired', 'policy_version', 'received_at'}
-        _fields(response, required | {'reporting_interval', 'refresh', 'command', 'command_ack'}, required)
+        _fields(response, required | {'reporting_interval', 'refresh', 'command', 'command_ack', 'capabilities'}, required)
+        self._capabilities(response)
         if response['device_id'] != state['device_id']:
             raise ResponseError('Acknowledgment device mismatch')
         version = protocol.number(response['policy_version'], True)
@@ -202,9 +204,18 @@ class SyncClient:
                 raise ResponseError('Expired command')
         return acknowledged
 
+    @staticmethod
+    def _capabilities(response):
+        """What the server said it accepts; a reply without a list comes from a 1.1 server."""
+        try:
+            return protocol.validate_capabilities(response.get('capabilities', []))
+        except ValueError:
+            raise ResponseError('Invalid capability list') from None
+
     def _exchange(self, state):
         phase = state['phase']
         self._sent_extended = False
+        self._full = None
         if phase == 'enrolling':
             message = state['enrollment']
             response = tls.request_json(state['bundle'], '/v1/enroll', message, timeout=self.timeout)
@@ -220,11 +231,14 @@ class SyncClient:
             raise ResponseError('No approved reporting credential')
         message = self.agent.batch()
         message['client_version'] = protocol.CLIENT_VERSION
-        extended = 'hardware' in message.get('readings', {}).get('specs', {}) or 'health' in message.get('readings', {}) or 'detail' in message.get('health', {}) or bool(set(message.get('history', {})) & set(protocol.HISTORY_EXTRA))
-        if extended and time.time() < state.get('legacy_server_until', 0):
-            message = protocol.without_extended(message)
-            extended = False
-        self._sent_extended = extended
+        # Send only what this server said it accepts (remembered from its last reply; none known = 1.1).
+        # After a 400 for optional content, send the 1.1 format for a day so reporting never stalls.
+        accepted = state.get('capabilities') or []
+        if time.time() < state.get('legacy_server_until', 0):
+            accepted = []
+        self._full = message
+        message = protocol.without_extended(message, accepted)
+        self._sent_extended = message != protocol.without_extended(message)
         response = tls.request_json(state['bundle'], '/v1/sync', message,
                                     credential=state['credential'], timeout=self.timeout)
         self._ack_reply(response, state, message)
@@ -250,7 +264,8 @@ class SyncClient:
                 kind, response, message = self._exchange(state)
                 with self.agent._transaction() as current:
                     self._keep_trust(current, state['bundle'])
-                    current.update(failures=0, next_attempt=now+current['interval'])
+                    current.update(failures=0, next_attempt=now+current['interval'],
+                                   capabilities=self._capabilities(response))
                     if kind == 'sync':
                         sent_result = message.get('command_result')
                         if sent_result and current.get('command_result') == sent_result:
@@ -288,6 +303,11 @@ class SyncClient:
                         current['next_attempt'] = now + (0 if response.get('refresh', False) else current['interval'])
                         if current.get('command_result'):
                             current['next_attempt'] = 0
+                        # Disclose trimming ("server is older, some details are not shared"), never silently.
+                        accepted = [] if now < current.get('legacy_server_until', 0) else current['capabilities']
+                        current['trimmed'] = protocol.without_extended(self._full, accepted) != self._full
+                        if message != self._full and not current['trimmed']:
+                            current['next_attempt'] = 0     # the server takes more than was sent: send it now
                     else:
                         status = response['status']
                         current['enrollment_sent'] = True
@@ -323,8 +343,8 @@ class SyncClient:
                                        enrollment=None, credential=None)
                         self.agent._set_policy(current, dict(history=False, resources=False))
                     elif status == 400 and getattr(self, '_sent_extended', False):
-                        # A server older than 1.2 rejects the Activity/Health detail: resend the 1.1 format for a day.
-                        current.update(legacy_server_until=now+86400, next_attempt=0)
+                        # The server refused optional detail it had advertised: resend the 1.1 format for a day.
+                        current.update(legacy_server_until=now+86400, next_attempt=0, trimmed=True)
                     elif status == 409:
                         current['status'] = 'conflict'
                     elif status in (401, 403) and state['phase'] == 'approved':

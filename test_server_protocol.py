@@ -42,6 +42,28 @@ class ReadingsV2Tests(unittest.TestCase):
         with self.assertRaises(ProtocolError):
             validate_sync(value)
 
+    def test_trimming_keeps_only_advertised_parts_and_never_mutates(self):
+        from lifetime_protocol import CAPABILITIES, validate_capabilities, without_extended
+        value = message()
+        value['policy'].update(history=True, resources=True, health=True)
+        value['history'] = dict(daily={}, hourly=[0]*24, boots=3)
+        value['readings'] = dict(observed_at='2026-11-07T12:00:00Z', specs=dict(hardware={'fans': []}),
+                                 health=dict(version=1))
+        value['health'] = dict(version=1, detail={})
+        original = copy.deepcopy(value)
+        self.assertEqual(without_extended(value, CAPABILITIES), value)
+        only = without_extended(value, ('hardware',))
+        self.assertEqual(only['history'], dict(daily={}))
+        self.assertNotIn('detail', only['health'])
+        self.assertEqual(only['readings'], dict(observed_at='2026-11-07T12:00:00Z', specs=dict(hardware={'fans': []})))
+        legacy = without_extended(value)
+        self.assertEqual(legacy['readings'], dict(observed_at='2026-11-07T12:00:00Z', specs={}))
+        self.assertEqual(value, original)
+        self.assertEqual(validate_capabilities(['history.detail', 'live.v2']), ['history.detail', 'live.v2'])
+        for bad in ('hardware', ['Hardware'], [''], ['x'*33], ['a']*33, [1]):
+            with self.subTest(bad=str(bad)[:20]), self.assertRaises(ProtocolError):
+                validate_capabilities(bad)
+
     def test_readings_and_command_result(self):
         value = message()
         value['policy'].update(resources=True, control=True)

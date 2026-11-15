@@ -364,7 +364,8 @@ class MachineAgent:
                         pending=self._db.execute('SELECT count(*) FROM outbox').fetchone()[0],
                         dropped=state['dropped'], policy=dict(state['policy']),
                         server_name=state.get('server_name'), phase=state['phase'],
-                        error=state.get('last_error'), error_at=state.get('last_error_at'))
+                        error=state.get('last_error'), error_at=state.get('last_error_at'),
+                        trimmed=bool(state.get('trimmed')))
 
     def write_status(self):
         with self._lock:

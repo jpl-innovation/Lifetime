@@ -1631,6 +1631,8 @@ _TRUST_VI = {
         'Chứng chỉ bảo mật của máy chủ đã hết hạn, hoặc đồng hồ của máy tính này bị sai. Hãy kiểm tra ngày giờ, hoặc nhờ quản trị viên kiểm tra Lifetime Server.',
     "This address is not one of the server's names. Ask the administrator to add it under Administration on Lifetime Server.":
         'Địa chỉ này không nằm trong các tên của máy chủ. Hãy nhờ quản trị viên thêm địa chỉ này trong mục Quản trị của Lifetime Server.',
+    'The server runs an older version of Lifetime, so some details are not shared until it is updated.':
+        'Máy chủ đang chạy phiên bản Lifetime cũ hơn, nên một số chi tiết chưa được chia sẻ cho đến khi máy chủ được cập nhật.',
 }
 for _key, _text in _TRUST_VI.items():
     EN[_key] = _key

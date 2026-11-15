@@ -24,6 +24,7 @@ from lifetime_glass import solid
 
 NO_SERVER = 'No server found with this code. Check that the server is on and that this computer is on the same network.'
 PERMISSION = 'Windows permission is needed to finish.'
+TRIMMED = 'The server runs an older version of Lifetime, so some details are not shared until it is updated.'
 
 
 def locate_server(value):
@@ -643,7 +644,8 @@ class ConnectPage(QWidget):
                 names.append(title)
         self.summary.setText(self.server_name + '\n' + self.server_address + '\n' +
                              self.t('Last report: {time}', time=self._local_time(self.status.get('last_sync')) or self.t('Not available')) +
-                             '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)))
+                             '\n\n' + self.t('Shared: {items}', items='\n'.join(self.t(name) for name in names)) +
+                             ('\n\n' + self.t(TRIMMED) if self.status.get('trimmed') else ''))
         self._set_reachable(self.status.get('status') not in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
 
     def _code_rejected(self, state):

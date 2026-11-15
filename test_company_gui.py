@@ -142,6 +142,9 @@ class ConnectTests(unittest.TestCase):
         self.page.completed(0, up)                                 # and it recovers by itself
         self.assertEqual(self.page.connected_title.text(), 'Connected')
         self.assertTrue(self.page.unreachable.isHidden())
+        self.assertNotIn('older version', self.page.summary.text())
+        self.page.completed(0, dict(up, trimmed=True))            # an older server: never trimmed silently
+        self.assertIn('older version of Lifetime', self.page.summary.text())
 
     def test_the_review_step_says_found_not_connected_until_it_really_is(self):
         self.find()

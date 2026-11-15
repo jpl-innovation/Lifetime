@@ -458,8 +458,9 @@ def request_json(bundle, path, payload, credential=None, timeout=10):
     try:
         if isinstance(bundle, dict) and trusted != value:
             bundle.update(trusted)
+        # Ask for the server's capability list; an older server ignores the header.
         headers = {'Content-Type': 'application/json', 'Accept': 'application/json',
-                   'Connection': 'close'}
+                   'Connection': 'close', 'Lifetime-Accept': 'capabilities'}
         if credential is not None:
             headers['Authorization'] = f'Bearer {credential}'
         connection.request('POST', path, body=body, headers=headers)

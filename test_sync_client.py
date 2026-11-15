@@ -41,16 +41,20 @@ class SyncFixture(AgentFixture):
         self.enterContext(patch('lifetime_discovery.discover', return_value=[]))     # never multicast from tests
         self.client = SyncClient(self.machine)
 
+    server_capabilities = None      # None: a 1.1 server that sends no list
+
     def exchange(self, bundle, path, payload, credential=None, timeout=10):
         self.calls.append((path, copy.deepcopy(payload), credential))
+        caps = self.server_capabilities
+        extra = {} if caps is None else dict(capabilities=list(caps) if isinstance(caps, tuple) else caps)
         try:
             if path == '/v1/enroll':
-                return self.store.enroll(payload)
+                return self.store.enroll(payload) | extra
             if path == '/v1/claim':
                 self.assertEqual(set(payload), {'request_id', 'poll_token'})
-                return self.store.claim(**payload)
+                return self.store.claim(**payload) | extra
             if path == '/v1/sync':
-                return self.store.ingest(payload['device_id'], credential, payload)
+                return self.store.ingest(payload['device_id'], credential, payload) | extra
             self.fail('Unexpected route')
         except storage.ConflictError:
             raise tls.HTTPSRequestError(409) from None
@@ -440,6 +444,69 @@ class TrustTests(RuntimeFixture):
         self.assertEqual(self.machine._load()['bundle']['address'], self.runtime.public_address)
         self.assertEqual(self.connected()['status'], 'connected')
         self.assertEqual(impostor._store.list_devices(), [])
+
+
+def strict_1_1(message):
+    """A 1.1 server: the same strict validation, without the fields added after 1.1."""
+    if protocol.without_extended(message) != message:
+        raise protocol.ProtocolError('Invalid or incompatible fields')
+    return protocol.validate_sync(message)
+
+
+class CapabilityTests(SyncFixture):
+    """Golden case 5: mixed versions during an upgrade; no rejected reports, trimmed fields disclosed."""
+    HISTORY = dict(history=True, resources=False)
+
+    def report(self):
+        self.tick = getattr(self, 'tick', 100) + 30
+        self.sample(self.tick)
+        return self.client.step(force=True)
+
+    def test_new_computer_with_old_server_sends_the_1_1_format_and_says_so(self):
+        self.enterContext(patch.object(storage, 'validate_sync', side_effect=strict_1_1))
+        self.pair(self.HISTORY)
+        status = self.report()
+        self.assertEqual((status['status'], status['trimmed']), ('connected', True))
+        sent = self.calls[-1][1]
+        self.assertIn('daily', sent['history'])
+        self.assertFalse(set(sent['history']) & set(protocol.HISTORY_EXTRA))
+        self.assertEqual(self.machine._load()['capabilities'], [])
+
+    def test_rolling_upgrade_server_first_then_full_detail_with_no_rejected_report(self):
+        self.enterContext(patch.object(storage, 'validate_sync', side_effect=strict_1_1))
+        self.pair(self.HISTORY)
+        self.assertTrue(self.report()['trimmed'])
+        # The server is upgraded: strict validation stays, and it now advertises what it accepts.
+        storage.validate_sync.side_effect = protocol.validate_sync
+        self.server_capabilities = protocol.CAPABILITIES
+        status = self.report()                      # still sent the 1.1 way; the reply brings the list
+        self.assertEqual((status['status'], status['trimmed']), ('connected', False))
+        self.assertEqual(self.machine._load()['next_attempt'], 0)     # so the detail follows at once
+        self.client.step()
+        self.assertIn('hourly', self.calls[-1][1]['history'])
+        self.assertIn('hourly', self.store.get_device(self.machine.device_id)['history'])
+        self.assertEqual(self.machine._load()['capabilities'], list(protocol.CAPABILITIES))
+        # A server that lists only some parts gets only those.
+        self.server_capabilities = ('hardware',)
+        self.report()
+        self.assertTrue(self.report()['trimmed'])
+        self.assertFalse(set(self.calls[-1][1]['history']) & set(protocol.HISTORY_EXTRA))
+
+    def test_capabilities_are_validated_and_forgotten_for_a_new_server(self):
+        self.server_capabilities = protocol.CAPABILITIES
+        self.pair(self.HISTORY)
+        self.assertEqual(self.machine._load()['capabilities'], list(protocol.CAPABILITIES))
+        for bad in (['Bad Name'], 'hardware', ['x' * 33], ['a'] * 33):
+            self.server_capabilities = bad
+            with self.subTest(bad=str(bad)[:20]):
+                self.assertEqual(self.report()['error'], 'protocol')
+        self.server_capabilities = protocol.CAPABILITIES
+        self.report()
+        self.assertEqual(self.machine._load()['capabilities'], list(protocol.CAPABILITIES))
+        self.transport.side_effect = TimeoutError()     # another server, not answering yet: nothing carries over
+        self.client.start_enrollment(tls.encode_bundle('https://other.example:8443', 'another-code', self.pem),
+                                     {}, dict(history=False, resources=False))
+        self.assertEqual(self.machine._load()['capabilities'], [])
 
 
 class PowerSyncTests(SyncFixture):

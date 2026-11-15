@@ -272,17 +272,33 @@ def validate_health_detail(detail):
                 raise ProtocolError('Night exceeds one day')
 
 
-def without_extended(message):
-    """The 1.1 wire format, for servers that predate Activity/Health detail."""
+# Optional sync parts added after 1.1. A server lists the ones it accepts in each enroll, claim and sync
+# reply ("capabilities"), but only to a computer that asked for the list with the request header
+# "Lifetime-Accept: capabilities", so an older computer never sees an unknown reply field.
+# A server that sends no list accepts the 1.1 format only.
+CAPABILITIES = ('history.detail', 'health.detail', 'hardware')
+
+
+def validate_capabilities(value):
+    if (not isinstance(value, list) or len(value) > 32
+            or not all(isinstance(item, str) and re.fullmatch(r'[a-z0-9.]{1,32}', item) for item in value)):
+        raise ProtocolError('Invalid capability list')
+    return value
+
+
+def without_extended(message, capabilities=()):
+    """``message`` with only the optional parts in ``capabilities``; with none, the 1.1 wire format."""
     result = dict(message)
-    if 'history' in result:
+    if 'history.detail' not in capabilities and 'history' in result:
         result['history'] = {k: v for k, v in result['history'].items() if k not in HISTORY_EXTRA}
-    if 'health' in result:
-        result['health'] = {k: v for k, v in result['health'].items() if k != 'detail'}
-    if 'readings' in result:
-        result['readings'] = {k: v for k, v in result['readings'].items() if k != 'health'}
-    if 'specs' in result.get('readings', {}):
-        result['readings']['specs'] = {k: v for k, v in result['readings']['specs'].items() if k != 'hardware'}
+    if 'health.detail' not in capabilities:
+        if 'health' in result:
+            result['health'] = {k: v for k, v in result['health'].items() if k != 'detail'}
+        if 'readings' in result:
+            result['readings'] = {k: v for k, v in result['readings'].items() if k != 'health'}
+    if 'hardware' not in capabilities and 'specs' in result.get('readings', {}):
+        result['readings'] = dict(result['readings'], specs={
+            k: v for k, v in result['readings']['specs'].items() if k != 'hardware'})
     return result
 
 

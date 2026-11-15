@@ -26,7 +26,7 @@ import time
 import datetime as dt
 
 import lifetime_permissions as permissions
-from lifetime_protocol import MAX_BYTES, ProtocolError, canonical, decode
+from lifetime_protocol import CAPABILITIES, MAX_BYTES, ProtocolError, canonical, decode
 from lifetime_server_store import (AuthenticationError, ConflictError, Store,
                                    StoreError, ThrottledError)
 import lifetime_tls as tls
@@ -385,6 +385,9 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     method = runtime._store.ingest_live if self.path == '/v1/live' else runtime._store.ingest
                     result = method(value['device_id'], credential, value)
+            if (self.path in ('/v1/enroll', '/v1/claim', '/v1/sync') and not self.server.admin
+                    and self.headers.get_all('Lifetime-Accept') == ['capabilities']):
+                result = dict(result, capabilities=list(CAPABILITIES))     # only a computer that asked gets the new field
             self._reply(200, result)
         except _HTTPError as error:
             self.send_error(error.status)

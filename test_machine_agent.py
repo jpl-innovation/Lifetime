@@ -217,7 +217,7 @@ class MachineTests(AgentFixture):
             self.machine.write_status()
             public = agent.status_path()
         self.assertEqual(public.parent, self.root.parent)
-        self.assertEqual(set(json.loads(public.read_text())), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at'})
+        self.assertEqual(set(json.loads(public.read_text())), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at', 'trimmed'})
         if sys.platform == 'win32':
             self.assertEqual(acl.call_args_list[0].args[2][-1], '*S-1-5-32-545:(RX)')
             self.assertEqual(acl.call_args_list[1].args[2][-1], '*S-1-5-32-545:(R)')
@@ -235,7 +235,7 @@ class MachineTests(AgentFixture):
         self.sample()
         status = json.loads(agent.status_path(self.root).read_text())
         # error is a fixed category word (see lifetime_client.error_kind), never exception text
-        self.assertEqual(set(status), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at'})
+        self.assertEqual(set(status), {'enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported', 'error', 'error_at', 'trimmed'})
         self.assertNotIn(self.machine.device_id, json.dumps(status))
 
     def test_disable_reporting_keeps_uuid_stock_and_core_queue(self):
