@@ -260,6 +260,12 @@ _ADMIN = {
     'incident': ('monitor.incident', ('incident_id',), ()),
     'acknowledge': ('monitor.acknowledge', ('incident_id', 'by'), ()),
     'alert_summary': ('monitor.summary', (), ()),
+    'notifications': ('monitor.notifications', (), ()),
+    'set_notifications': ('monitor.set_notifications', (), (
+        'email_enabled', 'smtp_host', 'smtp_port', 'security', 'username', 'sender', 'recipients', 'webhook_enabled',
+        'summary_enabled', 'summary_hour', 'language', 'password', 'webhook_url')),
+    'test_notification': ('monitor.test_notification', ('channel',), ()),
+    'deliveries': ('monitor.deliveries', (), ('limit', 'offset')),
 }
 
 
@@ -528,7 +534,8 @@ class ServerRuntime:
                         tls.protect_private(path)
                 self._store = Store(self.directory / 'server.sqlite')
                 from lifetime_monitor import Monitor
-                self.monitor = Monitor(self.directory / 'monitoring.sqlite', self._store, clock=self.clock).start()
+                self.monitor = Monitor(self.directory / 'monitoring.sqlite', self._store, clock=self.clock,
+                                       server_name=socket.gethostname()[:63]).start()
                 if self._renew_certificate():       # due, or the names changed: same key, new certificate
                     context, bundle = _certificate(self.directory, self.address)
                 self.fingerprint = bundle['fingerprint']
@@ -654,6 +661,8 @@ class ServerRuntime:
         while not self._maintenance_stop.wait(MONITOR_TICK):
             with contextlib.suppress(Exception):    # a failing pass is retried at the next tick
                 self.monitor.tick()
+            with contextlib.suppress(Exception):
+                self.monitor.deliver()
 
     def _maintain(self):
         while not self._maintenance_stop.wait(CERTIFICATE_CHECK):

@@ -230,7 +230,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_whitelist_passes_pagination_filters_exactly(self):
         with patch.object(self.runtime._store, 'get_overview', return_value={'devices': 1}) as query:
-            self.assertEqual(self.admin.call('overview'), {'devices': 1})
+            self.assertEqual(self.admin.call('overview')['devices'], 1)     # plus the alert badge counts
         query.assert_called_once_with()
         arguments = dict(limit=2, offset=3, search='M\u00e1y', group='Sales', status='approved')
         with patch.object(self.runtime._store, 'list_devices', return_value=[]) as query:
@@ -269,6 +269,26 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.admin.call('device', device_id=request['device_id'])['record_count'], 1)
         for name in ('admin-token', 'server-key.pem', 'server-cert.pem', 'server.sqlite', 'server.sqlite-wal'):
             self.assertEqual(self.admin_raw('/v1/backup', {'path': str(self.root / name)})[0], 400)
+
+    def test_alerts_through_the_admin_api_with_reserved_files_and_no_secret_in_replies(self):
+        request, credential = self.pair()
+        self.public('sync', self.message(request), credential)
+        self.assertEqual(self.admin.call('overview')['alerts']['active'], 0)
+        self.runtime.monitor.tick()
+        alerts = self.admin.call('device', device_id=request['device_id'])['alerts']
+        self.assertEqual((alerts['incidents'], alerts['status']['presence']), ([], 'online'))
+        rules = self.admin.call('set_alert_rule', rule='disk_low', threshold=15)
+        self.assertEqual(next(rule for rule in rules if rule['rule'] == 'disk_low')['threshold'], 15)
+        self.assertEqual(self.admin_raw('/v1/set_alert_rule', {'rule': 'disk_low', 'threshold': 500})[0], 400)
+        self.assertEqual(self.admin.call('incidents', state='active'), [])
+        settings = self.admin.call('set_notifications', email_enabled=True, smtp_host='mail.example', sender='a@b.example',
+                                   recipients=['c@d.example'], password='S3cret-pass')
+        self.assertTrue(settings['password_set'])
+        self.assertNotIn('S3cret', json.dumps(settings) + json.dumps(self.admin.call('notifications')))
+        for name in ('monitoring.sqlite', 'monitoring.sqlite-wal', 'alert-secrets.bin'):
+            self.assertEqual(self.admin_raw('/v1/backup', {'path': str(self.root / name)})[0], 400)
+        self.admin.call('delete', device_id=request['device_id'])
+        self.assertEqual(self.admin.call('presence', device_id=request['device_id']), [])
 
     def test_real_pinned_tls_wrong_hostname_trust_anchor_and_pin_mismatch(self):
         # A different trust anchor fails before HTTP/application data is sent.

@@ -5,12 +5,20 @@ Every test uses a temporary directory, an injectable clock and a fake fleet; not
 import contextlib
 import datetime as dt
 from pathlib import Path
+import socketserver
 import sqlite3
+import ssl
+import sys
 import tempfile
+import threading
 import unittest
+from unittest.mock import patch
 import uuid
+import test_compat  # noqa: F401  (enterContext on Python 3.10)
 
 import lifetime_monitor as monitoring
+import lifetime_notify as notify
+import lifetime_permissions as permissions
 
 T0 = dt.datetime(2026, 11, 16, 9, 0, tzinfo=dt.timezone.utc)      # a Monday
 ID = str(uuid.UUID(int=1))
@@ -57,16 +65,35 @@ class Clock:
         return self.now
 
 
+class Transport:
+    """Records what would have been sent; ``fail`` makes every attempt raise that error."""
+    def __init__(self):
+        self.emails, self.hooks, self.fail = [], [], None
+
+    def send_email(self, settings, password, subject, body):
+        if self.fail:
+            raise self.fail
+        self.emails.append(dict(subject=subject, body=body, password=password, to=list(settings['recipients'])))
+
+    def post_webhook(self, url, payload):
+        if self.fail:
+            raise self.fail
+        self.hooks.append(dict(url=url, payload=payload))
+
+
 class MonitorCase(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        if sys.platform == 'win32':     # the ACL helper needs elevation; production has no bypass
+            self.acl = self.enterContext(patch.object(permissions, 'windows_acl'))
         self.path = Path(self.temporary.name) / 'monitoring.sqlite'
-        self.fleet, self.clock = Fleet(), Clock()
+        self.fleet, self.clock, self.transport = Fleet(), Clock(), Transport()
         self.monitor = self.open()
 
     def open(self, **options):
-        monitor = monitoring.Monitor(self.path, self.fleet, clock=self.clock, **options).start()
+        monitor = monitoring.Monitor(self.path, self.fleet, clock=self.clock, transport=self.transport,
+                                     server_name='School-Server', **options).start()
         self.addCleanup(lambda: monitor._db.close())
         return monitor
 
@@ -426,6 +453,218 @@ class IncidentTests(MonitorCase):
         for arguments in (dict(state='bogus'), dict(limit=0), dict(offset=-1)):
             with self.assertRaises(monitoring.MonitorError):
                 self.monitor.incidents(**arguments)
+
+
+MAIL = dict(email_enabled=True, smtp_host='mail.school.local', smtp_port=587, security='starttls',
+            username='alerts', sender='lifetime@school.local', recipients=['it@school.local'])
+
+
+class SMTPStub(socketserver.StreamRequestHandler):
+    """A small local SMTP server: STARTTLS (when offered), AUTH PLAIN, one message per DATA. No real network."""
+    def write(self, text):
+        self.wfile.write(text.encode('ascii') + b'\r\n')
+
+    def handle(self):
+        try:
+            self.converse()
+        finally:
+            self.connection.close()
+
+    def converse(self):
+        server, secure = self.server, False
+        self.write('220 stub ESMTP')
+        while True:
+            line = self.rfile.readline(4096).decode('ascii', 'replace').strip()
+            verb = line.split(' ', 1)[0].upper()
+            if not line or verb == 'QUIT':
+                self.write('221 bye')
+                return
+            if verb in ('EHLO', 'HELO'):
+                extensions = ([] if secure or not server.starttls else ['STARTTLS']) + ['AUTH PLAIN']
+                self.write('\r\n'.join(['250-stub'] + [f'250-{item}' for item in extensions[:-1]] + [f'250 {extensions[-1]}']))
+            elif verb == 'STARTTLS':
+                self.write('220 ready')
+                self.connection = server.context.wrap_socket(self.connection, server_side=True)
+                self.rfile, self.wfile = self.connection.makefile('rb'), self.connection.makefile('wb', buffering=0)
+                secure = True
+            elif verb == 'AUTH':
+                server.auth.append((secure, line))
+                self.write('235 ok')
+            elif verb == 'DATA':
+                self.write('354 go')
+                data = b''
+                while (chunk := self.rfile.readline(65536)) not in (b'.\r\n', b''):
+                    data += chunk
+                server.messages.append((secure, data.decode('utf-8', 'replace')))
+                self.write('250 queued')
+            else:
+                self.write('250 ok')
+
+
+class NotificationTests(MonitorCase):
+    def setUp(self):
+        super().setUp()
+        self.monitor.set_notifications(password='Pa55-word', **MAIL)
+        self.fleet.add()
+        self.monitor.tick()
+
+    def unplug(self):
+        self.fleet.offline(self.clock.now)
+        self.run_for(15)
+        self.monitor.deliver()
+
+    def test_open_and_recovery_are_sent_once_and_a_test_creates_no_incident(self):
+        self.unplug()
+        self.assertEqual(len(self.transport.emails), 1)
+        email = self.transport.emails[0]
+        self.assertEqual(email['subject'], '[School-Server] Problem: Computer offline on PC-001')
+        self.assertEqual((email['password'], email['to']), ('Pa55-word', ['it@school.local']))
+        for _ in range(3):
+            self.run_for(5)
+            self.monitor.deliver()
+        self.assertEqual(len(self.transport.emails), 1)
+        self.fleet.online(self.clock.now)
+        self.run_for(10)
+        self.monitor.deliver()
+        self.assertEqual([item['subject'][:27] for item in self.transport.emails],
+                         ['[School-Server] Problem: Co', '[School-Server] Resolved: C'])
+        result = self.monitor.test_notification('email')
+        self.assertEqual(result, dict(channel='email', status='sent', error=None))
+        self.assertEqual(len(self.monitor.incidents()), 1)
+        self.assertEqual([row['kind'] for row in self.monitor.deliveries()], ['test', 'recovery', 'open'])
+        for item in self.transport.emails:     # no history, readings, addresses or secrets in any message
+            self.assertNotIn('Pa55', item['body'])
+            self.assertNotIn(ID, item['body'])
+
+    def test_mail_server_down_retries_with_backoff_then_fails_without_crashing(self):
+        self.transport.fail = ConnectionRefusedError('mail server down')
+        self.unplug()
+        log = self.monitor.deliveries()[0]
+        self.assertEqual((log['status'], log['attempts'], log['error']), ('queued', 1, 'connect'))
+        for seconds in monitoring.BACKOFF:
+            self.assertEqual(self.monitor.deliver(), 0)     # not due yet
+            self.clock.advance(seconds=seconds)
+            self.assertEqual(self.monitor.deliver(), 1)
+        log = self.monitor.deliveries()[0]
+        self.assertEqual((log['status'], log['attempts'], log['error']), ('failed', 5, 'connect'))
+        self.clock.advance(days=1)
+        self.assertEqual(self.monitor.deliver(), 0)
+        self.assertEqual(self.transport.emails, [])
+        self.assertEqual(self.monitor.test_notification('email')['error'], 'connect')
+
+    def test_a_restart_never_sends_twice_even_when_it_interrupted_a_send(self):
+        self.unplug()
+        self.restart(gap_minutes=1)
+        self.run_for(20)
+        self.monitor.deliver()
+        self.assertEqual(len(self.transport.emails), 1)
+        with self.monitor._transaction() as db:      # as if the server stopped in the middle of sending
+            db.execute("UPDATE deliveries SET status='sending'")
+        self.restart()
+        self.monitor.deliver()
+        self.assertEqual(len(self.transport.emails), 1)
+        self.assertEqual(self.monitor.deliveries()[0]['error'], 'interrupted')
+
+    def test_webhook_is_optional_https_only_and_its_address_is_a_secret(self):
+        for url in ('http://hooks.example/x', 'https://user:pw@hooks.example/x', 'https:///x', 'https://a b/', 'ftp://x'):
+            with self.assertRaises(monitoring.MonitorError, msg=url):
+                self.monitor.set_notifications(webhook_url=url, webhook_enabled=True)
+        with self.assertRaises(monitoring.MonitorError):
+            self.monitor.set_notifications(webhook_enabled=True)        # enabled without an address
+        settings = self.monitor.set_notifications(webhook_url='https://hooks.example/services/T0KEN', webhook_enabled=True)
+        self.assertEqual(settings['webhook'], 'https://hooks.example/…')
+        self.assertTrue(settings['password_set'])       # keeping the password: None leaves it alone
+        self.unplug()
+        hook = self.transport.hooks[0]
+        self.assertEqual(hook['url'], 'https://hooks.example/services/T0KEN')
+        self.assertEqual((hook['payload']['event'], hook['payload']['computer']), ('open', 'PC-001'))
+        self.assertNotIn('T0KEN', str(self.monitor.notifications()) + str(self.monitor.deliveries()))
+        self.monitor.set_notifications(webhook_url='', webhook_enabled=False)
+        self.assertEqual(self.monitor.notifications()['webhook'], '')
+
+    def test_settings_are_validated_and_secrets_stay_out_of_the_database(self):
+        for change in (dict(security='none'), dict(smtp_port=0), dict(smtp_host='bad host'), dict(sender='nobody'),
+                       dict(recipients=['a@b.c'] * 21), dict(recipients='it@school.local'), dict(summary_hour=24),
+                       dict(language='fr'), dict(email_enabled='yes'), dict(colour='red'),
+                       dict(recipients=[], email_enabled=True), dict(password='a\nb')):
+            with self.assertRaises(monitoring.MonitorError, msg=change):
+                self.monitor.set_notifications(**change)
+        settings = self.monitor.notifications()
+        self.assertTrue(settings['password_set'])
+        self.assertNotIn('Pa55-word', str(settings))
+        self.monitor.close()
+        for name in ('monitoring.sqlite', 'monitoring.sqlite-wal'):
+            path = Path(self.temporary.name) / name
+            if path.exists():
+                self.assertNotIn(b'Pa55-word', path.read_bytes())
+        secret = (Path(self.temporary.name) / notify.SECRET_FILE).read_bytes()
+        if sys.platform == 'win32':
+            self.assertTrue(secret.startswith(b'DPAPI1\n'))
+            self.assertNotIn(b'Pa55-word', secret)
+            self.acl.assert_called()        # restricted to Administrators and SYSTEM before it was written
+        self.monitor = self.open()
+        self.assertEqual(self.monitor.secrets.load()['smtp_password'], 'Pa55-word')
+        (Path(self.temporary.name) / notify.SECRET_FILE).write_bytes(b'DPAPI1\ngarbage' if sys.platform == 'win32' else b'??')
+        self.assertTrue(self.monitor.notifications()['secrets_unreadable'])
+        self.assertEqual(self.monitor.test_notification('email')['error'], 'config')
+
+    def test_daily_summary_is_off_by_default_and_sent_once_a_day(self):
+        self.unplug()
+        self.run_for(12 * 60, step=60)
+        self.monitor.deliver()
+        self.assertEqual([row['kind'] for row in self.monitor.deliveries()], ['open'])
+        self.monitor.set_notifications(summary_enabled=True, summary_hour=0)
+        self.run_for(30, step=10)
+        self.monitor.deliver()
+        summaries = [item for item in self.transport.emails if 'daily summary' in item['subject']]
+        self.assertEqual(len(summaries), 1)
+        self.assertIn('Open 1', summaries[0]['body'])
+        self.assertIn('PC-001: Computer offline', summaries[0]['body'])
+
+    def test_vietnamese_messages(self):
+        self.monitor.set_notifications(language='vi')
+        self.unplug()
+        self.assertEqual(self.transport.emails[0]['subject'], '[School-Server] Sự cố: Máy tính ngoại tuyến trên PC-001')
+
+    def test_real_smtp_over_starttls_with_a_local_stub_and_no_plain_text_fallback(self):
+        import lifetime_tls as tls
+        directory = Path(self.temporary.name) / 'tls'
+        directory.mkdir()
+        tls.generate_certificate(directory, 'https://127.0.0.1:8443')
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_context.load_cert_chain(directory / 'server-cert.pem', directory / 'server-key.pem')
+        for starttls in (True, False):
+            stub = socketserver.ThreadingTCPServer(('127.0.0.1', 0), SMTPStub)
+            stub.daemon_threads = True
+            stub.context, stub.starttls, stub.messages, stub.auth = server_context, starttls, [], []
+            thread = threading.Thread(target=stub.serve_forever, kwargs=dict(poll_interval=0.05))
+            thread.start()
+            try:
+                transport = notify.Transport()
+                transport.context = ssl.create_default_context(cadata=(directory / 'server-cert.pem').read_text())
+                self.monitor.transport = transport
+                self.monitor.set_notifications(smtp_host='127.0.0.1', smtp_port=stub.server_address[1])
+                result = self.monitor.test_notification('email')
+            finally:
+                stub.shutdown()
+                stub.server_close()
+                thread.join()
+            if starttls:
+                self.assertEqual(result['status'], 'sent')
+                self.assertEqual([secure for secure, _ in stub.auth + stub.messages], [True, True])
+                self.assertIn('Subject: Lifetime Server test message', stub.messages[0][1])
+            else:       # a server without STARTTLS gets nothing, not even the password
+                self.assertEqual(result, dict(channel='email', status='failed', error='tls'))
+                self.assertEqual((stub.auth, stub.messages), ([], []))
+
+    def test_error_categories_are_secret_free_words(self):
+        import smtplib
+        import urllib.error
+        for error, expected in ((smtplib.SMTPAuthenticationError(535, b'no'), 'auth'), (TimeoutError(), 'timeout'),
+                                (smtplib.SMTPRecipientsRefused({}), 'refused'), (ssl.SSLError(), 'tls'),
+                                (urllib.error.HTTPError('https://x', 503, 'busy', {}, None), 'http-503'),
+                                (OSError('secret path'), 'connect'), (RuntimeError('x'), 'other')):
+            self.assertEqual(notify.category(error), expected)
 
 
 class SnapshotTests(unittest.TestCase):

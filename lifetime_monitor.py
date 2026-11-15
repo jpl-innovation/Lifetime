@@ -12,10 +12,14 @@ size (QUOTA_BYTES), checked every hour.
 import contextlib
 import datetime as dt
 import json
+from pathlib import Path
 import re
 import sqlite3
 import threading
+import uuid
 import zoneinfo
+
+import lifetime_notify as notify
 
 SCHEMA_VERSION = 1
 APPLICATION_ID = 0x4C544D4E     # "LTMN"
@@ -24,6 +28,7 @@ QUOTA_BYTES = 64 * 1024 * 1024
 MAX_DELIVERIES = 5000
 HOUSEKEEPING_SECONDS = 3600
 PRESENCE = ('online', 'offline', 'unknown')
+BACKOFF = (60, 300, 900, 3600)  # seconds before the 2nd to 5th attempt; after the 5th the delivery has failed
 RECOVER_SECONDS = 300           # a problem must stay away this long before its incident resolves (no flapping storms)
 ACTIVE = ('pending', 'open', 'acknowledged', 'suppressed')
 
@@ -232,8 +237,13 @@ def _migrate(db):
 class Monitor:
     """The single writer of monitoring.sqlite. ``store`` provides ``monitor_snapshot()``; ``clock`` returns UTC now."""
 
-    def __init__(self, path, store=None, clock=None, quota=QUOTA_BYTES, retention_days=RETENTION_DAYS):
+    def __init__(self, path, store=None, clock=None, quota=QUOTA_BYTES, retention_days=RETENTION_DAYS,
+                 secrets_path=None, server_name='Lifetime Server', transport=None):
         self.store, self.clock = store, clock or _now
+        self.secrets = notify.Secrets(secrets_path or Path(path).with_name(notify.SECRET_FILE))
+        self.server_name, self.transport = server_name, transport or notify.Transport()
+        self.status = {}
+        self._delivering = threading.Lock()
         self.quota, self.retention = quota, dt.timedelta(days=retention_days)
         self.started_at = None
         self._housekeeping_at = None
@@ -291,6 +301,9 @@ class Monitor:
                     db.execute("INSERT INTO presence(device_id,state,reason,start_at,end_at) VALUES (?,'unknown','server-down',?,?)",
                                (row['device_id'], _stamp(end), _stamp(now)))
             self._meta(db, 'heartbeat', _stamp(now))
+            # A message being sent when the server stopped may or may not have left: never send it twice.
+            db.execute("UPDATE deliveries SET status='failed',error='interrupted',updated_at=? WHERE status='sending'",
+                       (_stamp(now),))
         self.started_at = now
         return self
 
@@ -357,6 +370,7 @@ class Monitor:
             for row in db.execute(f'SELECT * FROM incidents WHERE state IN {ACTIVE}').fetchall():    # nosec B608: constant
                 if row['device_id'] not in status or row['rule'] not in rules:
                     self._resolve(db, row, now, 'not-monitored')     # removed, disconnected, or its rule turned off
+            self._summary(db, now)
             if self._housekeeping_at is None or (now - self._housekeeping_at).total_seconds() >= HOUSEKEEPING_SECONDS:
                 self._housekeeping(db, now)
                 self._housekeeping_at = now
@@ -566,8 +580,151 @@ class Monitor:
         if resolution == 'recovered' and row['notified']:
             self._notify(db, row['id'], 'recovery', now)
 
-    def _notify(self, db, incident_id, kind, now):
-        """Queue the open or recovery message for every configured channel."""
+    def _notify(self, db, incident_id, kind, now, ref=None):
+        """Queue a message for every enabled channel. (kind, channel, ref) is unique, so a restart or a repeated
+        pass can never queue the same message twice."""
+        settings = self._notification_settings(db)
+        for channel, enabled in (('email', settings['email_enabled']), ('webhook', settings['webhook_enabled'])):
+            if enabled:
+                db.execute('''INSERT OR IGNORE INTO deliveries(incident_id,kind,channel,ref,status,next_at,created_at,updated_at)
+                    VALUES (?,?,?,?,'queued',?,?,?)''', (incident_id, kind, channel, ref or str(incident_id),
+                                                         _stamp(now), _stamp(now), _stamp(now)))
+
+    # ---- notifications ----
+
+    def _notification_settings(self, db):
+        return dict(notify.DEFAULTS, **json.loads(self._setting(db, 'notifications') or '{}'))
+
+    def notifications(self):
+        """Settings for the dashboard: never the password or the webhook URL, only whether they are set."""
+        with self._transaction() as db:
+            settings = self._notification_settings(db)
+        secrets = self.secrets.load()
+        return dict(settings, password_set=bool(secrets.get('smtp_password')),
+                    webhook=notify.masked(secrets.get('webhook_url')), secrets_unreadable=bool(secrets.get('unreadable')))
+
+    def set_notifications(self, password=None, webhook_url=None, **settings):
+        """Save the settings. ``password`` and ``webhook_url``: None keeps the stored value, '' removes it."""
+        with self._transaction() as db:
+            try:
+                value = notify.validate(dict(self._notification_settings(db), **settings))
+                secrets = self.secrets.load()
+                secrets.pop('unreadable', None)
+                for key, given in (('smtp_password', password), ('webhook_url', webhook_url)):
+                    if given is None:
+                        continue
+                    if not isinstance(given, str) or len(given) > 2048 or any(ord(c) < 32 for c in given):
+                        raise MonitorError('Invalid secret')
+                    if key == 'webhook_url' and given:
+                        notify.check_webhook(given)
+                    secrets[key] = given
+            except notify.NotifyError as error:
+                raise MonitorError(str(error)) from None
+            if value['webhook_enabled'] and not secrets.get('webhook_url'):
+                raise MonitorError('Enter the webhook address')
+            if password is not None or webhook_url is not None:
+                self.secrets.save(secrets)
+            self._setting(db, 'notifications', json.dumps(value, sort_keys=True))
+        return self.notifications()
+
+    def deliveries(self, limit=50, offset=0):
+        """The delivery log: queued, sent or failed with an error category; never message text or secrets."""
+        if type(limit) is not int or not 1 <= limit <= 500 or type(offset) is not int or offset < 0:
+            raise MonitorError('Invalid pagination')
+        with self._lock:
+            return [dict(row) for row in self._db.execute(
+                '''SELECT deliveries.id,deliveries.incident_id,kind,channel,deliveries.status,attempts,error,created_at,
+                   deliveries.updated_at,incidents.device_name,incidents.rule FROM deliveries
+                   LEFT JOIN incidents ON incidents.id=deliveries.incident_id
+                   ORDER BY deliveries.id DESC LIMIT ? OFFSET ?''', (limit, offset))]
+
+    def _message(self, db, row, settings):
+        language = settings['language']
+        if row['kind'] == 'test':
+            return notify.compose_test(self.server_name, language)
+        if row['kind'] == 'summary':
+            counts = dict.fromkeys(ACTIVE, 0)
+            counts.update({state: number for state, number in db.execute(
+                f'SELECT state,COUNT(*) FROM incidents WHERE state IN {ACTIVE} GROUP BY state')})    # nosec B608
+            day = _stamp(self.clock() - dt.timedelta(days=1))
+            counts['new'] = db.execute('SELECT COUNT(*) FROM incidents WHERE opened_at>=?', (day,)).fetchone()[0]
+            counts['resolved'] = db.execute("SELECT COUNT(*) FROM incidents WHERE state='resolved' AND resolved_at>=?",
+                                            (day,)).fetchone()[0]
+            items = db.execute("SELECT * FROM incidents WHERE state IN ('open','acknowledged') ORDER BY started_at LIMIT 20")
+            return notify.compose_summary(counts, [dict(item) for item in items], self.server_name, language)
+        incident = db.execute('SELECT * FROM incidents WHERE id=?', (row['incident_id'],)).fetchone()
+        return notify.compose(row['kind'], dict(incident), self.server_name, language) if incident else None
+
+    def _send(self, channel, settings, secrets, message):
+        """Deliver one message; returns None, or a secret-free error category."""
+        subject, body, payload = message
+        if secrets.get('unreadable'):
+            return 'config'
+        try:
+            if channel == 'email':
+                if not (settings['smtp_host'] and settings['sender'] and settings['recipients']):
+                    return 'config'
+                self.transport.send_email(settings, secrets.get('smtp_password', ''), subject, body)
+            else:
+                if not secrets.get('webhook_url'):
+                    return 'config'
+                self.transport.post_webhook(secrets['webhook_url'], payload)
+        except Exception as error:      # every failure becomes a category; the worker never stops
+            return notify.category(error)
+        return None
+
+    def deliver(self, now=None):
+        """Send what is due, retrying after BACKOFF. Returns the number of attempts made."""
+        now = now or self.clock()
+        attempts = 0
+        with self._delivering:
+            while attempts < 50:
+                with self._transaction() as db:
+                    row = db.execute("SELECT * FROM deliveries WHERE status='queued' AND next_at<=? ORDER BY id LIMIT 1",
+                                     (_stamp(now),)).fetchone()
+                    if not row:
+                        break
+                    db.execute("UPDATE deliveries SET status='sending',attempts=attempts+1,updated_at=? WHERE id=?",
+                               (_stamp(now), row['id']))
+                    settings = self._notification_settings(db)
+                    message = self._message(db, row, settings)
+                error = self._send(row['channel'], settings, self.secrets.load(), message) if message else 'gone'
+                attempts += 1
+                tried = row['attempts'] + 1
+                with self._transaction() as db:
+                    if error is None:
+                        db.execute("UPDATE deliveries SET status='sent',error=NULL,updated_at=? WHERE id=?",
+                                   (_stamp(now), row['id']))
+                    elif tried > len(BACKOFF) or error in ('config', 'gone'):
+                        db.execute("UPDATE deliveries SET status='failed',error=?,updated_at=? WHERE id=?",
+                                   (error, _stamp(now), row['id']))
+                    else:
+                        db.execute("UPDATE deliveries SET status='queued',error=?,next_at=?,updated_at=? WHERE id=?",
+                                   (error, _stamp(now + dt.timedelta(seconds=BACKOFF[tried - 1])), _stamp(now), row['id']))
+        return attempts
+
+    def test_notification(self, channel):
+        """Send a test message now. It never creates an incident; the result is also in the delivery log."""
+        if channel not in ('email', 'webhook'):
+            raise MonitorError('Invalid channel')
+        now = self.clock()
+        with self._transaction() as db:
+            settings = self._notification_settings(db)
+            identifier = db.execute('''INSERT INTO deliveries(incident_id,kind,channel,ref,status,attempts,next_at,created_at,updated_at)
+                VALUES (NULL,'test',?,?,'sending',1,?,?,?)''', (channel, str(uuid.uuid4()), _stamp(now), _stamp(now),
+                                                              _stamp(now))).lastrowid
+        error = self._send(channel, settings, self.secrets.load(), notify.compose_test(self.server_name, settings['language']))
+        with self._transaction() as db:
+            db.execute('UPDATE deliveries SET status=?,error=?,updated_at=? WHERE id=?',
+                       ('failed' if error else 'sent', error, _stamp(self.clock()), identifier))
+        return dict(channel=channel, status='failed' if error else 'sent', error=error)
+
+    def _summary(self, db, now):
+        """The optional daily summary, once per server-local day, after the chosen hour."""
+        settings = self._notification_settings(db)
+        local = now.astimezone()
+        if settings['summary_enabled'] and local.hour >= settings['summary_hour']:
+            self._notify(db, None, 'summary', now, ref=local.date().isoformat())
 
     def _step(self, db, device, name, rule, row, verdict, since, value, paused, now):
         """Move one (computer, rule) through pending -> open or suppressed -> resolved: one incident per problem."""
