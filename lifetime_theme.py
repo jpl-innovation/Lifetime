@@ -422,18 +422,29 @@ def install():
             # Retain them so their overlay and resize handling survive Polish.
             self.controls = {}
 
+        # Every event of every object passes through this filter, so it reads the type once and leaves at once
+        # for the kinds it never handles; a page with many widgets otherwise paid for it on every repaint.
+        WATCHED = frozenset((QEvent.Type.Paint, QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.FocusIn,
+                             QEvent.Type.FocusOut, QEvent.Type.Enter, QEvent.Type.Leave, QEvent.Type.EnabledChange,
+                             QEvent.Type.Polish, QEvent.Type.KeyPress, QEvent.Type.MouseButtonPress,
+                             QEvent.Type.MouseButtonRelease, QEvent.Type.StyleChange, QEvent.Type.LayoutDirectionChange,
+                             QEvent.Type.FontChange, QEvent.Type.LayoutRequest))
+
         def eventFilter(self, widget, event):
-            if not isinstance(widget, QWidget):
+            kind = event.type()
+            if kind not in self.WATCHED or not isinstance(widget, QWidget):
                 return False
-            if event.type() == QEvent.Type.Paint and widget.property('lifetimePopup') and not isinstance(widget, QMenu):
+            checkbox = isinstance(widget, QCheckBox)
+            if kind == QEvent.Type.Paint and not checkbox and not widget.isWindow():
+                return False
+            if kind == QEvent.Type.Paint and widget.property('lifetimePopup') and not isinstance(widget, QMenu):
                 painter = QPainter(widget)
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing)
                 painter.setBrush(QColor(tokens()['card']))
                 painter.setPen(QPen(QColor(tokens()['border']), 1))
                 painter.drawRoundedRect(QRectF(widget.rect()).adjusted(.5, .5, -.5, -.5), PANEL_RADIUS, PANEL_RADIUS)
                 painter.end()
-            if isinstance(widget, QCheckBox):
-                kind = event.type()
+            if checkbox:
                 overlay = getattr(widget, '_lifetime_switch', None)
                 if kind == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and widget.isEnabled():
                     widget._lifetime_keyboard = True
@@ -451,20 +462,24 @@ def install():
                         overlay.place()
                     if kind == QEvent.Type.Show:
                         overlay.position = 1.0 if widget.isChecked() else 0.0
-                    if kind in (QEvent.Type.Paint, QEvent.Type.FocusIn, QEvent.Type.FocusOut, QEvent.Type.Enter,
-                                QEvent.Type.Leave, QEvent.Type.EnabledChange, QEvent.Type.MouseButtonPress,
-                                QEvent.Type.MouseButtonRelease, QEvent.Type.KeyPress):
+                    if kind == QEvent.Type.Paint:
+                        # The overlay is repainted with the box anyway. Asking for another paint here started
+                        # an endless repaint loop: every visible switch redrew itself every frame, for good.
+                        overlay.sync()
+                    elif kind in (QEvent.Type.FocusIn, QEvent.Type.FocusOut, QEvent.Type.Enter,
+                                  QEvent.Type.Leave, QEvent.Type.EnabledChange, QEvent.Type.MouseButtonPress,
+                                  QEvent.Type.MouseButtonRelease, QEvent.Type.KeyPress):
                         overlay.sync()
                         overlay.update()
-            if event.type() in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.FocusIn,
-                                QEvent.Type.FocusOut, QEvent.Type.Enter, QEvent.Type.Leave, QEvent.Type.EnabledChange):
+            if kind in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.FocusIn,
+                        QEvent.Type.FocusOut, QEvent.Type.Enter, QEvent.Type.Leave, QEvent.Type.EnabledChange):
                 arrows = getattr(widget, '_lifetime_arrows', None)
                 if arrows is not None:
                     arrows.setGeometry(widget.rect())
                     arrows.raise_()
                     arrows.update()
-            if event.type() == QEvent.Type.Polish:
-                if isinstance(widget, QCheckBox) and not hasattr(widget, '_lifetime_switch'):
+            if kind == QEvent.Type.Polish:
+                if checkbox and not hasattr(widget, '_lifetime_switch'):
                     widget.setAttribute(Qt.WidgetAttribute.WA_Hover)
                     widget._lifetime_switch = SwitchOverlay(widget)
                     widget._lifetime_switch.place()

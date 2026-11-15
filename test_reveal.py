@@ -1,7 +1,8 @@
 """Entrance helpers: numbers count up and land exactly; Intro plays once and progress() reads its slice."""
+import time
 import unittest
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QVariantAnimation
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QLabel, QWidget
 
@@ -71,6 +72,55 @@ class RevealTests(unittest.TestCase):
         self.assertEqual(reveal.progress(None), 1.0)
         intro.ready()                                                                  # a second ready() never replays
         self.assertTrue(intro.done)
+
+    def test_page_entrance_plays_a_picture_then_hands_over_to_the_live_page(self):
+        page = self.cards[1]
+        entrance = reveal.PageEntrance(page, reveal.QPointF(0, 8), 120)
+        finished = []
+        entrance.finished.connect(lambda: finished.append(True))
+        self.assertEqual(page.graphicsEffect().opacity(), 0.0)          # the live page is not drawn meanwhile
+        self.assertTrue(entrance.testAttribute(reveal.Qt.WidgetAttribute.WA_TransparentForMouseEvents))
+        for _ in range(100):
+            if finished:
+                break
+            QTest.qWait(10)
+        self.assertEqual(finished, [True])
+        self.assertIsNotNone(entrance.picture)
+        self.assertIsNone(page.graphicsEffect())
+        entrance.finish()                                                 # a second finish changes nothing
+        self.assertEqual(finished, [True])
+
+    def test_page_entrance_gives_way_when_the_page_moves_or_hides(self):
+        page = self.cards[0]
+        entrance = reveal.PageEntrance(page, reveal.QPointF(14, 0), 5000)
+        page.move(page.x(), page.y() + 1)
+        self.assertTrue(entrance._done)
+        self.assertIsNone(page.graphicsEffect())
+        entrance = reveal.PageEntrance(page, reveal.QPointF(14, 0), 5000)
+        page.hide()
+        self.assertTrue(entrance._done)
+        self.assertIsNone(page.graphicsEffect())
+
+    def test_pending_entrance_delays_do_not_slow_the_animation_clock(self):
+        # Short single shots are precise by default, and on Windows each holds one of the process's few
+        # multimedia timers; with an entrance cascade pending the animation clock fell to the 15.6 ms system tick
+        # (about 40 fps) and stayed there while any animation kept running. later() keeps delays off them.
+        import sys
+        if sys.platform != 'win32':
+            self.skipTest('Windows timer behaviour')
+        for index in range(24):
+            reveal.later(400 + index, lambda: None)
+        ticks = []
+        animation = QVariantAnimation()
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setDuration(300)
+        animation.valueChanged.connect(lambda value: ticks.append(time.perf_counter()))
+        animation.start()
+        QTest.qWait(360)
+        gaps = sorted(b - a for a, b in zip(ticks, ticks[1:]))
+        self.assertGreater(len(gaps), 5)
+        self.assertLess(gaps[len(gaps) // 2], 0.021)                     # the median frame stays near 16 ms
 
     def test_reduced_motion_finishes_the_intro_at_once(self):
         intro = reveal.Intro(self.window, 200, reduced=lambda: True)

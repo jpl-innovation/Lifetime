@@ -84,7 +84,12 @@ class SwitchTests(unittest.TestCase):
             self.assertEqual(overlay.animation.state(), overlay.animation.State.Running)
             overlay.animation.setCurrentTime(60)
             self.assertTrue(0.0 < overlay.position < 1.0)
-            QTest.qWait(260)
+            # After the heavy window tests in this module Qt's animation clock can take a few hundred ms to start
+            # (measured the same before and after); the old endless switch repaint loop happened to hide that.
+            for _ in range(100):
+                if overlay.position == 1.0:
+                    break
+                QTest.qWait(20)
             self.assertEqual(overlay.position, 1.0)
         with patch.dict(os.environ, {'LIFETIME_REDUCE_MOTION': '1'}):
             self.click()
@@ -100,6 +105,23 @@ class SwitchTests(unittest.TestCase):
             self.app.processEvents()
         self.assertEqual(self.overlay().position, 1.0)
         self.assertEqual(self.events, [])
+
+    def test_an_idle_switch_does_not_keep_repainting_itself(self):
+        # A paint of the box used to ask the overlay for another paint, which repainted the box: every visible
+        # switch redrew itself every frame for as long as it was on screen (the Settings page held a core busy).
+        from PyQt6.QtCore import QEvent, QObject
+        class Paints(QObject):
+            count = 0
+            def eventFilter(self, watched, event):
+                if event.type() == QEvent.Type.Paint:
+                    Paints.count += 1
+                return False
+        counter = Paints()
+        self.box.installEventFilter(counter)
+        self.addCleanup(self.box.removeEventFilter, counter)
+        self.box.update()
+        QTest.qWait(400)
+        self.assertLessEqual(Paints.count, 3)
 
     def test_a_disabled_switch_does_not_toggle(self):
         self.box.setEnabled(False)

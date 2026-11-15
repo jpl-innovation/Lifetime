@@ -5,9 +5,114 @@ import os
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPointF, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QFontMetricsF, QPainter, QPalette
-from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel, QWidget
 
 ROLL_DELAY = 160    # ms: numbers start rolling just after the entrance does
+
+
+def later(delay, callback):
+    """Run `callback` after `delay` ms on a coarse timer. Qt makes short single shots precise, and on Windows every
+    precise timer holds one of the process's few multimedia timers. An entrance cascade can hold them all; the
+    animation clock then falls back to the 15.6 ms system tick and every animation in the window runs at ~40 fps
+    for as long as any animation keeps the clock alive (the status pulse loops forever)."""
+    QTimer.singleShot(max(0, int(delay)), Qt.TimerType.CoarseTimer, callback)
+
+
+def warm_pages(pages, busy, start=3000, gap=300):
+    """Draw each page once, off screen, a few seconds after the window opens. A page's first drawing works out
+    its style rules, fonts and layouts and costs several times a later one (up to ~90 ms for Settings or a page
+    of charts); done here, in idle time one page at a time, the first visit costs what every later one does.
+    `busy()` says a page change is playing; the next page then waits, so warming never stalls a transition."""
+    queue = list(pages)
+
+    def step():
+        try:
+            if busy():
+                return later(500, step)
+            if queue:
+                queue.pop(0).grab()
+                later(gap, step)
+        except RuntimeError:        # the window was closed and deleted meanwhile
+            pass
+    later(start, step)
+
+
+class PageEntrance(QWidget):
+    """A page arrives as one picture. The page is drawn once into a pixmap and only that picture fades in and slides
+    the last few pixels into place; then the live page takes over. Meanwhile the page sits behind a zero-opacity
+    effect, which Qt skips without painting anything, so a frame costs one blit however much the page holds.
+    (An opacity effect on the page itself re-renders every widget on the page on every frame.)"""
+    finished = pyqtSignal()
+
+    def __init__(self, page, offset, duration, start=0.15):
+        super().__init__(page.parentWidget())
+        self.page, self.offset, self.start = page, QPointF(offset), start
+        self.picture, self.origin, self.value, self._done = None, QPointF(), 0.0, False
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hider = QGraphicsOpacityEffect(page)
+        self.hider.setOpacity(0.0)
+        page.setGraphicsEffect(self.hider)
+        self.animation = QVariantAnimation(self)
+        self.animation.setStartValue(0.0)
+        self.animation.setEndValue(1.0)
+        self.animation.setDuration(duration)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.valueChanged.connect(self._step)
+        self.animation.finished.connect(self.finish)
+        self.setGeometry(page.geometry())
+        self.raise_()
+        self.show()
+        page.installEventFilter(self)
+        # The click is answered at once: the first frame shows the menu moving and the old page gone. The picture
+        # is taken just after that frame (and after the new page's pending layout, so it matches the live page).
+        # Qt posts repaints at low priority, so a plain zero timer here would run first and delay that frame.
+        self._scheduled = False
+        later(100, self._capture)       # in case the first frame never comes (window covered)
+
+    def _capture(self):
+        if self._done or self.picture is not None:
+            return
+        area = self.page.visibleRegion().boundingRect()
+        if area.isEmpty():
+            return self.finish()
+        self.hider.setEnabled(False)
+        self.picture = self.page.grab(area)
+        self.hider.setEnabled(True)
+        self.origin = QPointF(area.topLeft())
+        self.animation.start()
+        self.update()
+
+    def _step(self, value):
+        self.value = float(value)
+        self.update()
+
+    def paintEvent(self, event):
+        if self.picture is None:
+            if not self._scheduled:
+                self._scheduled = True
+                QTimer.singleShot(0, self._capture)
+            return
+        painter = QPainter(self)
+        painter.setOpacity(self.start + (1 - self.start) * self.value)
+        painter.drawPixmap(self.origin + self.offset * (1 - self.value), self.picture)
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Hide):
+            self.finish()       # the picture no longer matches the page
+        return False
+
+    def finish(self):
+        """Hand over to the live page. Safe to call more than once."""
+        if self._done:
+            return
+        self._done = True
+        self.animation.stop()
+        self.page.removeEventFilter(self)
+        if self.page.graphicsEffect() is self.hider:
+            self.page.setGraphicsEffect(None)
+        self.hide()
+        self.deleteLater()
+        self.finished.emit()
 
 
 def paint_roll(painter, rect, text, progress, align=Qt.AlignmentFlag.AlignLeft):
@@ -79,7 +184,7 @@ class RollLabel(QLabel):
         animation.valueChanged.connect(self._set_roll)
         animation.finished.connect(lambda: self._set_roll(1.0))
         self._rolling = animation
-        QTimer.singleShot(int(delay), lambda: animation.start() if self._rolling is animation else None)
+        later(delay, lambda: animation.start() if self._rolling is animation else None)
 
     def _set_roll(self, value):
         self._roll = float(value)
@@ -110,7 +215,7 @@ def fade_in(widget, delay=0, duration=260, reduced=False):
     animation.setEasingCurve(QEasingCurve.Type.OutCubic)
     animation.valueChanged.connect(lambda v: effect.setOpacity(float(v)))
     animation.finished.connect(lambda: widget.graphicsEffect() is effect and widget.setGraphicsEffect(None))
-    QTimer.singleShot(int(delay), animation.start)
+    later(delay, animation.start)
 
 
 def phase(value, start, end):
@@ -164,7 +269,7 @@ class Intro(QObject):
     def _maybe_start(self):
         if self._armed and not self._started and self.widget.isVisible():
             self._started = True
-            QTimer.singleShot(int(self.delay), self._begin)
+            later(self.delay, self._begin)
 
     def _begin(self):
         if self.widget.isVisible():

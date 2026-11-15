@@ -32,7 +32,7 @@ from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_alerts import AlertsUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, local_expiry, reduced_motion, status_dot, table_action
-from lifetime_reveal import RollLabel, fade_in
+from lifetime_reveal import RollLabel, fade_in, later, warm_pages
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot, Insights
@@ -307,6 +307,7 @@ class ServerWindow(QMainWindow):
             self._glass_button(button)
         self.retranslate()
         QTimer.singleShot(0, self.refresh)
+        warm_pages([self.tabs.widget(index) for index in range(1, self.tabs.count())], lambda: self.tabs.entrance is not None)
         # Open with nothing focused: a yellow focus outline at launch reads as a second selected state.
         body.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         QTimer.singleShot(0, lambda: body.setFocus(Qt.FocusReason.OtherFocusReason))
@@ -1022,7 +1023,7 @@ class ServerWindow(QMainWindow):
                 del self._live_ring[:-300]
             if not self._paint_pending:
                 self._paint_pending = True
-                QTimer.singleShot(120, self._paint_pushed)      # at most about eight repaints a second, however many arrive
+                later(120, self._paint_pushed)      # at most about eight repaints a second, however many arrive
         elif event.get('type') in ('status', 'ack'):
             if event.get('type') == 'status' and event.get('online') is False:
                 self._live_items.pop(device_id, None)
@@ -2498,7 +2499,7 @@ class ServerWindow(QMainWindow):
         if self._manual_refresh and not busy:
             self._manual_refresh = False
             # Loopback answers in milliseconds; hold the state long enough to be seen.
-            QTimer.singleShot(max(0, int(450 - (time.monotonic() - self._refresh_started) * 1000)), self._refresh_done)
+            later(450 - (time.monotonic() - self._refresh_started) * 1000, self._refresh_done)
 
     def _refresh_done(self):
         if not self._closed:

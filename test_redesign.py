@@ -105,6 +105,39 @@ class DashboardShellTests(unittest.TestCase):
         QTest.qWait(300)
         self.assertEqual(self.w.scroll.verticalScrollBar().maximum(), 0)
 
+    def test_a_page_switch_draws_the_page_twice_at_most_whatever_it_holds(self):
+        """The page rises in as one picture: drawn once for the picture and once at the hand-over, never once per
+        animation frame (the old whole-page opacity effect redrew every widget of Activity, System or Settings
+        on every frame)."""
+        from PyQt6.QtCore import QEvent, QObject
+        from PyQt6.QtWidgets import QWidget
+        class Paints(QObject):
+            count = 0
+            def eventFilter(self, watched, event):
+                if event.type() == QEvent.Type.Paint:
+                    Paints.count += 1
+                return False
+        counter = Paints()
+        with patch.object(gui, 'REDUCE_MOTION', False), patch.dict(os.environ, LIFETIME_REDUCE_MOTION='0'):
+            for index in (2, 1, 4, 3, 6, 0):
+                page = self.w.pages._pages[index]
+                widgets = [page] + page.findChildren(QWidget)
+                for widget in widgets:
+                    widget.installEventFilter(counter)
+                Paints.count = 0
+                self.w.select_page(index)
+                self.assertIsNotNone(self.w.page_animation)
+                self.assertEqual(page.graphicsEffect().opacity(), 0.0)     # hidden behind its picture
+                for _ in range(200):
+                    if self.w.page_animation is None:
+                        break
+                    QTest.qWait(10)
+                for widget in widgets:
+                    widget.removeEventFilter(counter)
+                self.assertIsNone(self.w.page_animation)
+                self.assertIsNone(page.graphicsEffect())
+                self.assertLessEqual(Paints.count, 2 * len(widgets) + 10, index)
+
     def test_rebuild_banner_shows_only_until_history_is_imported(self):
         self.assertFalse(self.w.history_banner.isVisible())
         self.w.display_ledger(dict(self.ledger, imported=None))

@@ -14,6 +14,7 @@ class ControlRow(QLayout):
         super().__init__(parent)
         self._items = []
         self._stretch = {}
+        self._heights = {}
         self.setContentsMargins(0, 0, 0, 0)
         self.setSpacing(12)
 
@@ -58,7 +59,15 @@ class ControlRow(QLayout):
         return True
 
     def heightForWidth(self, width):
-        return self._arrange(QRect(0, 0, width, 0), False)
+        # Qt asks the same width many times while it lays out a page (hundreds of calls on the first show of the
+        # Administration page); the answer only changes when the layout is invalidated, which every activation does.
+        if width not in self._heights:
+            self._heights[width] = self._arrange(QRect(0, 0, width, 0), False)
+        return self._heights[width]
+
+    def invalidate(self):
+        self._heights = {}
+        super().invalidate()
 
     def minimumSize(self):
         size = QSize(0, 0)

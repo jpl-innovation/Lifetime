@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayo
 from lifetime_server_widgets import reduced_motion, status_dot, more_icon
 from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_theme
 from lifetime_glass import STYLES, set_style, active_style, paint_classic, paint_glass, Glass, glass   # shared with the desktop app
-from lifetime_reveal import Intro, paint_roll, phase
+from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase
 
 
 class SegmentedBar(QTabBar):
@@ -502,45 +502,24 @@ class ServerPages(QStackedWidget):
         self.bar.currentChanged.connect(self.setCurrentIndex)
         self.currentChanged.connect(self.bar.setCurrentIndex)
         self.currentChanged.connect(self._fade_in)
-        self.page_fade = QVariantAnimation(self)
-        self.page_fade.setStartValue(0.0)
-        self.page_fade.setEndValue(1.0)
-        self.page_fade.setDuration(240)
-        self.page_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._fading = None
+        self.entrance = None
         self._last_index = 0
-        self._direction = 1
-        self.page_fade.valueChanged.connect(self._page_opacity)
-        self.page_fade.finished.connect(self._page_settled)
         self.bar.animation.valueChanged.connect(lambda _: self.bar.update())
         self.shortcuts = []
 
     def _fade_in(self, index):
-        """The new page settles in from the side the menu pill moved towards: a short fade and a small slide."""
-        self.page_fade.stop()
-        self._page_settled()
+        """The new page settles in from the side the menu pill moved towards: a short fade and a small slide,
+        played by a picture of the page (see PageEntrance), so a busy page costs no more per frame than an empty one."""
+        if self.entrance is not None:
+            self.entrance.finish()
+            self.entrance = None
         previous, self._last_index = self._last_index, index
         page = self.widget(index)
         if page is None or reduced_motion() or not self.isVisible():
             return
-        self._direction = 1 if index >= previous else -1
-        self._fading = page
-        page.setGraphicsEffect(QGraphicsOpacityEffect(page))
-        self._page_opacity(0.0)
-        self.page_fade.start()
-
-    def _page_opacity(self, value):
-        page = self._fading
-        if page is not None and page.graphicsEffect() is not None:
-            page.graphicsEffect().setOpacity(0.15 + 0.85 * value)
-            base = self.contentsRect().topLeft()
-            page.move(base.x() + round(14 * self._direction * (1 - value)), base.y())
-
-    def _page_settled(self):
-        if self._fading is not None:
-            self._fading.setGraphicsEffect(None)
-            self._fading.move(self.contentsRect().topLeft())
-            self._fading = None
+        entrance = PageEntrance(page, QPointF(14 if index >= previous else -14, 0), 240)
+        entrance.finished.connect(lambda: setattr(self, 'entrance', None) if self.entrance is entrance else None)
+        self.entrance = entrance
 
     def addTab(self, widget, title):
         index = self.addWidget(widget)
@@ -715,7 +694,7 @@ class DeviceBox(QWidget):
         fill.setEasingCurve(QEasingCurve.Type.OutCubic)
         fill.valueChanged.connect(lambda v: meter.setValue(int(v)))
         fill.finished.connect(lambda: meter.setValue(value))
-        QTimer.singleShot(delay, fill.start)
+        later(delay, fill.start)
 
     def set_selected(self, selected):
         if self.property('selected') != selected:

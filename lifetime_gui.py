@@ -30,7 +30,7 @@ from lifetime_setup import SetupDialog, SettingsPage, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
 from lifetime_connect import ConnectPage
-from lifetime_reveal import Intro, paint_roll, phase, progress
+from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase, progress, warm_pages
 from lifetime_tasks import Tasks
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all
@@ -1005,13 +1005,13 @@ class Window(QWidget):
             def health_finished():
                 if not future_health.done():
                     if not self.worker.closed:
-                        QTimer.singleShot(100, health_finished)
+                        later(100, health_finished)
                     return
                 try:
                     future_health.result()
                 except Exception:
                     QMessageBox.warning(self, tr('Connect'), tr('Could not change Health sharing. Open Connect to change what is shared.'))
-            QTimer.singleShot(100, health_finished)
+            later(100, health_finished)
         if settings['autostart'] != previous.get('autostart') or not previous.get('completed'):
             try:
                 configure_tray_login(settings['autostart'])
@@ -1021,7 +1021,7 @@ class Window(QWidget):
             def finished():
                 if not future.done():
                     if not self.worker.closed:
-                        QTimer.singleShot(100, finished)
+                        later(100, finished)
                     return
                 try:
                     future.result()
@@ -1033,7 +1033,7 @@ class Window(QWidget):
                         except OSError:
                             pass
                     QMessageBox.warning(self, tr('Login tracking could not be updated'), str(error))
-            QTimer.singleShot(100, finished)
+            later(100, finished)
         if settings['rebuild'] and (not previous.get('completed') or not previous.get('rebuild')):
             self.rebuild_history()
 
@@ -1080,8 +1080,7 @@ class Window(QWidget):
         if getattr(self, 'active_page', None) == index:
             return
         if self.page_animation:
-            self.page_animation.stop()
-            self.page_animation.deleteLater()
+            self.page_animation.finish()        # gives the previous page back and deletes itself
             self.page_animation = None
         previous = self.pages.currentWidget()
         if previous.graphicsEffect():
@@ -1096,17 +1095,12 @@ class Window(QWidget):
         page = self.pages.currentWidget()
         if index == 0 and self.intro.done:
             self.hero.roll_again()
-        if not motion_reduced():
-            effect = RiseEffect(page)
-            page.setGraphicsEffect(effect)
-            def frame(value):
-                effect.setOpacity(.15 + .85*value)
-                effect.offset = 8*(1-value)
-                effect.update()
-            animate(self, 'page_animation', 0, 1, frame, 220)
-            frame(0)
-            self.page_animation.finished.connect(lambda: page.setGraphicsEffect(None))
         self.reflow()
+        if not motion_reduced():
+            # The page rises in as one picture of itself (see PageEntrance): one blit a frame, however big the page.
+            entrance = PageEntrance(page, QPointF(0, 8), 220)
+            entrance.finished.connect(lambda: setattr(self, 'page_animation', None) if self.page_animation is entrance else None)
+            self.page_animation = entrance
 
     @property
     def palette_tokens(self):
@@ -1168,6 +1162,8 @@ class Window(QWidget):
             self.timer.start(1000)
         if getattr(self, '_shown_once', False) and getattr(self, 'active_page', None) == 0 and self.intro.done:
             self.hero.roll_again()      # brought back from the tray or restored: the total rolls in again
+        if not getattr(self, '_shown_once', False):
+            warm_pages(self.pages._pages[1:], lambda: self.page_animation is not None)   # quick first visits
         self._shown_once = True
         self.reflow()
         QTimer.singleShot(0, lambda: self.sidebar.move_indicator(False))

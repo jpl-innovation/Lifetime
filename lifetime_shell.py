@@ -734,6 +734,7 @@ class Sidebar(QWidget):
         # The marker stretches as it moves: the edge it moves towards goes first, the other edge catches up.
         self.trail_animation = None
         self.trail_side, self.trail_from, self.trail_to, self.trail_value = 't', 0.0, 0.0, 1.0
+        self._marker_area = None
         self.tight = False
         self.setFixedWidth(232)
         box = QVBoxLayout(self)
@@ -876,11 +877,21 @@ class Sidebar(QWidget):
 
     def _trail_frame(self, value):
         self.trail_value = float(value)
-        self.update()
+        self._marker_moved()
 
     def _indicator_frame(self, value):
         self.indicator_y = value
-        self.update()
+        self._marker_moved()
+
+    def _marker_moved(self):
+        """Repaint only the strip the marker leaves and enters (with room for the lens's shadow), not the whole
+        sidebar with its rows and switches, on every frame of the move."""
+        row = self.group.checkedButton()
+        if row is None:
+            return self.update()
+        area = self.marker_rect(row).adjusted(-8, -6, 8, 10).toAlignedRect()
+        self.update(area.united(self._marker_area) if self._marker_area is not None else area)
+        self._marker_area = area
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

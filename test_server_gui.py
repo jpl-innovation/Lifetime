@@ -1004,16 +1004,52 @@ class ServerGuiTests(unittest.TestCase):
         QTest.qWait(400)
         with patch('lifetime_server_devices.reduced_motion', return_value=False):
             pages.setCurrentIndex(2)
-            QTest.qWait(30)
-            self.assertGreater(pages.widget(2).x(), pages.contentsRect().x())     # arriving from the right
-            QTest.qWait(500)
+            self.assertGreater(pages.entrance.offset.x(), 0)       # the page's picture arrives from the right
+            self.wait(lambda: pages.entrance is None)
             self.assertEqual(pages.widget(2).pos(), pages.contentsRect().topLeft())
             pages.setCurrentIndex(1)
-            QTest.qWait(30)
-            self.assertLess(pages.widget(1).x(), pages.contentsRect().x())        # arriving from the left
-            QTest.qWait(500)
+            self.assertLess(pages.entrance.offset.x(), 0)          # and from the left
+            self.wait(lambda: pages.entrance is None)
         self.assertIsNone(pages.widget(1).graphicsEffect())
         self.assertEqual(pages.widget(1).pos(), pages.contentsRect().topLeft())
+
+    def test_a_tab_switch_paints_the_page_twice_at_most_and_asks_the_server_nothing_on_this_thread(self):
+        """However much a page holds, a switch draws it once for its entrance picture and once when the live page
+        takes over, never once per animation frame (a whole-page opacity effect did). Its data comes from the
+        background tasks, never from an admin call made on the window's own thread."""
+        from PyQt6.QtCore import QEvent, QObject
+        from PyQt6.QtWidgets import QWidget
+        pages = self.window.tabs
+        calls, real = [], self.window.client.call
+        def spy(name, *args, **kwargs):
+            if threading.current_thread() is threading.main_thread():
+                calls.append(name)
+            return real(name, *args, **kwargs)
+        self.window.client.call = spy
+        self.addCleanup(setattr, self.window.client, 'call', real)
+        class Paints(QObject):
+            count = 0
+            def eventFilter(self, watched, event):
+                if event.type() == QEvent.Type.Paint:
+                    Paints.count += 1
+                return False
+        counter = Paints()
+        with patch('lifetime_server_devices.reduced_motion', return_value=False):
+            for index in list(range(1, pages.count())) + [0]:
+                page = pages.widget(index)
+                widgets = [page] + page.findChildren(QWidget)
+                for widget in widgets:
+                    widget.installEventFilter(counter)
+                Paints.count = 0
+                pages.setCurrentIndex(index)
+                self.assertIsNotNone(pages.entrance)
+                self.assertEqual(page.graphicsEffect().opacity(), 0.0)     # hidden behind its picture, never rendered
+                self.wait(lambda: pages.entrance is None)
+                for widget in widgets:
+                    widget.removeEventFilter(counter)
+                self.assertLessEqual(Paints.count, 2 * len(widgets) + 10, pages.tabText(index))
+                self.assertIsNone(page.graphicsEffect())
+        self.assertEqual(calls, [])
 
     def test_menu_pill_stretches_leading_edge_first_and_settles_exactly(self):
         from PyQt6.QtCore import QRectF
@@ -1469,6 +1505,27 @@ class AddComputerSheetTests(unittest.TestCase):
         self.sheet.tasks.resolve(error='OSError')
         self.assertTrue(self.sheet.error.isVisible())
         self.assertEqual(self.sheet.error.text(), "Can't reach the Lifetime server. Make sure it is running.")
+
+
+class ControlRowTests(unittest.TestCase):
+    def test_height_for_width_is_kept_until_the_layout_is_invalidated(self):
+        # Laying out the first show of a long page asked the same width hundreds of times.
+        from PyQt6.QtWidgets import QWidget
+        from lifetime_layout import ControlRow
+        self.app = qt_app()
+        holder = QWidget()
+        self.addCleanup(holder.deleteLater)
+        row = ControlRow(holder)
+        buttons = [QPushButton('Button text') for _ in range(4)]
+        for button in buttons:
+            row.addWidget(button)
+        wide = row.heightForWidth(2000)
+        with patch.object(row, '_arrange', side_effect=AssertionError('recomputed')):
+            self.assertEqual(row.heightForWidth(2000), wide)
+        self.assertGreater(row.heightForWidth(120), wide)              # a narrow row still wraps
+        for button in buttons:
+            button.setMinimumWidth(900)                                 # Qt invalidates the layout
+        self.assertGreater(row.heightForWidth(2000), wide)
 
 
 if __name__ == '__main__':
