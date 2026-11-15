@@ -220,7 +220,8 @@ class TransportTests(StdlibCertificateFixture):
 
     def test_failed_handshake_sends_no_http_bytes(self):
         self.connection.connect.side_effect = ssl.SSLCertVerificationError('hostname mismatch')
-        with self.assertRaises(ssl.SSLCertVerificationError):
+        # The pinned certificate itself is presented (nothing renewed to learn), so the failure stands.
+        with patch.object(tls, 'peer_certificate', return_value=self.der),                 self.assertRaises(ssl.SSLCertVerificationError):
             tls.request_json(self.bundle(), '/v1/report', {}, 'device-secret')
         self.connection.request.assert_not_called()
         self.connection.close.assert_called_once()
