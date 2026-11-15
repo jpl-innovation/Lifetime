@@ -247,7 +247,8 @@ class Access:
         """Keep at most ``max_rows``: the oldest ``segment`` goes to a protected archive file first, then is removed.
         The last archived row becomes the chain's anchor, so verification still covers the first remaining row."""
         with self._lock:
-            if self._db.execute('SELECT count(*) FROM audit').fetchone()[0] <= self.max_rows:
+            if (self._db.execute('SELECT coalesce(max(seq) - min(seq) + 1, 0) FROM audit').fetchone()[0]
+                    <= self.max_rows):        # rows are contiguous; a gap only makes this prune early
                 return
             rows = [dict(row) for row in self._db.execute('SELECT * FROM audit ORDER BY seq LIMIT ?', (self.segment,))]
             self.archive.mkdir(exist_ok=True)

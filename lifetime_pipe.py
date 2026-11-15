@@ -347,7 +347,9 @@ class PipeServer:
         try:
             raw = _read(handle, deadline, self._stop)
             identity = _client_identity(handle)
-            _write(handle, self.handler(identity, raw), deadline)
+            reply = self.handler(identity, raw)
+            deadline = time.monotonic() + self.timeout      # a slow operation (a backup) does not eat the reply's time
+            _write(handle, reply, deadline)
             try:        # wait for the client to read the reply and close, so the reply is never discarded
                 _read(handle, deadline, self._stop, limit=0)
             except (OSError, ValueError):

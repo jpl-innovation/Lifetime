@@ -161,6 +161,28 @@ class AccessTests(unittest.TestCase):
         finally:
             refused.stop()
 
+    @unittest.skipUnless(WINDOWS, 'Windows named pipe')
+    def test_pipe_large_reply_after_a_slow_operation_and_concurrent_clients(self):
+        import threading
+        import time
+        import lifetime_pipe
+        name = lifetime_pipe.PREFIX + 'test-' + uuid.uuid4().hex
+        own = lifetime_pipe.current_identity()['sid']
+        def slow(identity, raw):
+            time.sleep(1.2 if raw == b'slow' else 0)
+            return b'x' * 300_000
+        pipe = lifetime_pipe.PipeServer(name, slow, lambda: f'D:P(A;;FA;;;SY)(A;;FA;;;{own})', timeout=1).start()
+        self.addCleanup(pipe.stop)
+        self.assertEqual(len(lifetime_pipe.call(name, b'slow', timeout=5)), 300_000)
+        sizes = []
+        threads = [threading.Thread(target=lambda: sizes.append(len(lifetime_pipe.call(name, b'fast', timeout=5))))
+                   for _ in range(24)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sizes, [300_000] * 24)       # never "no such pipe" while instances are busy
+
     def test_start_without_pipe_keeps_token_channel_and_logs_it(self):
         if not WINDOWS:
             self.skipTest('Windows named pipe')
