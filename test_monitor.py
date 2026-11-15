@@ -667,6 +667,89 @@ class NotificationTests(MonitorCase):
             self.assertEqual(notify.category(error), expected)
 
 
+class GoldenCases(MonitorCase):
+    """The alert state machine end to end: incidents and the messages a recipient would actually receive."""
+    def setUp(self):
+        super().setUp()
+        self.monitor.set_notifications(password='pw', **MAIL)
+        self.fleet.add()
+        self.step()
+
+    def step(self, minutes=1):
+        for _ in range(minutes):
+            self.clock.advance(minutes=1)
+            self.monitor.tick()
+            self.monitor.deliver()
+
+    def subjects(self):
+        return [item['subject'].split('] ')[1].split(':')[0] for item in self.transport.emails]
+
+    def test_unplug_gives_one_incident_and_one_email_and_reconnect_one_recovery(self):
+        self.fleet.offline(self.clock.now)
+        self.step(120)
+        self.assertEqual((len(self.monitor.incidents()), self.subjects()), (1, ['Problem']))
+        self.fleet.online(self.clock.now)
+        self.step(60)
+        self.assertEqual(self.subjects(), ['Problem', 'Resolved'])
+        self.assertEqual(self.monitor.incidents()[0]['state'], 'resolved')
+
+    def test_server_restart_gives_no_duplicate_incident_or_email(self):
+        self.fleet.offline(self.clock.now)
+        self.step(20)
+        for gap in (1, 45):
+            self.restart(gap_minutes=gap)
+            self.step(30)
+        self.assertEqual((len(self.monitor.incidents()), self.subjects()), (1, ['Problem']))
+        self.fleet.online(self.clock.now)
+        self.restart(gap_minutes=2)         # it came back while the server was down
+        self.step(30)
+        self.assertEqual(self.subjects(), ['Problem', 'Resolved'])
+
+    def test_flapping_gives_no_storm(self):
+        for minute in range(180):           # three hours of three-minute drop-outs: never a sustained problem
+            (self.fleet.offline if minute % 6 < 3 else self.fleet.online)(self.clock.now)
+            self.step()
+        self.assertEqual((self.monitor.incidents(), self.transport.emails), ([], []))
+        self.fleet.offline(self.clock.now)
+        self.step(20)
+        for minute in range(120):           # a real outage, then flapping: still one incident, nothing more sent
+            (self.fleet.offline if minute % 4 < 2 else self.fleet.online)(self.clock.now)
+            self.step()
+        self.assertEqual((len(self.monitor.incidents()), self.subjects()), (1, ['Problem']))
+        self.fleet.online(self.clock.now)
+        self.step(10)
+        self.assertEqual(self.subjects(), ['Problem', 'Resolved'])
+
+    def test_laptop_asleep_outside_its_hours_gives_nothing(self):
+        self.fleet.devices[ID]['laptop'] = True
+        self.fleet.offline(self.clock.now)
+        self.step(3 * 24 * 60)
+        self.assertEqual((self.monitor.incidents(), self.transport.emails), ([], []))
+
+    def test_mail_server_down_retries_then_fails_and_monitoring_continues(self):
+        self.transport.fail = smtplib_error()
+        self.fleet.offline(self.clock.now)
+        self.step(150)
+        log = self.monitor.deliveries()[0]
+        self.assertEqual((log['status'], log['attempts'], log['error']), ('failed', 5, 'connect'))
+        self.transport.fail = None
+        self.fleet.online(self.clock.now)
+        self.step(10)
+        self.assertEqual(self.subjects(), ['Resolved'])      # the next message still goes out
+        self.assertEqual(self.monitor.incidents()[0]['state'], 'resolved')
+
+    def test_consent_off_means_no_rule_fires_on_that_data(self):
+        self.fleet.devices[ID].update(resources=False, health=False, crashes_30d=99, metrics=dict(
+            cpu_percent=100, ram_percent=100, disk_free_percent=0, battery_health_percent=5, temperature_c=110))
+        self.step(240)
+        self.assertEqual((self.monitor.incidents(), self.transport.emails), ([], []))
+
+
+def smtplib_error():
+    import smtplib
+    return smtplib.SMTPServerDisconnected('Connection unexpectedly closed')
+
+
 class SnapshotTests(unittest.TestCase):
     """Store.monitor_snapshot hands the rules only what each computer's policy shares."""
     def test_policy_filters_readings_and_health(self):
