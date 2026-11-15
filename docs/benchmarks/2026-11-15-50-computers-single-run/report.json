@@ -1,0 +1,113 @@
+{
+ "label": "single run",
+ "date": "2026-11-15T09:20:00.990692Z",
+ "machine": {
+  "system": "Windows",
+  "release": "11",
+  "version": "10.0.26200",
+  "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+  "logical_cpus": 24,
+  "python": "3.12.10",
+  "total_ram_gb": 31.4,
+  "free_ram_gb_at_start": 9.4
+ },
+ "configuration": {
+  "devices": 50,
+  "duration_s": 120,
+  "measured_s": 130.2,
+  "checks": 10,
+  "churn_per_minute": 0.05,
+  "outages": 2,
+  "offline_rule_minutes": 1,
+  "target": "test server started on 127.0.0.1"
+ },
+ "enrollment_seconds": 0.35,
+ "server_process": {
+  "method": "GetProcessTimes/K32GetProcessMemoryInfo",
+  "cpu_percent_of_one_core": {
+   "mean": 1.8,
+   "count": 59,
+   "p50": 1.6,
+   "p95": 4.7,
+   "p99": 11.6,
+   "max": 11.6
+  },
+  "rss_mb": {
+   "start": 45.0,
+   "peak": 61.0,
+   "end": 61.0
+  }
+ },
+ "simulator_cpu_percent_of_one_core": 1.7,
+ "storage_mb": {
+  "server_sqlite_end": 0.45,
+  "server_wal_peak": 3.95,
+  "monitoring_sqlite_end": 0.08,
+  "monitoring_wal_peak": 0.32,
+  "access_sqlite_end": 0.0
+ },
+ "live": {
+  "sent": 3041,
+  "reached_dashboard": 3041,
+  "missing": 0,
+  "missing_percent": 0.0,
+  "reconnects": 22,
+  "refused": 0,
+  "latency_ms": {
+   "count": 3041,
+   "p50": 205.1,
+   "p95": 208.9,
+   "p99": 224.5,
+   "max": 302.8
+  }
+ },
+ "sync": {
+  "requests": 194,
+  "errors": {},
+  "unacknowledged_at_end": 0,
+  "latency_ms": {
+   "count": 194,
+   "p50": 36.9,
+   "p95": 103.3,
+   "p99": 147.6,
+   "max": 176.0
+  }
+ },
+ "dashboard": {
+  "calls": 48,
+  "errors": 0,
+  "latency_ms": {
+   "count": 48,
+   "p50": 2.6,
+   "p95": 8.1,
+   "p99": 52.7,
+   "max": 52.7
+  }
+ },
+ "drop_outs": 5,
+ "incidents": {
+  "outages": 2,
+  "opened": 1,
+  "lag_s": {
+   "count": 1,
+   "p50": 9.4,
+   "p95": 9.4,
+   "p99": 9.4,
+   "max": 9.4
+  },
+  "measured": true,
+  "other_incidents": 0
+ },
+ "checks": {
+  "configured": 10,
+  "ok": 10,
+  "latency_ms": {
+   "count": 10,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99": 0.0,
+   "max": 0.0
+  }
+ },
+ "server_log_refusals": 0
+}

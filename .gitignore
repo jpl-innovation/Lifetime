@@ -25,3 +25,4 @@ admin-token
 .env
 .env.*
 server-demo-*/
+fleet-report/
