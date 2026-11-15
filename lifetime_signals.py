@@ -813,6 +813,8 @@ def systemd_sleep_seconds():
 
 
 def verify_linux_awake():
+    if not shutil.which('journalctl'):      # no systemd journal (OpenRC, runit, s6, SysV, Alpine-style systems)
+        return dict(message='Not available · this system has no systemd journal')
     # Preferred source: systemd's own sleep records (handles suspend-then-hibernate, where the hibernate phase can
     # last days and is invisible to the kernel suspend messages below).
     sleep = systemd_sleep_seconds()

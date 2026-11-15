@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lifetime
+Comment=Total computer awake time
+Exec=Lifetime
+Icon=lifetime
+Terminal=false
+Categories=Utility;

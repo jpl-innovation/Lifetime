@@ -206,6 +206,34 @@ def _resources(state=None):
     return result
 
 
+def systemd_booted():
+    return os.path.isdir('/run/systemd/system')
+
+
+def linux_power_command(action, which=None):
+    """The command for a power action on Linux, or None when this computer offers no way to do it without a password.
+
+    systemd: ``systemctl suspend`` and ``shutdown +1`` (one minute's warning, like Windows). Without systemd: elogind's
+    loginctl, then logind over D-Bus with interactive=false, then (as root) ``shutdown``. Never sudo, never a password
+    prompt: --no-ask-password and interactive=false make polkit refuse instead of asking."""
+    which = which or shutil.which
+    verb = {'sleep': 'suspend', 'restart': 'reboot', 'shutdown': 'poweroff'}[action]
+    delayed = ['shutdown', '-r' if action == 'restart' else '-h', '+1']
+    if systemd_booted() and which('systemctl'):
+        if action == 'sleep':
+            return ['systemctl', '--no-ask-password', 'suspend']
+        return delayed if which('shutdown') else ['systemctl', '--no-ask-password', verb]
+    if which('loginctl'):
+        return ['loginctl', '--no-ask-password', verb]
+    if which('dbus-send'):
+        method = {'suspend': 'Suspend', 'reboot': 'Reboot', 'poweroff': 'PowerOff'}[verb]
+        return ['dbus-send', '--system', '--print-reply', '--dest=org.freedesktop.login1', '/org/freedesktop/login1',
+                'org.freedesktop.login1.Manager.' + method, 'boolean:false']
+    if action != 'sleep' and which('shutdown') and hasattr(os, 'geteuid') and os.geteuid() == 0:
+        return delayed
+    return None
+
+
 def execute_power(action, runner=subprocess.run):
     """Only the agent command path calls this, after its result is acknowledged."""
     if action not in ('sleep', 'restart', 'shutdown'):
@@ -217,12 +245,10 @@ def execute_power(action, runner=subprocess.run):
             message = ('Lifetime: your IT technician restarted this computer. Save your work.' if action == 'restart'
                        else 'Lifetime: your IT technician shut down this computer. Save your work.')
             args = ['shutdown', '/r' if action == 'restart' else '/s', '/t', '60', '/c', message]
-    elif action == 'sleep':
-        args = ['systemctl', 'suspend']
-    elif shutil.which('shutdown'):
-        args = ['shutdown', '-r' if action == 'restart' else '-h', '+1']
     else:
-        args = ['systemctl', 'reboot' if action == 'restart' else 'poweroff']
+        args = linux_power_command(action)
+        if args is None:
+            raise OSError('Remote power is not supported on this computer')
     return runner(args, check=True, timeout=15, capture_output=True,
                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
@@ -903,6 +929,10 @@ def main(argv=None, stdin=None):
             replace_running_agent(directory)
             command = ([sys.executable] if getattr(sys, 'frozen', False) else
                        [sys.executable, str(Path(__file__).resolve())])
+            appdir, appimage = os.environ.get('APPDIR'), os.environ.get('APPIMAGE')
+            if (getattr(sys, 'frozen', False) and sys.platform != 'win32' and appdir and appimage
+                    and Path(sys.executable).resolve().is_relative_to(Path(appdir).resolve())):
+                command = [appimage, '--run-tool', 'LifetimeAgent']    # the AppImage's mount ends when this exits
             options = dict(creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW) if sys.platform == 'win32' else dict(start_new_session=True)
             environment = None
             if getattr(sys, 'frozen', False):

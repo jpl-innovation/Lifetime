@@ -406,12 +406,46 @@ class PowerAndResourcesTests(AgentFixture):
                 self.assertIn('Save your work.', args[5])
             agent.execute_power('sleep', runner)
             self.assertEqual(runner.call_args.args[0], ['rundll32.exe', 'powrprof.dll,SetSuspendState', '0,1,0'])
-        with patch.object(agent.sys, 'platform', 'linux'), patch.object(agent.shutil, 'which', return_value='/sbin/shutdown'):
-            for action, args in (('restart', ['shutdown', '-r', '+1']), ('shutdown', ['shutdown', '-h', '+1']), ('sleep', ['systemctl', 'suspend'])):
+        with patch.object(agent.sys, 'platform', 'linux'), patch.object(agent.shutil, 'which', return_value='/sbin/shutdown'), \
+                patch.object(agent, 'systemd_booted', return_value=True):
+            for action, args in (('restart', ['shutdown', '-r', '+1']), ('shutdown', ['shutdown', '-h', '+1']),
+                                 ('sleep', ['systemctl', '--no-ask-password', 'suspend'])):
                 agent.execute_power(action, runner)
                 self.assertEqual(runner.call_args.args[0], args)
         with self.assertRaises(ValueError):
             agent.execute_power('unknown', runner)
+
+    def test_linux_power_without_systemd_never_prompts_or_uses_sudo(self):
+        def only(*names):
+            return lambda name: f'/usr/bin/{name}' if name in names else None
+        with patch.object(agent, 'systemd_booted', return_value=True):
+            # systemd without the shutdown alias: systemctl, never asking for a password
+            self.assertEqual(agent.linux_power_command('restart', only('systemctl')),
+                             ['systemctl', '--no-ask-password', 'reboot'])
+        with patch.object(agent, 'systemd_booted', return_value=False):
+            # systemctl installed but not running (containers, OpenRC with systemctl shims): elogind's loginctl
+            self.assertEqual(agent.linux_power_command('sleep', only('systemctl', 'loginctl')),
+                             ['loginctl', '--no-ask-password', 'suspend'])
+            self.assertEqual(agent.linux_power_command('shutdown', only('loginctl')),
+                             ['loginctl', '--no-ask-password', 'poweroff'])
+            # logind over D-Bus with interactive=false
+            command = agent.linux_power_command('restart', only('dbus-send'))
+            self.assertEqual(command[-2:], ['org.freedesktop.login1.Manager.Reboot', 'boolean:false'])
+            self.assertIn('--system', command)
+            # nothing usable: not supported (reported as a failed command), never sudo
+            with patch.object(agent.os, 'geteuid', create=True, return_value=1000):
+                self.assertIsNone(agent.linux_power_command('restart', only('shutdown')))
+            with patch.object(agent.os, 'geteuid', create=True, return_value=0):
+                self.assertEqual(agent.linux_power_command('restart', only('shutdown')), ['shutdown', '-r', '+1'])
+                self.assertIsNone(agent.linux_power_command('sleep', only('shutdown')))
+            for action in ('sleep', 'restart', 'shutdown'):
+                for name in ('sudo', 'pkexec'):
+                    self.assertNotIn(name, agent.linux_power_command(action, only('loginctl', 'dbus-send')) or [])
+            runner = Mock()
+            with patch.object(agent.sys, 'platform', 'linux'), patch.object(agent.shutil, 'which', return_value=None):
+                with self.assertRaises(OSError):
+                    agent.execute_power('sleep', runner)
+            runner.assert_not_called()
 
     def test_control_consent_is_independent_and_defaults_off(self):
         self.assertFalse(self.machine._load()['policy'].get('control', False))

@@ -474,10 +474,46 @@ class SettingsPage(QWidget):
         self.window_.refresh()
 
 
+def systemd_user_available():
+    """A running systemd user manager (systemd booted and ``systemctl --user`` answers). False on distributions without
+    systemd (OpenRC, runit, s6, SysV), in most containers and in sessions started without a user manager."""
+    import shutil
+    if not shutil.which('systemctl') or not os.path.isdir('/run/systemd/system'):
+        return False
+    try:
+        return subprocess.run(['systemctl', '--user', 'show-environment'], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def desktop_exec(args):
+    """An Exec= value for a .desktop file: every argument quoted per the Desktop Entry specification."""
+    def quote(value):
+        for character in ('\\', '"', '`', '$'):
+            value = value.replace(character, '\\' + character)
+        return '"' + value.replace('%', '%%') + '"'
+    return ' '.join(quote(str(a)) for a in args)
+
+
+def xdg_autostart(path, args, enabled):
+    """Start the tracker at sign-in through XDG autostart, which GNOME, KDE, XFCE, Cinnamon, MATE, LXQt and Budgie
+    all honour, when there is no systemd user manager."""
+    if not enabled:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[Desktop Entry]\nType=Application\nName=Lifetime tracker\nComment=Counts awake time\n'
+                    'Exec=' + desktop_exec(args) + '\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n',
+                    encoding='utf-8')
+
+
 def configure_login(enabled):
     """Run only after consent. No elevation; tasks always use the current user."""
     executable = Path(sys.executable)
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, 'frozen', False) and sys.platform != 'win32':      # Linux bundle or AppImage
+        from lifetime_settings import bundled_command
+        args = bundled_command('LifetimeTracker') + ['--run']
+    elif getattr(sys, 'frozen', False):
         args = [str(executable.with_name('LifetimeTracker.exe')), '--run']
     else:
         if sys.platform == 'win32' and executable.with_name('pythonw.exe').exists():
@@ -500,9 +536,15 @@ def configure_login(enabled):
         command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
                    base64.b64encode(script.encode('utf-16le')).decode('ascii')]
     else:
+        config = Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))
+        entry = config/'autostart/lifetime-tracker.desktop'
+        if not systemd_user_available():
+            xdg_autostart(entry, args, enabled)
+            return
+        entry.unlink(missing_ok=True)       # one start-up mechanism at a time
         # The installer prepares a disabled user unit. Source runs can prepare it too.
         if enabled:
-            unit = Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))/'systemd/user/lifetime-tracker.service'
+            unit = config/'systemd/user/lifetime-tracker.service'
             unit.parent.mkdir(parents=True, exist_ok=True)
             def quote(value):
                 return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'

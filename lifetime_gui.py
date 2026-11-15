@@ -1084,7 +1084,8 @@ class Window(QWidget):
             return
         self.import_process = QProcess(self)
         if getattr(sys, 'frozen', False):
-            command = [str(Path(sys.executable).with_name('LifetimeImport.exe'))]
+            from lifetime_settings import bundled_command
+            command = bundled_command('LifetimeImport')
         else:
             script = 'lifetime_import_windows.py' if sys.platform == 'win32' else 'lifetime_import.py'
             command = [sys.executable, str(Path(__file__).with_name(script))]
@@ -1463,8 +1464,9 @@ class Window(QWidget):
 
     def start_tracker(self):
         executable = Path(sys.executable)
-        if getattr(sys, 'frozen', False):          # packaged Windows build: tracker exe sits next to this one
-            command = [str(executable.with_name('LifetimeTracker.exe')), '--run']
+        if getattr(sys, 'frozen', False):          # packaged build: the tracker program sits next to this one
+            from lifetime_settings import bundled_command
+            command = bundled_command('LifetimeTracker') + ['--run']
         else:
             if sys.platform == 'win32' and executable.with_name('pythonw.exe').exists():
                 executable = executable.with_name('pythonw.exe')
@@ -1477,7 +1479,39 @@ class Window(QWidget):
             QMessageBox.warning(self, tr('Could not start tracker'), str(error))
 
 
+LINUX_QT_PLUGINS = ('platforms/libqxcb.so', 'platforms/libqwayland-generic.so', 'platforms/libqwayland-egl.so',
+                    'platforms/libqoffscreen.so', 'wayland-shell-integration/libxdg-shell.so')
+
+
+def self_check():
+    """``Lifetime --self-check``: the packaged build is complete (Qt can start, X11 and Wayland plugins are present,
+    every program module loads, a ledger round-trips) without showing a window or reading this computer. Used by CI."""
+    import importlib
+    from PyQt6.QtCore import QLibraryInfo
+    problems = []
+    plugins = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))
+    if sys.platform.startswith('linux') and getattr(sys, 'frozen', False):
+        problems += [f'missing Qt plugin {name}' for name in LINUX_QT_PLUGINS if not (plugins / name).is_file()]
+    linux_bundle = getattr(sys, 'frozen', False) and sys.platform.startswith('linux')
+    bundled = ('lifetime_server_gui',) if linux_bundle else ()     # the Linux bundle ships the server dashboard
+    for module in ('lifetime_tracker', 'lifetime_signals', 'lifetime_agent', 'lifetime_client', 'lifetime_import',
+                   'lifetime_reports', 'lifetime_ws_client', *bundled):
+        try:
+            importlib.import_module(module)
+        except Exception as error:
+            problems.append(f'{module}: {type(error).__name__}: {error}')
+    app = QApplication.instance() or QApplication(sys.argv[:1])
+    from lifetime_tracker import new_ledger, validate_ledger
+    validate_ledger(new_ledger())
+    print(f"Lifetime self-check: {'FAILED' if problems else 'OK'} (Qt {app.platformName()}, plugins {plugins})", flush=True)
+    for problem in problems:
+        print('  ' + problem, flush=True)
+    return 1 if problems else 0
+
+
 if __name__ == '__main__':
+    if '--self-check' in sys.argv:
+        sys.exit(self_check())
     if sys.platform == 'win32':  # own taskbar identity so the icon is not grouped under python
         try:
             import ctypes

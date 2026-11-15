@@ -134,7 +134,10 @@ def configure_tray_login(enabled):
     if not tray_available() or (here / '.git').exists():
         return
     executable = Path(sys.executable)
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, 'frozen', False) and sys.platform != 'win32':      # Linux bundle or AppImage
+        from lifetime_settings import bundled_command
+        args = bundled_command('Lifetime') + ['--tray']
+    elif getattr(sys, 'frozen', False):
         args = [str(executable), '--tray']
     else:
         if sys.platform == 'win32' and executable.with_name('pythonw.exe').exists():

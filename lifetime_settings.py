@@ -13,6 +13,19 @@ CATEGORIES = ('history', 'battery', 'network', 'wifi_name', 'graphics', 'resourc
 SYSTEM_FIELDS = ('system', 'release', 'machine', 'python_version')
 
 
+def bundled_command(tool):
+    """Command that starts another program of a packaged (PyInstaller) build: on Windows ``<tool>.exe`` beside this one;
+    on Linux ``<tool>`` beside it, or, inside the AppImage, the AppImage itself (its mount path changes every start, so
+    a path inside it must never be remembered by an autostart entry or a detached process)."""
+    import os
+    import sys
+    appdir, appimage = os.environ.get('APPDIR'), os.environ.get('APPIMAGE')
+    if (sys.platform != 'win32' and appdir and appimage
+            and Path(sys.executable).resolve().is_relative_to(Path(appdir).resolve())):
+        return [appimage, '--run-tool', tool]
+    return [str(Path(sys.executable).with_name(tool + ('.exe' if sys.platform == 'win32' else '')))]
+
+
 def iso_date(value: str) -> dt.date:
     """Parse a calendar date in exact YYYY-MM-DD form; reject other ISO forms."""
     if not isinstance(value, str):

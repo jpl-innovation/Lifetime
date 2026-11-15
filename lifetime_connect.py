@@ -81,7 +81,10 @@ def run_agent(action, policy, bundle=None, directory=None, display_name=None):
             args += ['--set-policy']
         if action != 'disconnect':
             args += ['--policy-' + key for key, enabled in policy.items() if enabled]
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, 'frozen', False) and sys.platform != 'win32':      # Linux bundle or AppImage
+            from lifetime_settings import bundled_command
+            command = bundled_command('LifetimeAgent') + args
+        elif getattr(sys, 'frozen', False):
             executable = Path(sys.executable).with_name('LifetimeAgent.exe')
             if not executable.is_file():
                 raise FileNotFoundError('LifetimeAgent.exe is missing beside Lifetime.exe')

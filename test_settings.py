@@ -96,6 +96,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_login_linux_user_service_only(self):
         with patch('lifetime_setup.sys.platform', 'linux'), \
+                patch('lifetime_setup.systemd_user_available', return_value=True), \
                 patch.dict('os.environ', {'XDG_CONFIG_HOME': str(self.root)}), \
                 patch('lifetime_setup.subprocess.run', return_value=SimpleNamespace(returncode=0)) as run:
             configure_login(True)

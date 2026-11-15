@@ -1,0 +1,13 @@
+#!/bin/sh
+# Lifetime AppImage entry point. With no arguments it opens Lifetime. "--run-tool NAME" starts another program of the
+# bundle (LifetimeTracker, LifetimeImport, LifetimeAgent, LifetimeServerDashboard); Lifetime itself uses this form for
+# autostart entries and background processes, because the AppImage's mount path changes every time it starts.
+here="$(dirname "$(readlink -f "$0")")"
+tool=Lifetime
+if [ "${1:-}" = "--run-tool" ]; then
+    case "${2:-}" in
+        Lifetime|LifetimeTracker|LifetimeImport|LifetimeAgent|LifetimeServerDashboard) tool="$2"; shift 2 ;;
+        *) echo "Unknown Lifetime program: ${2:-}" >&2; exit 2 ;;
+    esac
+fi
+exec "$here/usr/lib/lifetime/$tool" "$@"

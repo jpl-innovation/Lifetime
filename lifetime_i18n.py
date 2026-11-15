@@ -166,6 +166,7 @@ VI = {
     'Not available · Windows event log does not cover this boot': 'Chưa có dữ liệu · nhật ký Windows không bao quát lần khởi động này',
     'Not available · Windows event log has incomplete sleep intervals': 'Chưa có dữ liệu · nhật ký Windows thiếu các mốc ngủ và thức',
     'Not available · system journal could not be read': 'Chưa có dữ liệu · không đọc được nhật ký hệ thống',
+    'Not available · this system has no systemd journal': 'Chưa có dữ liệu · hệ thống này không có nhật ký systemd',
     'Not available · journal has insufficient suspend evidence': 'Chưa có dữ liệu · nhật ký không đủ thông tin về thời gian ngủ',
     'Not available · journal has incomplete suspend intervals': 'Chưa có dữ liệu · nhật ký thiếu các mốc ngủ và thức',
     'Not available · journal clocks are inconsistent': 'Chưa có dữ liệu · các mốc thời gian trong nhật ký không nhất quán',

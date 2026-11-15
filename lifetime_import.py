@@ -77,6 +77,8 @@ def parse_shutdowns(raw):
 
 
 def linux_boots():
+    if not shutil.which('journalctl'):
+        raise ValueError('Earlier history is not available: this system has no systemd journal')
     try:
         raw = command(['journalctl', '--list-boots', '--output=json', '--no-pager', '--utc'])
         boots = parse_boots(raw)
