@@ -539,6 +539,37 @@ class ProtectionTests(unittest.TestCase):
                 server._admin_token(path)
             self.assertEqual(path.read_bytes(), b'bad-secret\n')
 
+    def test_service_runs_the_base_interpreter_not_a_venv_launcher_or_pythonservice(self):
+        import lifetime_server_service as service
+        root = Path(tempfile.gettempdir())
+        base, venv = str(root / 'Python312' / 'python.exe'), str(root / 'server' / '.venv')
+        with patch.object(sys, '_base_executable', base, create=True), patch.object(sys, 'prefix', venv), \
+                patch.object(sys, 'base_prefix', str(Path(base).parent)):
+            executable, arguments = service.host_command()
+        self.assertEqual(executable, base)       # never <venv>\Scripts\python.exe, a launcher Windows rejects
+        self.assertTrue(arguments.startswith('-E -s "'))
+        self.assertIn('lifetime_server_service.py" --service-host "', arguments)
+        self.assertTrue(arguments.endswith(f'"{Path(venv).resolve()}"'))
+        with patch.object(sys, 'frozen', True, create=True):
+            self.assertEqual(service.host_command(), (None, None))    # a packaged build is its own host
+
+    def test_service_host_puts_the_environment_packages_first(self):
+        import lifetime_server_service as service
+        with tempfile.TemporaryDirectory() as temporary:
+            packages = Path(temporary) / 'Lib' / 'site-packages'
+            packages.mkdir(parents=True)
+            (packages / 'extra-entry').mkdir()
+            (packages / 'marker.pth').write_text('extra-entry\n')
+            saved = list(sys.path)
+            try:
+                service.use_environment(temporary)
+                self.assertEqual(Path(sys.path[0]), packages)
+                self.assertIn(packages / 'extra-entry', [Path(entry) for entry in sys.path[:2]])
+            finally:
+                sys.path[:] = saved
+            with self.assertRaises(SystemExit):
+                service.use_environment(Path(temporary) / 'missing')
+
     def test_runtime_and_service_imports_do_not_require_pywin32_or_crypto(self):
         script = '''
 import builtins

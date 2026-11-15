@@ -45,7 +45,7 @@ try {
     Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'lifetime_*.py' -File | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $output
     }
-    foreach ($name in @('install_server_windows.ps1', 'uninstall_server_windows.ps1',
+    foreach ($name in @('install_server_windows.ps1', 'uninstall_server_windows.ps1', 'restart_server_windows.ps1',
                         'install_agent_windows.ps1', 'uninstall_agent_windows.ps1', 'requirements-server.txt')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $output
     }

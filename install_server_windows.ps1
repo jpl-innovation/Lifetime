@@ -95,7 +95,7 @@ foreach ($root in @($InstallDirectory, $DataDirectory)) {
 Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'lifetime_*.py' -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $InstallDirectory -Force
 }
-foreach ($name in @('requirements-server.txt', 'uninstall_server_windows.ps1', 'SECURITY.md')) {
+foreach ($name in @('requirements-server.txt', 'uninstall_server_windows.ps1', 'restart_server_windows.ps1', 'SECURITY.md')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $InstallDirectory -Force
 }
 foreach ($name in @('LifetimeServerRuntime.exe', 'LifetimeServerDashboard.exe')) {
@@ -123,9 +123,20 @@ if ($Mode -ne 'PackagedTask') {
 }
 if ($Mode -eq 'SourceService') {
     $ErrorActionPreference = 'Continue'
-    & $ServerPython (Join-Path $InstallDirectory 'lifetime_server_service.py') --startup auto install
+    $serviceScript = Join-Path $InstallDirectory 'lifetime_server_service.py'
+    # Run the service's own start-up path first, so a broken Python environment fails here with its real error
+    # instead of a service that Windows later reports only as "did not respond".
+    & $ServerPython $serviceScript --self-check
+    if ($LASTEXITCODE -ne 0) { throw 'The server Python environment cannot host the service (see the error above). Nothing was registered; -Mode SourceTask is the fallback.' }
+    & $ServerPython $serviceScript --startup auto install
     if ($LASTEXITCODE -ne 0) { throw 'Service registration failed. See the explicit SourceTask/PackagedTask fallback; no fallback was installed automatically.' }
     $ErrorActionPreference = 'Stop'
+    # The service must run the machine-wide interpreter directly (a venv python.exe is a launcher Windows rejects).
+    $imagePath = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\LifetimeServer').ImagePath
+    if ($imagePath -notlike '*--service-host*') { throw "The service was registered with an unexpected program ($imagePath). Run the uninstaller, then install again." }
+    Write-Host "Service program: $imagePath"
+    # Restart automatically if the server process ever dies: after 10 s, 60 s, then every 5 minutes.
+    & sc.exe failure LifetimeServer reset= 86400 actions= restart/10000/restart/60000/restart/300000 | Out-Null
     $parameters = 'HKLM:\SYSTEM\CurrentControlSet\Services\LifetimeServer\Parameters'
     New-Item -Path $parameters -Force | Out-Null
     foreach ($pair in @(@('Directory', $DataDirectory), @('Address', $Address), @('Host', $HostAddress))) {

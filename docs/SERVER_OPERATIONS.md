@@ -37,6 +37,10 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Modes are `SourceService` (default, Windows service wrapper), `SourceTask` (Python runtime as a SYSTEM startup scheduled task), and `PackagedTask` (packaged runtime executable as a SYSTEM startup task). Source modes create a dedicated virtual environment and install `requirements-server.txt` plus PyQt6; pass a machine-wide interpreter with `-Python` if `python` does not resolve outside user profiles. `PackagedTask` requires `LifetimeServerRuntime.exe`. Installation refuses an existing registration: stop and uninstall it before upgrading. Add `-Start` to start the selected registration immediately.
 
+How `SourceService` runs: the service program is the machine-wide `python.exe` itself, started with `-E -s` on `lifetime_server_service.py --service-host <install>\.venv`; the script then loads the environment's packages. (pywin32's default host and a venv's `python.exe`, which is only a launcher for a child process, both fail to start as a SYSTEM service.) The installer runs `lifetime_server_service.py --self-check` first, so a broken environment stops the install with its real error, prints the registered service program, and sets Windows to restart the service after a crash (10 s, 60 s, then every 5 minutes). Start-up errors are written to the Windows Application event log.
+
+To restart or stop the server by hand, in any mode, run `restart_server_windows.ps1` (or `restart_server_windows.ps1 -Stop`) from the install directory in an elevated PowerShell. In task modes do not use `Stop-ScheduledTask` alone: it ends only the first process and leaves the real server running in a child process.
+
 To add an inbound firewall rule deliberately, specify the HTTPS port and an appropriately narrow address scope:
 
 ```powershell
@@ -79,4 +83,4 @@ Uninstall does not remove server files or retained customer data. Review and rem
 
 ## CI
 
-The dedicated server workflow runs unit tests on Linux and Windows with Python 3.10 through 3.13, installs PyQt6 and `cryptography`, and uses Qt's offscreen platform. It does not execute Windows service installation, SCM operations, firewall changes, or reboot tests. CI is validation only: it does not publish a release or automatically deploy.
+The dedicated server workflow runs unit tests on Linux and Windows with Python 3.11 and 3.12, installs PyQt6 and `cryptography`, and uses Qt's offscreen platform. It does not execute Windows service installation, SCM operations, firewall changes, or reboot tests. CI is validation only: it does not publish a release or automatically deploy.

@@ -18,14 +18,18 @@ if ($service -and $PSCmdlet.ShouldProcess('LifetimeServer', 'Stop and remove thi
 $task = Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -ErrorAction SilentlyContinue
 if ($task -and $PSCmdlet.ShouldProcess('\Lifetime\Server', 'Stop and remove this server task registration')) {
     $executable = [Environment]::ExpandEnvironmentVariables([string]$task.Actions[0].Execute)
+    $script = Join-Path ([string]$task.Actions[0].WorkingDirectory) 'lifetime_server.py'
     if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server }
-    # The packaged runtime is a one-file executable: it starts a second process that does the work, and stopping
-    # the task ends only the first. Left alone, that process keeps the port and the program file busy, so a later
-    # install or upgrade could not replace the file or start. End only processes running this task's own program.
-    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $executable } | ForEach-Object {
-        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-        $_.WaitForExit(10000) | Out-Null
-    }
+    # Stopping the task ends only the process it started, and in both task modes the work is done by a second one:
+    # the packaged one-file runtime unpacks into a child, and a venv python.exe is a launcher that starts the real
+    # interpreter as a child. Left alone, that child keeps the port and the files busy. End only this task's own
+    # program and interpreters running this installation's lifetime_server.py.
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -eq $executable -or ($_.CommandLine -and $_.CommandLine.Contains($script)) } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+        }
     Unregister-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -Confirm:$false
 }
 # The installer always adds LifetimeServer-Connect and adds LifetimeServer-HTTPS only on request; remove both here.
