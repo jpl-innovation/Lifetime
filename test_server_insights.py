@@ -90,7 +90,8 @@ class ReportTests(unittest.TestCase):
         energy = dict(settings=config, computers={
             'a': dict(power=dict(watts=20.0, method='estimated', source='typical-laptop', readings=0), energy={},
                       after=dict(source='office-hours', hours=insights.settings()['hours'],
-                                 week=dict(hours=3.0, kwh=0.06, cost=120.0))),
+                                 week=dict(hours=3.0, kwh=0.06, cost=120.0)),
+                      health=dict(score=100, factors=[('stability', 'good', 0), ('battery', None, None)], unknown=['battery'])),
             'b': dict(power=dict(watts=50.0, method='measured', source='battery', readings=12), energy={})})
         report = reports.device_report(self.device(), '2026-11-10', '2026-11-10', insights=energy)
         rows = {title: value for section, title, value in report['extra_rows'] if section == 'energy'}
@@ -98,6 +99,8 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(rows['Energy in the period (kWh)'], 0.2)                # 10 h x 20 W
         self.assertEqual(rows['Cost in the period'], '400 VND')
         self.assertIn(insights.ENERGY_NOTE, report['notes'])
+        health = {title: value for section, title, value in report['extra_rows'] if section == 'health'}
+        self.assertEqual((health['Health score (0-100)'], health['Score part: Battery']), (100, 'Unknown'))
         self.assertEqual((rows['Awake after hours, last 7 days (hours)'], rows['Cost after hours, last 7 days'],
                           rows['Hours used']), (3.0, '120 VND', 'office hours 08:00–18:00'))
         fleet = reports.fleet_report([self.device('a'), self.device('b'), self.device('c')], '2026-11-10', '2026-11-10',

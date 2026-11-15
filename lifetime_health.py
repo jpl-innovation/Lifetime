@@ -456,17 +456,48 @@ def detail(data, now=None):
     return result
 
 
-def factors(events_30d, battery_health, has_battery=True):
+NOT_APPLICABLE = object()       # a factor that does not apply here (not "unknown"): left out of the badge entirely
+
+
+def factors(events_30d, battery_health, has_battery=True, disk_free=NOT_APPLICABLE, temperature=NOT_APPLICABLE,
+            agent_current=NOT_APPLICABLE):
     """What the health badge scores, as (key, kind, value): kind is good / warning / danger, or None when the reading
-    is missing. Stability: unexpected shutdowns plus crashes in 30 days, 0 good, 1-2 warning, 3 or more danger.
-    Battery: full-charge capacity as a share of design, 80 % or more good, 60-79 % warning, below 60 % danger
-    (left out on a computer without a battery). The GUI only displays this; it invents nothing."""
+    is missing (unknown: shown, but never counted as good or bad). Stability: unexpected shutdowns plus crashes in
+    30 days, 0 good, 1-2 warning, 3 or more danger. Battery: full-charge capacity as a share of design, 80 % or more
+    good, 60-79 % warning, below 60 % danger (left out on a computer without a battery). Optional, when passed:
+    system disk free 20 % or more good, 10-19 % warning, below 10 % danger (the disk alert's default); temperature
+    below 80 °C good, 80-89 °C warning, 90 °C or more danger (the temperature alert's default); the Lifetime agent up
+    to date good, older warning. The GUI only displays this; it invents nothing."""
     result = [('stability', None if events_30d is None else 'good' if events_30d == 0 else
                'warning' if events_30d <= 2 else 'danger', events_30d)]
     if has_battery:
         result.append(('battery', None if battery_health is None else 'good' if battery_health >= 80 else
                        'warning' if battery_health >= 60 else 'danger', battery_health))
+    if disk_free is not NOT_APPLICABLE:
+        result.append(('disk', None if disk_free is None else 'good' if disk_free >= 20 else
+                       'warning' if disk_free >= 10 else 'danger', disk_free))
+    if temperature is not NOT_APPLICABLE:
+        result.append(('temperature', None if temperature is None else 'good' if temperature < 80 else
+                       'warning' if temperature < 90 else 'danger', temperature))
+    if agent_current is not NOT_APPLICABLE:
+        result.append(('agent', None if agent_current is None else 'good' if agent_current else 'warning', agent_current))
     return result
+
+
+def health_score(factors):
+    """factors: [(name, kind, value)] where kind is good / warning / danger, or None when the reading is missing.
+    Each known factor scores 100 (good), 50 (warning) or 0 (danger); the score is their average. None when nothing
+    is known: a missing reading never counts as good."""
+    known = [kind for _, kind, _ in factors if kind in ('good', 'warning', 'danger')]
+    if not known:
+        return None
+    return round(sum({'good': 100, 'warning': 50, 'danger': 0}[kind] for kind in known) / len(known))
+
+
+def average_score(scores):
+    """(average of the known scores or None, how many were known, how many unknown) for a room, group or fleet."""
+    known = [score for score in scores if score is not None]
+    return (round(sum(known) / len(known)) if known else None), len(known), len(scores) - len(known)
 
 
 def summary(data, now=None):

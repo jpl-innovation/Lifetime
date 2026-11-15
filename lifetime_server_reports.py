@@ -172,6 +172,20 @@ def forecast_rows(item, language):
     return rows
 
 
+PART_NAME = {'stability': 'Stability', 'battery': 'Battery', 'disk': 'System disk free', 'temperature': 'Temperature',
+             'agent': 'Lifetime agent'}
+
+
+def score_rows(item, language):
+    """The health score with what it is made of; unknown parts are named and left out of the score."""
+    found = item.get('health') or {}
+    rows = [('health', 'Health score (0-100)', found.get('score') if found.get('score') is not None else tr('Unknown', language))]
+    for key, kind, _ in found.get('factors') or []:
+        rows.append(('health', tr('Score part: {part}', language).format(part=tr(PART_NAME[key], language)),
+                     tr({'good': 'Good', 'warning': 'Needs a look', 'danger': 'Poor'}.get(kind, 'Unknown'), language)))
+    return rows
+
+
 def plan_rows(plan, config, language):
     rows = []
     for key, title in (('quarter', 'Due now or next quarter'), ('year', 'Due later this year')):
@@ -248,6 +262,7 @@ def device_report(device, start=None, end=None, selected_identity=(), system_fie
         report['extra_rows'].extend(after_rows([item and item.get('after')], insights['settings'], language))
         if item:
             report['extra_rows'].extend(forecast_rows(item, language))
+            report['extra_rows'].extend(score_rows(item, language))
             report['notes'].append(FORECAST_NOTE)
     return report
 
@@ -389,6 +404,12 @@ def _fleet_energy(report, devices, reports, results, language):
     chosen = {device['device_id'] for device in devices}
     found = [results['computers'][i] for i in chosen if i in results['computers']]
     plan = insights.plan(found, results['settings'], dt.date.fromisoformat(results['today'])) if results.get('today') else None
+    if found and all('health' in c for c in found):
+        score = insights.health_summary(found)
+        report['extra_rows'] += [('health', 'Average health score (0-100)', score['score'] if score['score'] is not None
+                                  else tr('Unknown', language)),
+                                 ('health', 'Computers with a score', score['known']),
+                                 ('health', 'Computers without a reading (left out)', score['unknown'])]
     if plan:
         report['extra_rows'].extend(plan_rows(plan, results['settings'], language))
         report['notes'].append(FORECAST_NOTE)

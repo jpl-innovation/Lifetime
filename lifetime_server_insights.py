@@ -11,7 +11,8 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, 
 import lifetime_insights as insights
 from lifetime_charts import Plot
 from lifetime_layout import ControlRow
-from lifetime_widgets_dashboard import EmptyState, InfoCard
+from lifetime_health_gui import HEALTH_EXPLAIN_FULL
+from lifetime_widgets_dashboard import EmptyState, InfoCard, ScoreRing
 
 SOURCE_TEXT, ENERGY_NOTE = insights.SOURCE_TEXT, insights.ENERGY_NOTE
 POLICY_NOTE = ('Sleep after hours sends the ordinary single-computer Sleep command, as the account that turned it on, '
@@ -115,6 +116,7 @@ class InsightsUI:
         layout.addWidget(panel)
         self._make_after(layout)
         self._make_plan(layout)
+        self._make_health(layout)
         # ---- settings ----
         settings, form = w._panel()
         w.access_ui.gate(settings, 'set_insight_settings')
@@ -203,6 +205,29 @@ class InsightsUI:
         form.addLayout(hours)
         layout.addWidget(settings)
         layout.addStretch()
+
+    def _make_health(self, layout):
+        w = self.w
+        panel, content = w._panel()
+        heading = w.label('Health score')
+        heading.setObjectName('sectionTitle')
+        content.addWidget(heading)
+        top = QHBoxLayout()
+        top.setSpacing(16)
+        self.ring = ScoreRing()
+        top.addWidget(self.ring, 0, Qt.AlignmentFlag.AlignTop)
+        self.health_summary = QLabel()
+        self.health_summary.setWordWrap(True)
+        top.addWidget(self.health_summary, 1)
+        content.addLayout(top)
+        self.health_groups = self._table(4, 'healthGroupTable')
+        content.addWidget(self.health_groups)
+        self.health_table = self._table(7, 'healthTable')
+        content.addWidget(self.health_table)
+        self.health_note = w.label(HEALTH_EXPLAIN_FULL)
+        self.health_note.setObjectName('muted')
+        content.addWidget(self.health_note)
+        layout.addWidget(panel)
 
     def _make_plan(self, layout):
         w = self.w
@@ -421,6 +446,9 @@ class InsightsUI:
         self.policy_group.setAccessibleName(self.t('Sleep after hours for'))
         for table in self.plan_tables.values():
             table.setHorizontalHeaderLabels([self.t(key) for key in ('Computer', 'Group', 'Part', 'When', 'Why')])
+        self.health_groups.setHorizontalHeaderLabels([self.t(key) for key in ('Group', 'Health score', 'Known', 'Unknown')])
+        self.health_table.setHorizontalHeaderLabels([self.t(key) for key in (
+            'Computer', 'Health score', 'Stability', 'Battery', 'System disk free', 'Temperature', 'Lifetime agent')])
         self.forecasts.setHorizontalHeaderLabels([self.t(key) for key in ('Computer', 'Battery', 'System disk space', 'Age', 'Awake so far')])
         self._policy_button()
         self.target_watts.setAccessibleName(self.t('Power for a group or computer'))
@@ -569,3 +597,37 @@ class InsightsUI:
              t('{years} years', years=c['age']['years']) if c['age']['years'] is not None else t('Not available'),
              t('{hours} h', hours=f"{c['age']['awake_hours']:,}") if c['age']['awake_hours'] is not None else t('Not available'))
             for c in result['computers']], numbers=False)
+        self.render_health(sorted(result['groups']))
+
+    def render_health(self, groups):
+        result, t = self.result, self.t
+        chosen = self.scope.currentData()
+        summary = (result['fleet'] if chosen is None else result['groups'][chosen])['health']
+        self.ring.set_score(summary['score'])
+        self.health_summary.setText(
+            t('Average of {known} computers with a score; {unknown} have no reading yet and are left out.',
+              known=summary['known'], unknown=summary['unknown']) if summary['score'] is not None
+            else t('No computer shares a health reading yet.'))
+        self.ring.setAccessibleName(t('Health score') + ('' if summary['score'] is None else f" {summary['score']}/100"))
+        self._fill(self.health_groups, [(name or t('No group'), self._score(g['health']['score']), str(g['health']['known']),
+                                         str(g['health']['unknown'])) for name, g in ((n, result['groups'][n]) for n in groups)])
+        words = dict(good=t('Good'), warning=t('Needs a look'), danger=t('Poor'))
+
+        def part(c, key):
+            row = next((r for r in c['health']['factors'] if r[0] == key), None)
+            if row is None:
+                return t('Does not apply')
+            if row[1] is None:
+                return t('Unknown')
+            value = row[2]
+            shown = (t('{count} in 30 days', count=value) if key == 'stability' else f'{value:.0f}%' if key in ('battery', 'disk')
+                     else f'{value:.0f} °C' if key == 'temperature' else t('up to date') if value else t('older'))
+            return f'{words[row[1]]} · {shown}'
+        computers = [c for c in result['computers'] if chosen is None or c['group'] == chosen]
+        computers.sort(key=lambda c: (c['health']['score'] is None, c['health']['score'] or 0, c['name'] or ''))
+        self._fill(self.health_table, [(c['name'], self._score(c['health']['score']),
+                                        *(part(c, key) for key in ('stability', 'battery', 'disk', 'temperature', 'agent')))
+                                       for c in computers], numbers=False)
+
+    def _score(self, score):
+        return self.t('Unknown') if score is None else f'{score}/100'

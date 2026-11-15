@@ -1169,6 +1169,20 @@ class ServerGuiTests(unittest.TestCase):
         self.assertEqual(ui.forecasts.item(1, 2).text(), 'not enough data (2 readings over 30 days)')
         self.assertEqual(ui.forecasts.item(0, 1).text(), 'No battery in this computer')
 
+    def test_health_score_section_averages_known_scores_and_names_unknown_parts(self):
+        self.api.insight_items = [dict(device_id='a', name='Good PC', group='Lab', kind='desktop', client_version='1.2.0',
+                                       health=dict(crashes_30d=0, shutdowns_30d=0)),
+                                  dict(device_id='b', name='Silent PC', group='Lab', kind='laptop')]
+        self.load([device(0)])
+        ui = self.window.insights
+        self.window.tabs.setCurrentIndex(ui.index)
+        self.wait_idle()
+        self.assertEqual(ui.ring.score, 100)          # only the known score; the silent computer is left out
+        self.assertIn('Average of 1 computers with a score; 1 have no reading yet', ui.health_summary.text())
+        self.assertEqual([ui.health_table.item(1, c).text() for c in range(5)],
+                         ['Silent PC', 'Unknown', 'Unknown', 'Unknown', 'Unknown'])
+        self.assertEqual(ui.health_table.item(0, 3).text(), 'Does not apply')     # a desktop has no battery
+
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget
         self.assertIsInstance(self.window.tabs, QStackedWidget)

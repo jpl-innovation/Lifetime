@@ -12,6 +12,7 @@ from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QToolTip,
                              QVBoxLayout, QWidget)
 
+from lifetime_health import health_score  # the one score, shared with the server (re-exported)
 from lifetime_theme import PANEL_RADIUS, active_theme, tokens
 
 KINDS = ('good', 'warning', 'danger', 'info', 'neutral')
@@ -553,16 +554,6 @@ class InfoCard(Tile):
 
 
 # ---- P10 health badge ----
-
-def health_score(factors):
-    """factors: [(name, kind, verdict)] where kind is good / warning / danger, or None when the reading is missing.
-    Each known factor scores 100 (good), 50 (warning) or 0 (danger); the score is their average. None when nothing
-    is known: a missing reading never counts as good."""
-    known = [kind for _, kind, _ in factors if kind in ('good', 'warning', 'danger')]
-    if not known:
-        return None
-    return round(sum({'good': 100, 'warning': 50, 'danger': 0}[kind] for kind in known) / len(known))
-
 
 def score_kind(score):
     return 'neutral' if score is None else 'good' if score >= 90 else 'warning' if score >= 50 else 'danger'

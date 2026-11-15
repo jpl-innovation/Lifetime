@@ -11,6 +11,8 @@ import datetime as dt
 import math
 import re
 
+import lifetime_health
+
 LAPTOP_WATTS, DESKTOP_WATTS = 20.0, 80.0    # typical draw: the middle of 15-25 W (laptops) and 60-100 W (desktops)
 WATTS_RANGE = (1.0, 2000.0)
 MIN_MEASURED = 3                            # discharge readings before their mean counts as a measurement
@@ -255,6 +257,7 @@ def summarize(items, config=None):
         for start, hours in item['after']['weeks']:
             weeks[start] = round(weeks.get(start, 0.0) + hours, 2)
     sleepable = sum(item['after']['week']['kwh'] for item in after if item.get('control')) * 30 / 7
+    total['health'] = health_summary(items) if all('health' in item for item in items) else None
     total['after'] = dict(known=len(after), unknown=len(items) - len(after),
                           hours=round(sum(item['after']['week']['hours'] for item in after), 2),
                           kwh=round(sum(item['after']['week']['kwh'] for item in after), 3),
@@ -404,7 +407,44 @@ def plan(computers, config, today):
     return result
 
 
-def computer(item, config, today):
+def version_key(text):
+    try:
+        return tuple(int(part) for part in str(text).split('.'))
+    except ValueError:
+        return None
+
+
+def health(item, latest_version=None):
+    """The health score's breakdown from what the computer shares (lifetime_health.factors): stability and battery
+    (Health permission, or the battery reading with Resources), system disk free and temperature (Resources), agent
+    up to date (against ``latest_version``). A part without a reading is unknown: listed, never scored."""
+    summary = item.get('health') or {}
+    readings = item.get('readings') or {}
+    specs, perf = readings.get('specs') or {}, readings.get('performance') or {}
+    events = None
+    if summary.get('crashes_30d') is not None and summary.get('shutdowns_30d') is not None:
+        events = summary['crashes_30d'] + summary['shutdowns_30d']
+    battery = summary.get('battery_health')
+    if battery is None:
+        battery = perf.get('battery_health_percent')
+    disks = specs.get('disks') or []
+    total, free = (disks[0].get('total_bytes') if disks else None), perf.get('disk_free_bytes')
+    disk = round(min(100.0, 100 * free / total), 1) if total and free is not None else None
+    current = None
+    if item.get('client_version') and latest_version and version_key(item['client_version']) and version_key(latest_version):
+        current = version_key(item['client_version']) >= version_key(latest_version)
+    rows = lifetime_health.factors(events, battery, has_battery=item.get('kind') != 'desktop', disk_free=disk,
+                                   temperature=perf.get('temperature_c'), agent_current=current)
+    return dict(score=lifetime_health.health_score(rows), factors=rows,
+                unknown=[key for key, kind, _ in rows if kind is None])
+
+
+def health_summary(items):
+    score, known, unknown = lifetime_health.average_score([item['health']['score'] for item in items])
+    return dict(score=score, known=known, unknown=unknown)
+
+
+def computer(item, config, today, latest_version=None):
     """One computer's results from what it shares (lifetime_server_store.Store.insight_inputs shape, which the desktop
     app builds for itself too)."""
     watts = power(item.get('kind'), item.get('discharge'), item.get('device_id', ''), item.get('group', ''), config)
@@ -413,13 +453,13 @@ def computer(item, config, today):
                 room=item.get('room') or '', control=bool(item.get('control')), kind=item.get('kind'), power=watts,
                 energy=energy(history['daily'], watts['watts'], today, config['price']) if history else None,
                 after=after_week(history, item.get('schedule'), watts['watts'], config, today),
-                replace=replacements(item, config, today), age=age(item, today))
+                replace=replacements(item, config, today), age=age(item, today), health=health(item, latest_version))
 
 
-def fleet(items, config, today):
+def fleet(items, config, today, latest_version=None):
     """Every computer, each group, each room and the whole fleet, the top consumers of the last 30 days and the
     computers most awake after hours this week."""
-    computers = [computer(item, config, today) for item in items]
+    computers = [computer(item, config, today, latest_version) for item in items]
     groups, rooms = {}, {}
     for result in computers:
         groups.setdefault(result['group'], []).append(result)

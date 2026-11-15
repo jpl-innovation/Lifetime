@@ -9,7 +9,7 @@ from lifetime_tasks import Tasks
 import lifetime_health as health
 from lifetime_theme import install, tokens
 from lifetime_widgets_dashboard import EmptyState, HealthBadge
-from lifetime_insights_gui import ForecastPanel
+from lifetime_insights_gui import ForecastPanel, read_samples
 
 from PyQt6.QtGui import QColor, QPainter
 
@@ -18,6 +18,17 @@ HEALTH_EXPLAIN = ('Score: the average of the readings shown, each good 100, need
                   'unexpected shutdowns and crashes in the last 30 days: none is good, 1 or 2 needs a look, 3 or more is '
                   'poor. Battery compares full charge with design capacity: 80% or more is good, 60 to 79% needs a look, '
                   'below 60% is poor. A missing reading is left out; with none the score is unknown.')
+
+
+# The same, with the system disk (this computer's daily disk reading, Resources permission) and, on the server, the
+# temperature and the agent version (lifetime_insights.health).
+HEALTH_EXPLAIN_FULL = ('Score: the average of the readings shown, each good 100, needs a look 50, poor 0. Stability: '
+                       'unexpected shutdowns and crashes in 30 days, none good, 1 or 2 needs a look, 3 or more poor. '
+                       'Battery: full charge against design capacity, 80% or more good, 60 to 79% needs a look, below '
+                       '60% poor. System disk free: 20% or more good, 10 to 19% needs a look, below 10% poor. '
+                       'Temperature: below 80 °C good, 80 to 89 °C needs a look, 90 °C or more poor. Lifetime agent: '
+                       'up to date good, older needs a look. An unknown reading is shown but left out of the score; '
+                       'with none the score is unknown.')
 
 
 class HealthPlot(Plot):
@@ -229,15 +240,20 @@ class HealthPage(QWidget):
         cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=30)
         events = sum(1 for r in stability if health.stamp(r['date']) >= cutoff) if isinstance(stability, list) else None
         packs = battery.get('packs') if isinstance(battery, dict) else None
-        rows = health.factors(events, (packs or [{}])[0].get('health'), has_battery=packs != [])
-        names = {'stability': tr('Stability'), 'battery': tr('Battery')}
+        disk = health.NOT_APPLICABLE
+        if not self.remote and self.settings.get('resources'):
+            recent = [value for day, value in (read_samples().get('disk') or {}).items()
+                      if day >= (dt.date.today() - dt.timedelta(days=2)).isoformat()]
+            disk = recent[-1] if recent else None
+        rows = health.factors(events, (packs or [{}])[0].get('health'), has_battery=packs != [], disk_free=disk)
+        names = {'stability': tr('Stability'), 'battery': tr('Battery'), 'disk': tr('System disk free')}
         def value(key, number):
             if number is None:
                 return tr('Not available')
             return tr('{count} in 30 days', count=number) if key == 'stability' else f'{number:.0f}%'
         self.badge.set_factors([(names[key], kind, value(key, number)) for key, kind, number in rows],
                                dict(good=tr('Good'), warning=tr('Needs a look'), danger=tr('Poor'), neutral=tr('Unknown')),
-                               tr(HEALTH_EXPLAIN))
+                               tr(HEALTH_EXPLAIN_FULL if disk is not health.NOT_APPLICABLE else HEALTH_EXPLAIN))
 
     def series(self, plot, values, message=''):
         if plot.kind != 'line' and plot.unit != 'events':

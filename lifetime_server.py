@@ -701,7 +701,10 @@ class ServerRuntime:
         for item in items:
             item['schedule'] = schedules[item['device_id']]
             item['trends'] = trends.get(item['device_id'], []) if item['readings'] is not None else []
-        result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date())
+        from lifetime_protocol import CLIENT_VERSION
+        offered = ((self.updates.summary() or {}).get('current') or {}).get('version') if self.updates else None
+        latest = max((v for v in (CLIENT_VERSION, offered) if v), key=lambda v: insights.version_key(v) or ())
+        result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date(), latest)
         result['sleep_policies'] = {key: dict(group=value['group'], name=value['name'], since=value['since'])
                                     for key, value in self.monitor.sleep_policies().items()}
         return result

@@ -196,6 +196,39 @@ class ForecastTests(unittest.TestCase):
         self.assertEqual(insights.age({}, dt.date(2026, 11, 16)), dict(years=None, since=None, awake_hours=None))
 
 
+class HealthScoreTests(unittest.TestCase):
+    def test_thresholds_of_the_new_parts(self):
+        import lifetime_health as health
+        rows = health.factors(0, 85, disk_free=19.9, temperature=80, agent_current=False)
+        self.assertEqual(rows[2:], [('disk', 'warning', 19.9), ('temperature', 'warning', 80), ('agent', 'warning', False)])
+        rows = health.factors(0, 85, disk_free=9.9, temperature=90, agent_current=True)
+        self.assertEqual([kind for _, kind, _ in rows[2:]], ['danger', 'danger', 'good'])
+        self.assertEqual([kind for _, kind, _ in health.factors(0, 85, disk_free=20, temperature=79.9)[2:]], ['good', 'good'])
+        self.assertEqual(len(health.factors(0, 85)), 2)                       # not passed: does not apply
+
+    def test_unknown_parts_are_disclosed_and_never_scored(self):
+        # stability 1 event (50), battery unknown, disk 15 % free (50), 92 °C (0), agent 1.2.0 = latest (100):
+        # (50 + 50 + 0 + 100) / 4 = 50; with the battery counted as good it would have been 60.
+        item = dict(kind='laptop', client_version='1.2.0', health=dict(crashes_30d=1, shutdowns_30d=0),
+                    readings=dict(specs=dict(disks=[dict(total_bytes=200)]),
+                                  performance=dict(disk_free_bytes=30, temperature_c=92)))
+        result = insights.health(item, '1.2.0')
+        self.assertEqual((result['score'], result['unknown']), (50, ['battery']))
+        self.assertEqual(insights.health(dict(item, client_version='1.1.9'), '1.2.0')['score'], 38)   # agent older: (50 + 50 + 0 + 50) / 4 = 37.5, rounded
+        desktop = insights.health(dict(kind='desktop'), None)
+        self.assertEqual(([row[0] for row in desktop['factors']], desktop['score']), (['stability', 'disk', 'temperature', 'agent'], None))
+
+    def test_rooms_groups_and_fleet_average_only_known_scores(self):
+        import lifetime_health as health
+        self.assertEqual(health.average_score([80, None, 60]), (70, 2, 1))
+        self.assertEqual(health.average_score([None]), (None, 0, 1))
+        items = [dict(device_id='a', group='Lab', kind='desktop', health=dict(crashes_30d=0, shutdowns_30d=0)),     # 100
+                 dict(device_id='b', group='Lab', kind='desktop', health=dict(crashes_30d=2, shutdowns_30d=1)),     # 0
+                 dict(device_id='c', group='Lab', kind='desktop')]                                                  # unknown
+        result = insights.fleet(items, insights.settings(), TODAY)
+        self.assertEqual(result['groups']['Lab']['health'], dict(score=50, known=2, unknown=1))
+
+
 class DesktopPanelTests(unittest.TestCase):
     """The desktop Reports page panel: its own on-battery readings (insights.json, never the ledger) and settings."""
 

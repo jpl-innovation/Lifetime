@@ -2234,3 +2234,29 @@ for _key, _text in _FORECAST_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+
+# Unique features: the health score per computer, room, group and fleet.
+_SCORE_VI = {
+    'Health score': 'Điểm sức khỏe',
+    'Known': 'Có số liệu',
+    'System disk free': 'Ổ đĩa hệ thống còn trống',
+    'Lifetime agent': 'Tác nhân Lifetime',
+    'Does not apply': 'Không áp dụng',
+    'up to date': 'mới nhất',
+    'older': 'cũ hơn',
+    'Average of {known} computers with a score; {unknown} have no reading yet and are left out.':
+        'Trung bình của {known} máy có điểm; {unknown} máy chưa có số liệu nên được bỏ ra.',
+    'No computer shares a health reading yet.': 'Chưa có máy nào chia sẻ số liệu sức khỏe.',
+    'Health score (0-100)': 'Điểm sức khỏe (0-100)',
+    'Score part: {part}': 'Thành phần điểm: {part}',
+    'Average health score (0-100)': 'Điểm sức khỏe trung bình (0-100)',
+    'Computers with a score': 'Số máy có điểm',
+    'Computers without a reading (left out)': 'Số máy chưa có số liệu (bỏ ra)',
+    'Score: the average of the readings shown, each good 100, needs a look 50, poor 0. Stability: unexpected shutdowns and crashes in 30 days, none good, 1 or 2 needs a look, 3 or more poor. Battery: full charge against design capacity, 80% or more good, 60 to 79% needs a look, below 60% poor. System disk free: 20% or more good, 10 to 19% needs a look, below 10% poor. Temperature: below 80 °C good, 80 to 89 °C needs a look, 90 °C or more poor. Lifetime agent: up to date good, older needs a look. An unknown reading is shown but left out of the score; with none the score is unknown.':
+        'Điểm: trung bình các chỉ số hiển thị, tốt 100, cần xem lại 50, kém 0. Độ ổn định: số lần tắt máy bất thường và sự cố trong 30 ngày, không có là tốt, 1 hoặc 2 cần xem lại, từ 3 trở lên là kém. Pin: dung lượng sạc đầy so với thiết kế, từ 80% là tốt, 60 đến 79% cần xem lại, dưới 60% là kém. Ổ đĩa hệ thống còn trống: từ 20% là tốt, 10 đến 19% cần xem lại, dưới 10% là kém. Nhiệt độ: dưới 80 °C là tốt, 80 đến 89 °C cần xem lại, từ 90 °C là kém. Tác nhân Lifetime: mới nhất là tốt, cũ hơn cần xem lại. Chỉ số chưa xác định vẫn được hiển thị nhưng không tính vào điểm; nếu không có chỉ số nào thì điểm là chưa xác định.',
+}
+for _key, _text in _SCORE_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)
