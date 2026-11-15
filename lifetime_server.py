@@ -1188,8 +1188,8 @@ def main(argv=None):
         stopped.wait()
     except KeyboardInterrupt:
         pass
-    except Exception:
-        print('Lifetime Server could not start or continue.', file=sys.stderr)
+    except Exception as error:      # the kind of error only: messages may carry paths or addresses
+        print(f'Lifetime Server could not start or continue ({type(error).__name__}).', file=sys.stderr)
         return 1
     finally:
         if runtime is not None:

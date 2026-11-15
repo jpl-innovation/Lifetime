@@ -4,6 +4,7 @@ Windows DACL replacement is atomic, then icacls enforces the same explicit grant
 There is no /reset step, inherited-permission exposure or production bypass.
 Windows writers must be elevated Administrators or SYSTEM. POSIX uses 0700/0600.
 """
+import errno
 import os
 from pathlib import Path
 import stat
@@ -50,13 +51,33 @@ def _regular(path, directory):
     return path
 
 
+def _chmod_nofollow(path, mode, directory):
+    """chmod that never follows a symlink. glibc before 2.32 (Debian 10/11, Ubuntu 20.04, RHEL 8) cannot do
+    fchmodat(AT_SYMLINK_NOFOLLOW) and Python 3.12 then raises ENOTSUP; open the path without following a link and
+    chmod the descriptor instead."""
+    try:
+        os.chmod(path, mode, follow_symlinks=False)
+        return
+    except (NotImplementedError, OSError) as error:
+        if isinstance(error, OSError) and error.errno not in (errno.ENOTSUP, errno.EOPNOTSUPP):
+            raise
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, 'O_CLOEXEC', 0)
+    fd = os.open(path, flags | (os.O_DIRECTORY if directory else 0))
+    try:
+        if not (stat.S_ISDIR if directory else stat.S_ISREG)(os.fstat(fd).st_mode):
+            raise ValueError('Private material requires a regular, non-linked path')
+        os.fchmod(fd, mode)
+    finally:
+        os.close(fd)
+
+
 def protect_directory(path):
     path = _regular(path, True)
     if sys.platform == 'win32':
         windows_acl(path, 'D:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)',
                     ['*S-1-5-32-544:(OI)(CI)(F)', '*S-1-5-18:(OI)(CI)(F)'])
     else:
-        os.chmod(path, 0o700, follow_symlinks=False)
+        _chmod_nofollow(path, 0o700, True)
 
 
 def protect_private(path):
@@ -65,4 +86,4 @@ def protect_private(path):
         windows_acl(path, 'D:P(A;;FA;;;BA)(A;;FA;;;SY)',
                     ['*S-1-5-32-544:(F)', '*S-1-5-18:(F)'])
     else:
-        os.chmod(path, 0o600, follow_symlinks=False)
+        _chmod_nofollow(path, 0o600, False)

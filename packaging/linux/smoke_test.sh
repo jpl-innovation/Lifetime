@@ -18,7 +18,6 @@ echo "=== ${PRETTY_NAME:-$ID} ($arch, glibc $(getconf GNU_LIBC_VERSION 2>/dev/nu
 
 work="$(mktemp -d)"
 export QT_QPA_PLATFORM=offscreen LIFETIME_DATA_DIR="$work/desktop-data"
-tar -xzf "$artifacts/Lifetime-Linux-$arch.tar.gz" -C "$work"
 bundle="$work/Lifetime-Linux-$arch"
 address=https://127.0.0.1:8443
 
@@ -27,9 +26,9 @@ if [[ "$mode" != --docker ]]; then
     # the bundle brings Python and Qt itself.
     case " $ID ${ID_LIKE:-} " in
         *" debian "*|*" ubuntu "*)
-            if [[ "$ID" == debian && "${VERSION_ID:-}" == 10 ]]; then      # buster moved to the archive
+            if [[ "$ID" == debian && "${VERSION_ID:-}" =~ ^(10|11)$ ]]; then    # buster and bullseye moved to the archive
                 sed -i -e 's|deb.debian.org|archive.debian.org|g' -e 's|security.debian.org|archive.debian.org|g' \
-                    -e '/buster-updates/d' /etc/apt/sources.list
+                    -e '/-updates /d' -e '/-security /d' /etc/apt/sources.list
             fi
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libgl1 libegl1 libfontconfig1 libxkbcommon0 \
@@ -45,6 +44,10 @@ if [[ "$mode" != --docker ]]; then
             pacman -S --noconfirm --needed --quiet libglvnd fontconfig libxkbcommon dbus glib2 tar gzip procps-ng >/dev/null ;;
         *) echo "Unknown distribution $ID"; exit 1 ;;
     esac
+fi
+tar -xzf "$artifacts/Lifetime-Linux-$arch.tar.gz" -C "$work"      # after the packages: minimal images lack tar
+
+if [[ "$mode" != --docker ]]; then
 
     echo '--- desktop bundle'
     "$bundle/Lifetime" --self-check
@@ -82,7 +85,9 @@ for _ in $(seq 90); do
     admin --operation server_info --field fingerprint >/dev/null 2>&1 && break
     sleep 1
 done
-admin --operation server_info --field fingerprint
+admin --operation server_info --field fingerprint || {
+    echo "The server did not start"; tail -n 50 "$work/server.log" /var/log/lifetime-server.log 2>/dev/null || true; exit 1
+}
 if [[ "$mode" != direct ]]; then
     # root (installer) or the lifetime-admin service account (container) over the Unix socket, not the token
     [[ "$(admin --operation whoami --field channel)" == socket ]] || { echo "admin did not use the Unix socket"; exit 1; }

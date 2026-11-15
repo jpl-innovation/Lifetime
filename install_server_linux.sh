@@ -56,7 +56,8 @@ if [[ "$(printf '%s\n2.28\n' "$glibc" | sort -V | head -n 1)" != 2.28 ]]; then
     fail "glibc $glibc is older than 2.28 (Debian 10, Ubuntu 20.04, RHEL 8). Use the container image instead."
 fi
 
-if [[ -n "$address" && ! "$address" =~ ^https://[A-Za-z0-9.:\[\]-]+(:[0-9]{1,5})?$ ]]; then
+address_pattern='^https://[][A-Za-z0-9.:-]+$'      # name or [IPv6], optional :port; ']' must come first in [...]
+if [[ -n "$address" && ! "$address" =~ $address_pattern ]]; then
     fail 'the address must look like https://server.school.lan:8443'
 fi
 for value in "$port" "$admin_port"; do

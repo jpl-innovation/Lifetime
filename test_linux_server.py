@@ -266,6 +266,30 @@ class RuntimeSocketTests(unittest.TestCase):
 
 
 @unittest.skipIf(sys.platform == 'win32', 'POSIX file modes')
+class OldGlibcChmodTests(unittest.TestCase):
+    def test_private_modes_without_fchmodat_nofollow(self):
+        """glibc < 2.32 (Debian 10/11, Ubuntu 20.04, RHEL 8): chmod(follow_symlinks=False) raises ENOTSUP."""
+        import errno
+        import lifetime_permissions as permissions
+        real = os.chmod
+        def old_glibc(path, mode, *, follow_symlinks=True):
+            if not follow_symlinks:
+                raise OSError(errno.ENOTSUP, 'Operation not supported')
+            return real(path, mode)
+        with tempfile.TemporaryDirectory() as directory, patch.object(permissions.os, 'chmod', old_glibc):
+            folder, private = Path(directory) / 'data', Path(directory) / 'data' / 'admin-token'
+            folder.mkdir(mode=0o755)
+            private.write_text('x')
+            permissions.protect_directory(folder)
+            permissions.protect_private(private)
+            self.assertEqual(stat.S_IMODE(os.stat(folder).st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(os.stat(private).st_mode), 0o600)
+            os.symlink(private, Path(directory) / 'link')
+            with self.assertRaises(ValueError):
+                permissions.protect_private(Path(directory) / 'link')
+
+
+@unittest.skipIf(sys.platform == 'win32', 'POSIX file modes')
 class SecretFileTests(unittest.TestCase):
     def test_alert_secrets_are_a_0600_file_readable_back(self):
         import lifetime_notify as notify
