@@ -235,8 +235,8 @@ class DashboardShellTests(unittest.TestCase):
         overlay = self.w._theme_reveal
         self.assertIsInstance(overlay, ThemeReveal)
         self.assertEqual(overlay.geometry(), self.w.rect())
-        QTest.qWait(ThemeReveal.DURATION + 120)
-        self.assertIsNone(self.w._theme_reveal)
+        from qt_test_support import wait_until
+        wait_until(lambda: self.w._theme_reveal is None, ThemeReveal.DURATION + 3000)    # timers run late under load
 
     def test_switch_slides_and_keeps_every_segment_reachable(self):
         control = self.w.theme_control

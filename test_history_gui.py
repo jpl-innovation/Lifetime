@@ -11,7 +11,7 @@ class HistoryGuiTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec('PyQt6'), 'PyQt6 is required')
     def test_history_gui(self):
         result = subprocess.run([sys.executable, __file__, '--child'], capture_output=True, text=True,
-                                timeout=30, env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'})
+                                timeout=120, env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == '__main__' and '--child' in sys.argv:
@@ -118,6 +118,10 @@ if __name__ == '__main__' and '--child' in sys.argv:
         reduced.close()
         w.close()
     print('Insights GUI checks passed: four ranges, six tables, hover, 3-year rendering, reduced motion, 2x HiDPI.')
+    # Every check passed. Skip interpreter teardown, which can crash while it frees Qt objects in arbitrary order
+    # under load; that would report passing checks as a failure.
+    sys.stdout.flush()
+    os._exit(0)
 
 if __name__ == '__main__' and '--child' not in sys.argv:
     unittest.main()

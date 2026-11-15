@@ -243,7 +243,8 @@ class ActivityLayoutTests(unittest.TestCase):
             current = QRectF(ranges.indicator)
             ranges.setCurrentIndex(3)
             self.assertEqual(ranges.animation.startValue(), current)
-            QTest.qWait(280)
+            from qt_test_support import wait_until
+            wait_until(lambda: ranges.animation.state() == ranges.animation.State.Stopped)
             self.assertEqual(ranges.indicator, QRectF(ranges.buttons[3].geometry()))
         with patch.object(c, 'motion_reduced', return_value=True):
             ranges.setCurrentIndex(0)

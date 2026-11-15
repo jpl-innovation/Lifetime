@@ -7,6 +7,20 @@ from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import QApplication
 
 
+def wait_until(condition, timeout=3000):
+    """Process events until condition() is true, or fail after timeout ms.
+
+    Use this instead of a fixed QTest.qWait before asserting an animation's end state: on a busy machine (the full
+    suite, a CI runner) Qt timers fire late, so a wait just longer than the animation is sometimes too short."""
+    import time
+    from PyQt6.QtTest import QTest
+    deadline = time.monotonic() + timeout / 1000
+    while not condition():
+        if time.monotonic() > deadline:
+            raise AssertionError(f'condition not met within {timeout} ms')
+        QTest.qWait(10)
+
+
 def qt_app():
     if QApplication.instance() is None:
         # Layout tests must not depend on a real window manager: a tiling or Wayland compositor
