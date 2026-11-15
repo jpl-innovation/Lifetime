@@ -697,9 +697,10 @@ class ServerRuntime:
         """Energy and cost, after-hours time, per computer, room, group and fleet (lifetime_insights), from what each
         computer shares, with the groups whose computers are put to sleep after hours."""
         items = self._store.insight_inputs()
-        schedules = self.monitor.resolved_schedules(items)
+        schedules, trends = self.monitor.resolved_schedules(items), self.monitor.trends()
         for item in items:
             item['schedule'] = schedules[item['device_id']]
+            item['trends'] = trends.get(item['device_id'], []) if item['readings'] is not None else []
         result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date())
         result['sleep_policies'] = {key: dict(group=value['group'], name=value['name'], since=value['since'])
                                     for key, value in self.monitor.sleep_policies().items()}

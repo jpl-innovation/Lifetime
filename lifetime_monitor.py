@@ -27,7 +27,7 @@ import lifetime_checks as checks
 import lifetime_insights as insights
 import lifetime_notify as notify
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 APPLICATION_ID = 0x4C544D4E     # "LTMN"
 RETENTION_DAYS = 180
 QUOTA_BYTES = 64 * 1024 * 1024
@@ -37,7 +37,8 @@ PRESENCE = ('online', 'offline', 'unknown')
 BACKOFF = (60, 300, 900, 3600)  # seconds before the 2nd to 5th attempt; after the 5th the delivery has failed
 RECOVER_SECONDS = 300           # a problem must stay away this long before its incident resolves (no flapping storms)
 ACTIVE = ('pending', 'open', 'acknowledged', 'suppressed')
-BACKUP_TABLES = ('settings', 'schedules', 'maintenance', 'checks', 'presence', 'incidents', 'timeline', 'deliveries')  # parents first
+BACKUP_TABLES = ('settings', 'schedules', 'maintenance', 'checks', 'presence', 'incidents', 'timeline', 'deliveries',
+                 'trends')  # parents first
 CHECK_RULES = ('check_down',)       # rules about agentless checks, never about computers
 
 # Built-in rules. ``threshold``/``minutes`` are the editable defaults with their allowed ranges; ``direction`` and
@@ -97,7 +98,12 @@ MIGRATIONS = [
             last_at TEXT, last_category TEXT, last_latency_ms REAL, last_detail TEXT NOT NULL DEFAULT '', down_since TEXT,
             created_at TEXT NOT NULL)''',
     ),
+    (   # 3: one reading a day per computer for replacement forecasts (battery health, system disk free space)
+        '''CREATE TABLE trends (device_id TEXT NOT NULL, day TEXT NOT NULL, battery_health REAL, disk_free_percent REAL,
+            PRIMARY KEY(device_id, day))''',
+    ),
 ]
+TREND_DAYS = 730        # forecasts look back up to two years; one small row per computer and day
 
 
 class MonitorError(ValueError):
@@ -407,6 +413,14 @@ class Monitor:
                     self._step(db, device, name, rule, row, verdict, began, value, paused, now)
                 status[device['device_id']] = dict(presence=state, reason=reason, expected=expected, paused=paused,
                                                    missing=missing)
+                metrics = device.get('metrics') or {}
+                if not device.get('resources'):     # readings no longer shared: their history goes too
+                    db.execute('DELETE FROM trends WHERE device_id=?', (device['device_id'],))
+                elif device.get('metrics_fresh') and (metrics.get('battery_health_percent') is not None
+                                                    or metrics.get('disk_free_percent') is not None):
+                    db.execute('INSERT OR REPLACE INTO trends VALUES (?,?,?,?)', (
+                        device['device_id'], now.astimezone().date().isoformat(),
+                        metrics.get('battery_health_percent'), metrics.get('disk_free_percent')))
             self._tick_checks(db, rules, status, now)
             for row in db.execute('SELECT id,device_id FROM presence WHERE end_at IS NULL').fetchall():
                 if row['device_id'] not in status:      # no longer approved or removed: its history simply ends
@@ -1060,6 +1074,15 @@ class Monitor:
             self._setting(db, 'sleep_policies', json.dumps(policies, sort_keys=True))
         return policies
 
+    def trends(self):
+        """{device_id: [(day, battery health %, system disk free %)]} oldest first: the daily readings kept for
+        replacement forecasts (only from computers that share their readings)."""
+        result = {}
+        with self._lock:
+            for row in self._db.execute('SELECT * FROM trends ORDER BY device_id,day'):
+                result.setdefault(row['device_id'], []).append((row['day'], row['battery_health'], row['disk_free_percent']))
+        return result
+
     def resolved_schedules(self, devices):
         """{device_id: the expected-online schedule that applies to it} for [{device_id, group}]."""
         with self._lock:
@@ -1135,6 +1158,7 @@ class Monitor:
         """A removed computer: delete everything monitoring kept about it."""
         with self._transaction() as db:
             db.execute('DELETE FROM presence WHERE device_id=?', (device_id,))
+            db.execute('DELETE FROM trends WHERE device_id=?', (device_id,))
             db.execute('DELETE FROM incidents WHERE device_id=?', (device_id,))
             db.execute("DELETE FROM schedules WHERE scope='device' AND key=?", (device_id,))
             db.execute("DELETE FROM maintenance WHERE scope='device' AND key=?", (device_id,))
@@ -1247,6 +1271,7 @@ class Monitor:
         db.execute("DELETE FROM deliveries WHERE status IN ('sent','failed') AND updated_at<?", (cutoff,))
         db.execute('DELETE FROM deliveries WHERE id <= (SELECT MAX(id)-? FROM deliveries)', (MAX_DELIVERIES,))
         db.execute('DELETE FROM maintenance WHERE end_at<?', (cutoff,))
+        db.execute('DELETE FROM trends WHERE day<?', ((now.astimezone().date() - dt.timedelta(days=TREND_DAYS)).isoformat(),))
         for _ in range(20):
             used = (db.execute('PRAGMA page_count').fetchone()[0] - db.execute('PRAGMA freelist_count').fetchone()[0]) \
                 * db.execute('PRAGMA page_size').fetchone()[0]

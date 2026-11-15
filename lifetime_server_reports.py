@@ -154,6 +154,41 @@ def after_rows(afters, config, language):
     return rows
 
 
+FORECAST_TITLE = {'battery': 'Battery forecast', 'disk': 'System disk forecast', 'disk-health': 'Disk health'}
+
+
+def _say(pair, language):
+    key, values = pair
+    return tr(key, language).format(**values)
+
+
+def forecast_rows(item, language):
+    """One computer's replacement forecasts, its age and awake hours (lifetime_insights)."""
+    rows = [('replacement', FORECAST_TITLE[part['part']], _say(insights.when_text(part), language))
+            for part in item.get('replace') or []]
+    age = item.get('age') or {}
+    rows.append(('replacement', 'Age (years)', age.get('years')))
+    rows.append(('replacement', 'Awake hours so far', age.get('awake_hours')))
+    return rows
+
+
+def plan_rows(plan, config, language):
+    rows = []
+    for key, title in (('quarter', 'Due now or next quarter'), ('year', 'Due later this year')):
+        budget = plan[key + '_budget']
+        rows.append(('replacement', title, len(plan[key])))
+        rows.extend(('replacement', title, f"{row['name']} · {tr(insights.PART_TEXT[row['part']], language)} · "
+                                           f"{_say(insights.when_text(row), language)}") for row in plan[key])
+        rows.append(('replacement', 'Budget (parts with a price)', tr('{total} ({unpriced} without a price)', language).format(
+            total=insights.money(budget['total'], config['currency']), unpriced=budget['unpriced'])))
+    return rows
+
+
+FORECAST_NOTE = ('Replacement forecasts are straight lines through each computer’s own readings (battery health, '
+                 'system disk free space). A date is given only with at least 4 readings over 30 days; otherwise the '
+                 'report says not enough data. They are estimates, not a diagnosis.')
+
+
 def _incident_line(item, language):
     end = _utc(item.get('resolved_at')) or tr('ongoing', language)
     return f"{tr(RULE_TEXT.get(item['rule'], item['rule']), language)} · {_utc(item['started_at'])} – {end} · {tr(STATUS_TEXT.get(item['state'], item['state']), language)}"
@@ -211,6 +246,9 @@ def device_report(device, start=None, end=None, selected_identity=(), system_fie
         add_energy(report, [(report['stats']['awake_seconds'] if item and item['energy'] is not None else None,
                              item and item['power'])], insights['settings'], language)
         report['extra_rows'].extend(after_rows([item and item.get('after')], insights['settings'], language))
+        if item:
+            report['extra_rows'].extend(forecast_rows(item, language))
+            report['notes'].append(FORECAST_NOTE)
     return report
 
 
@@ -348,6 +386,12 @@ def _fleet_energy(report, devices, reports, results, language):
     add_energy(report, items, results['settings'], language)
     report['extra_rows'].extend(after_rows([(results['computers'].get(device['device_id']) or {}).get('after')
                                             for device in devices], results['settings'], language))
+    chosen = {device['device_id'] for device in devices}
+    found = [results['computers'][i] for i in chosen if i in results['computers']]
+    plan = insights.plan(found, results['settings'], dt.date.fromisoformat(results['today'])) if results.get('today') else None
+    if plan:
+        report['extra_rows'].extend(plan_rows(plan, results['settings'], language))
+        report['notes'].append(FORECAST_NOTE)
 
 
 def _fleet_monitoring(report, devices, reports, results, thresholds, language):

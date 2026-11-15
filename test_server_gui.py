@@ -1149,6 +1149,26 @@ class ServerGuiTests(unittest.TestCase):
         self.wait_idle()
         self.assertEqual(self.api.insight_config['hours']['start'], '09:00')
 
+    def test_replacement_plan_lists_due_parts_budget_and_says_not_enough_data(self):
+        today = dt.date.today()
+        filling = [((today - dt.timedelta(days=d)).isoformat(), None, 10 + d * 0.1) for d in (90, 60, 30, 0)]   # 19 -> 10 %
+        self.api.insight_items = [dict(device_id='a', name='Lab PC', group='Lab', kind='desktop', readings=dict(specs={}),
+                                       trends=filling),
+                                  dict(device_id='b', name='New PC', group='Lab', kind='laptop', readings=dict(specs={}),
+                                       trends=filling[-2:])]
+        self.api.insight_config = insights.settings(dict(unit_prices=dict(disk=1_200_000)))
+        self.load([device(0)])
+        ui = self.window.insights
+        self.window.tabs.setCurrentIndex(ui.index)
+        self.wait_idle()
+        table = ui.plan_tables['quarter']
+        self.assertEqual([table.item(0, c).text() for c in range(4)],
+                         ['Lab PC', 'Lab', 'System disk space', 'now (10 %, limit 10 %)'])
+        self.assertEqual(ui.budgets['quarter'].text(), '1 parts · budget 1,200,000 VND for 1 priced, 0 without a price')
+        self.assertEqual(ui.forecasts.item(1, 1).text(), 'not enough data (0 readings over 0 days)')
+        self.assertEqual(ui.forecasts.item(1, 2).text(), 'not enough data (2 readings over 30 days)')
+        self.assertEqual(ui.forecasts.item(0, 1).text(), 'No battery in this computer')
+
     def test_segmented_stack_native_keyboard_shortcuts_and_interruptible_motion(self):
         from PyQt6.QtWidgets import QStackedWidget
         self.assertIsInstance(self.window.tabs, QStackedWidget)

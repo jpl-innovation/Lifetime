@@ -128,6 +128,16 @@ class AdminTests(unittest.TestCase):
         self.assertEqual((status, saved['price'], saved['group_watts']), (200, 3000.0, {'lab': 60.0}))
         self.assertEqual(self.admin.call('insights')['settings']['price'], 3000.0)
         self.assertEqual(self.runtime.access.audit(limit=1)[0]['action'], 'set_insight_settings')
+        # Daily readings kept by monitoring reach the forecast only while the computer shares its readings.
+        shared, private = self.computer(cpu=5), self.computer()
+        rows = [(device, (TODAY - dt.timedelta(days=d)).isoformat(), None, 20 + d / 10) for device in (shared, private)
+                for d in (0, 30, 60, 90)]
+        with self.runtime.monitor._transaction() as db:
+            db.executemany('INSERT OR REPLACE INTO trends VALUES (?,?,?,?)', rows)
+        found = {c['device_id']: c for c in self.admin.call('insights')['computers']}
+        disk = next(p for p in found[shared]['replace'] if p['part'] == 'disk')
+        self.assertEqual((disk['points'], disk['status']), (4, 'expected'))
+        self.assertEqual(found[private]['replace'], [])
 
 
     def computer(self, control=True, cpu=None, group='Lab'):

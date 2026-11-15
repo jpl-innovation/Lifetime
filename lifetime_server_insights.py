@@ -114,6 +114,7 @@ class InsightsUI:
         content.addWidget(self.note)
         layout.addWidget(panel)
         self._make_after(layout)
+        self._make_plan(layout)
         # ---- settings ----
         settings, form = w._panel()
         w.access_ui.gate(settings, 'set_insight_settings')
@@ -166,6 +167,22 @@ class InsightsUI:
         self.overrides.setWordWrap(True)
         self.overrides.setObjectName('muted')
         form.addWidget(self.overrides)
+        lifecycle = ControlRow()
+        self.battery_level, self.disk_level = QDoubleSpinBox(), QDoubleSpinBox()
+        self.battery_price, self.disk_price = QDoubleSpinBox(), QDoubleSpinBox()
+        for spin, low, high, suffix in ((self.battery_level, 50, 99, ' %'), (self.disk_level, 1, 50, ' %'),
+                                        (self.battery_price, 0, 1e12, ''), (self.disk_price, 0, 1e12, '')):
+            spin.setRange(low, high)
+            spin.setDecimals(0)
+            spin.setSuffix(suffix)
+        for key, spin in (('Replace battery below', self.battery_level), ('Act when disk free below', self.disk_level),
+                          ('Battery price', self.battery_price), ('Disk price', self.disk_price)):
+            lifecycle.addWidget(w.label(key))
+            lifecycle.addWidget(spin)
+            spin.setAccessibleName(self.t(key))
+        self.save_lifecycle = w.button('Save', self._save_lifecycle)
+        lifecycle.addWidget(self.save_lifecycle)
+        form.addLayout(lifecycle)
         hours_title = w.label('Office hours (for computers without business hours of their own)')
         hours_title.setStyleSheet('font-weight: 600;')
         form.addWidget(hours_title)
@@ -186,6 +203,39 @@ class InsightsUI:
         form.addLayout(hours)
         layout.addWidget(settings)
         layout.addStretch()
+
+    def _make_plan(self, layout):
+        w = self.w
+        panel, content = w._panel()
+        heading = w.label('Replacement plan')
+        heading.setObjectName('sectionTitle')
+        content.addWidget(heading)
+        self.plan_intro = w.label('Forecasts from each computer’s own history: when its battery falls below the '
+                                  'replacement level and when its system disk runs out of room, plus disks that report a '
+                                  'problem. A date is given only with at least 4 readings over 30 days; otherwise it '
+                                  'says not enough data, with what it has.')
+        self.plan_intro.setObjectName('muted')
+        content.addWidget(self.plan_intro)
+        self.plan_titles, self.plan_tables, self.budgets = {}, {}, {}
+        for key, title in (('quarter', 'Now and next quarter'), ('year', 'Later this year')):
+            label = w.label(title)
+            label.setStyleSheet('font-weight: 600;')
+            content.addWidget(label)
+            self.plan_titles[key] = label
+            table = self._table(5, f'plan_{key}')
+            content.addWidget(table)
+            self.plan_tables[key] = table
+            budget = QLabel()
+            budget.setWordWrap(True)
+            budget.setObjectName('muted')
+            content.addWidget(budget)
+            self.budgets[key] = budget
+        label = w.label('Forecast per computer')
+        label.setStyleSheet('font-weight: 600;')
+        content.addWidget(label)
+        self.forecasts = self._table(5, 'forecastTable')
+        content.addWidget(self.forecasts)
+        layout.addWidget(panel)
 
     def _make_after(self, layout):
         w = self.w
@@ -274,6 +324,10 @@ class InsightsUI:
         for day, box in enumerate(self.weekday_boxes):
             box.setChecked(day in hours['weekdays'])
         self.price.setValue(config['price'])
+        self.battery_level.setValue(config['battery_replace'])
+        self.disk_level.setValue(config['disk_replace'])
+        self.battery_price.setValue(config['unit_prices']['battery'])
+        self.disk_price.setValue(config['unit_prices']['disk'])
         self.currency.setText(config['currency'])
         self.laptop.setValue(config['laptop_watts'])
         self.desktop.setValue(config['desktop_watts'])
@@ -301,6 +355,11 @@ class InsightsUI:
     def _save(self):
         self._send(dict(values=dict(price=self.price.value(), currency=self.currency.text().strip().upper(),
                                     laptop_watts=self.laptop.value(), desktop_watts=self.desktop.value())), self.save)
+
+    def _save_lifecycle(self):
+        self._send(dict(values=dict(battery_replace=self.battery_level.value(), disk_replace=self.disk_level.value(),
+                                    unit_prices=dict(battery=self.battery_price.value(), disk=self.disk_price.value()))),
+                   self.save_lifecycle)
 
     def _save_hours(self):
         hours = dict(self.result['settings']['hours'] if self.result else insights.OFFICE_HOURS,
@@ -360,18 +419,21 @@ class InsightsUI:
         self.after_rooms.setHorizontalHeaderLabels([self.t(key) for key in ('Room', 'After hours', 'Energy', 'Cost')])
         self.after_chart.setAccessibleName(self.t('Hours on after hours per week (all computers)'))
         self.policy_group.setAccessibleName(self.t('Sleep after hours for'))
+        for table in self.plan_tables.values():
+            table.setHorizontalHeaderLabels([self.t(key) for key in ('Computer', 'Group', 'Part', 'When', 'Why')])
+        self.forecasts.setHorizontalHeaderLabels([self.t(key) for key in ('Computer', 'Battery', 'System disk space', 'Age', 'Awake so far')])
         self._policy_button()
         self.target_watts.setAccessibleName(self.t('Power for a group or computer'))
         if self.result:
             self.render()
 
-    def _fill(self, table, rows):
+    def _fill(self, table, rows, numbers=True):
         table.setRowCount(len(rows))
         for index, values in enumerate(rows):
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
-                if column >= 2:
+                if numbers and column >= 2:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(index, column, item)
         self.w._fit_rows(table, len(rows), most=10)
@@ -478,3 +540,32 @@ class InsightsUI:
         self.policies.setText('\n'.join(t('{group}: on since {since}, sent as {name}', group=p['group'], name=p['name'],
                                             since=self.w._timestamp(p['since'])) for p in policies.values())
                               or t('Sleep after hours is off for every group.'))
+        self.render_plan()
+
+    def _says(self, pair):
+        key, values = pair
+        return self.t(key, **values)
+
+    def render_plan(self):
+        result, t = self.result, self.t
+        plan, currency = result['plan'], result['settings']['currency']
+        for key, table in self.plan_tables.items():
+            rows = plan[key]
+            self._fill(table, [(row['name'], row['group'] or t('No group'), t(insights.PART_TEXT[row['part']]),
+                                self._says(insights.when_text(row)), self._says(insights.reason_text(row))) for row in rows], numbers=False)
+            budget = plan[key + '_budget']
+            self.budgets[key].setText(t('Nothing due.') if not rows else
+                                      t('{count} parts · budget {total} for {priced} priced, {unpriced} without a price',
+                                        count=len(rows), total=insights.money(budget['total'], currency),
+                                        priced=budget['priced'], unpriced=budget['unpriced']))
+
+        def cell(c, part):
+            found = next((p for p in c['replace'] if p['part'] == part), None)
+            if found:
+                return self._says(insights.when_text(found))
+            return t('No battery in this computer') if part == 'battery' and c.get('kind') == 'desktop' else t('Not available')
+        self._fill(self.forecasts, [
+            (c['name'], cell(c, 'battery'), cell(c, 'disk'),
+             t('{years} years', years=c['age']['years']) if c['age']['years'] is not None else t('Not available'),
+             t('{hours} h', hours=f"{c['age']['awake_hours']:,}") if c['age']['awake_hours'] is not None else t('Not available'))
+            for c in result['computers']], numbers=False)

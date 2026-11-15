@@ -9,6 +9,7 @@ from lifetime_tasks import Tasks
 import lifetime_health as health
 from lifetime_theme import install, tokens
 from lifetime_widgets_dashboard import EmptyState, HealthBadge
+from lifetime_insights_gui import ForecastPanel
 
 from PyQt6.QtGui import QColor, QPainter
 
@@ -100,6 +101,9 @@ class HealthPage(QWidget):
         self.badge = HealthBadge()
         badge_box.addWidget(self.badge)
         content.addWidget(self.badge_panel)
+        if not remote:      # the server shows its own Replacement plan
+            self.forecast = ForecastPanel()
+            content.addWidget(self.forecast)
         self.panels, self.states = {}, {}
         for key, title in (('stability', 'Stability'), ('battery', 'Battery'), ('sleep', 'Sleep')):
             panel = QFrame()
@@ -271,6 +275,9 @@ class HealthPage(QWidget):
             self.states[key].setText(message)
             self.states[key].setVisible(bool(message))
         self.render_badge()
+        if not self.remote:
+            self.forecast.set_data(self.data.get('battery') if isinstance(self.data.get('battery'), dict) else None,
+                                   self.data.get('machine') if isinstance(self.data.get('machine'), dict) else None)
         data = self.data.get('stability')
         events = [r for r in data if selected(r['date'])] if isinstance(data, list) else []
         self.stability_count.setVisible(isinstance(data, list))

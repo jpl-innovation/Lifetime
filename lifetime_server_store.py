@@ -1532,7 +1532,11 @@ class Store:
                             group=identity.get('department', ''), room=identity.get('location', ''),
                             created_at=row['created_at'],
                             client_version=row['client_version'], control=bool(policy.get('control')),
-                            history=None, readings=None, health=None, discharge=[], kind=None)
+                            history=None, readings=None, health=None, discharge=[], kind=None, awake_seconds=None)
+                latest = json.loads(row['latest_record']) if row['latest_record'] else None
+                if latest:
+                    totals = latest['totals']
+                    item['awake_seconds'] = totals['measured_seconds'] + totals['imported_seconds'] + totals['baseline_seconds']
                 if policy.get('history') and row['history']:
                     history = json.loads(row['history'])
                     item['history'] = dict(daily=history.get('daily') or {}, dated_hourly=history.get('dated_hourly') or {},

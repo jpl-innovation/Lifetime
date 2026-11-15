@@ -74,7 +74,8 @@ class ServerExportDialog(ExportDialog):
             found = self.client.call('insights')
         except ValueError:      # an older server without energy figures
             found = None
-        energy = found and dict(settings=found['settings'], computers={c['device_id']: c for c in found['computers']})
+        energy = found and dict(settings=found['settings'], today=found.get('today'),
+                               computers={c['device_id']: c for c in found['computers']})
         if single:
             return device_report(devices[0], availability=measured[0] if measured else None, thresholds=thresholds,
                                  insights=energy, **options)
@@ -87,7 +88,8 @@ class ServerExportDialog(ExportDialog):
                      # a new on-battery reading can change the measured draw between the review and the save
                      'Power draw (W)', 'Power method', 'Energy in the period (kWh)', 'Cost in the period',
                      'Measured on battery', 'Estimated from typical power', 'Awake after hours, last 7 days (hours)',
-                     'Energy after hours, last 7 days (kWh)', 'Cost after hours, last 7 days')
+                     'Energy after hours, last 7 days (kWh)', 'Cost after hours, last 7 days',
+                     'Battery forecast', 'System disk forecast', 'Awake hours so far')
 
     @staticmethod
     def report_content(report):

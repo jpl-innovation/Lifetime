@@ -63,7 +63,7 @@ def populate(store, fingerprint, count=20, detailed=False):
                       dict(name='Wi-Fi', model='Demo wireless adapter', kind='Wi-Fi', connected=False,
                            wifi_standard='802.11ax', band='5 GHz')],
             memory=dict(modules=[dict(kind='DDR5', speed_mhz=5600, capacity_bytes=8*2**30)]*2, slots_used=2, slots_total=4),
-            disks=[dict(model='Demo SSD', kind='NVMe', size_bytes=512*2**30, health='Healthy')],
+            disks=[dict(model='Demo SSD', kind='NVMe', size_bytes=512*2**30, health='Warning' if detailed and index == 5 else 'Healthy')],
             board=dict(manufacturer='Demo manufacturer', model='Demo board', bios_vendor='Demo BIOS', bios_version='1.23', bios_date='2025-06-01'),
             gpus=[dict(name='Demo graphics', driver='123.45', vram_bytes=8*2**30)],
             displays=[dict(width=2560, height=1440, hz=144)],
@@ -120,7 +120,7 @@ def populate(store, fingerprint, count=20, detailed=False):
                           last_crash=(observed-dt.timedelta(days=5)).isoformat() if index % 4 == 0 else None,
                           detail=dict(stability=[dict(date=(observed-dt.timedelta(days=9*i+2)).isoformat(), kind='Crash' if i % 3 == 0 else 'Unexpected shutdown') for i in range(index % 6+3)],
                                       battery=dict(packs=[dict(full=50.0-index*.4, design=60.0, cycles=240+index*7, chemistry='LION', unit='Wh', health=88.5-index)],
-                                                   history=[dict(date=(day-dt.timedelta(days=7*i)).isoformat(), full=55.0-i*.15-index*.3) for i in range(51, -1, -1)], usage=usage),
+                                                   history=[dict(date=(day-dt.timedelta(days=7*i)).isoformat(), full=round(50.0-index*.4+i*.12, 2)) for i in range(51, -1, -1)], usage=usage),
                                       sleep=dict(daily={n['date']: dict(cycles=1+int(n['seconds']) % 3, seconds=n['seconds']) for n in nights}, nights=nights)))
         with patch.object(storage, '_now', return_value=observed):
             store.ingest(request['device_id'], credential, dict(version=1, device_id=request['device_id'],
@@ -131,6 +131,20 @@ def populate(store, fingerprint, count=20, detailed=False):
                          history=history,
                          **({'readings': dict(readings(observed, 6), health=health), 'health': {k: v for k, v in health.items() if k != 'detail'}} if detailed else {})))
     return identifiers
+
+
+def populate_monitoring(runtime, days=120):
+    """Daily disk-free and battery-health readings for the replacement forecasts, as monitoring keeps them: some
+    computers' disks fill steadily, one has only a week of readings (not enough data). Synthetic, like populate."""
+    today = dt.datetime.now().astimezone().date()
+    rows = []
+    for index, item in enumerate(runtime._store.insight_inputs()):
+        span = 7 if index == 4 else days
+        for offset in range(0, span, 3):
+            rows.append((item['device_id'], (today - dt.timedelta(days=offset)).isoformat(), None,
+                         round(max(2.0, 55 - index * 3 - (0.3 if index % 3 == 0 else 0.03) * (days - offset)), 1)))
+    with runtime.monitor._transaction() as db:
+        db.executemany('INSERT OR REPLACE INTO trends VALUES (?,?,?,?)', rows)
 
 
 def settle(app, window):

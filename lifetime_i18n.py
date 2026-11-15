@@ -2182,3 +2182,55 @@ for _key, _text in _AFTER_HOURS_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+
+# Unique features: replacement forecasts and the replacement plan.
+_FORECAST_VI = {
+    'Replacement plan': 'Kế hoạch thay thế',
+    'Forecasts from each computer’s own history: when its battery falls below the replacement level and when its system disk runs out of room, plus disks that report a problem. A date is given only with at least 4 readings over 30 days; otherwise it says not enough data, with what it has.':
+        'Dự báo từ lịch sử của chính mỗi máy: khi nào pin giảm dưới mức cần thay và khi nào ổ đĩa hệ thống hết chỗ, cùng các ổ đĩa báo lỗi. Chỉ đưa ra ngày khi có ít nhất 4 lần đo trong 30 ngày; nếu không sẽ ghi chưa đủ dữ liệu, kèm số liệu đang có.',
+    'Now and next quarter': 'Ngay bây giờ và quý tới',
+    'Later this year': 'Cuối năm nay',
+    'Forecast per computer': 'Dự báo theo từng máy',
+    'Replace battery below': 'Thay pin khi dưới',
+    'Act when disk free below': 'Xử lý khi ổ đĩa trống dưới',
+    'Battery price': 'Giá pin',
+    'Disk price': 'Giá ổ đĩa',
+    'Part': 'Bộ phận',
+    'When': 'Khi nào',
+    'Why': 'Lý do',
+    'System disk space': 'Dung lượng ổ đĩa hệ thống',
+    'Age': 'Tuổi máy',
+    'Awake so far': 'Tổng thời gian thức',
+    'Nothing due.': 'Chưa có gì cần thay.',
+    '{count} parts · budget {total} for {priced} priced, {unpriced} without a price': '{count} bộ phận · ngân sách {total} cho {priced} bộ phận có giá, {unpriced} chưa có giá',
+    '{years} years': '{years} năm',
+    'now: the disk reports {health}': 'ngay: ổ đĩa báo {health}',
+    '{date} (from {points} readings over {days} days)': '{date} (từ {points} lần đo trong {days} ngày)',
+    'now ({latest} %, limit {threshold} %)': 'ngay ({latest} %, ngưỡng {threshold} %)',
+    'not falling ({points} readings over {days} days)': 'không giảm ({points} lần đo trong {days} ngày)',
+    'not within ten years ({points} readings over {days} days)': 'không trong vòng mười năm ({points} lần đo trong {days} ngày)',
+    'not enough data ({points} readings over {days} days)': 'chưa đủ dữ liệu ({points} lần đo trong {days} ngày)',
+    'Disk {model} reports {health}': 'Ổ đĩa {model} báo {health}',
+    'Battery health {latest} % now, replace below {threshold} %': 'Độ chai pin hiện {latest} %, thay khi dưới {threshold} %',
+    'System disk {latest} % free now, act below {threshold} %': 'Ổ đĩa hệ thống hiện trống {latest} %, xử lý khi dưới {threshold} %',
+    'Battery forecast': 'Dự báo pin',
+    'System disk forecast': 'Dự báo ổ đĩa hệ thống',
+    'Age (years)': 'Tuổi máy (năm)',
+    'Awake hours so far': 'Tổng số giờ thức',
+    'Due now or next quarter': 'Cần thay ngay hoặc trong quý tới',
+    'Due later this year': 'Cần thay trong năm nay',
+    'Budget (parts with a price)': 'Ngân sách (bộ phận có giá)',
+    '{total} ({unpriced} without a price)': '{total} ({unpriced} chưa có giá)',
+    'Replacement forecasts are straight lines through each computer’s own readings (battery health, system disk free space). A date is given only with at least 4 readings over 30 days; otherwise the report says not enough data. They are estimates, not a diagnosis.':
+        'Dự báo thay thế là đường thẳng qua các lần đo của chính mỗi máy (độ khỏe pin, dung lượng trống ổ đĩa hệ thống). Chỉ đưa ra ngày khi có ít nhất 4 lần đo trong 30 ngày; nếu không, báo cáo ghi chưa đủ dữ liệu. Đây là ước tính, không phải chẩn đoán.',
+    'Invalid replacement threshold': 'Ngưỡng thay thế không hợp lệ',
+    'Invalid unit prices': 'Đơn giá không hợp lệ',
+    'Replacement forecast': 'Dự báo thay thế',
+    'A date is given only with at least 4 readings over 30 days. Battery: replace below {battery} %. Disk: act below {disk} % free.':
+        'Chỉ đưa ra ngày khi có ít nhất 4 lần đo trong 30 ngày. Pin: thay khi dưới {battery} %. Ổ đĩa: xử lý khi trống dưới {disk} %.',
+}
+for _key, _text in _FORECAST_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

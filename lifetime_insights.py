@@ -23,7 +23,10 @@ ENERGY_NOTE = ('Energy = awake hours × power draw. Power is measured only when 
 # The default "school or office hours" for computers without business hours of their own (the admin edits them).
 OFFICE_HOURS = dict(start='08:00', end='18:00', weekdays=[0, 1, 2, 3, 4], holidays=[])
 DEFAULTS = dict(price=2500.0, currency='VND', laptop_watts=LAPTOP_WATTS, desktop_watts=DESKTOP_WATTS,
-                group_watts={}, device_watts={}, hours=OFFICE_HOURS)
+                group_watts={}, device_watts={}, hours=OFFICE_HOURS, battery_replace=80, disk_replace=10,
+                unit_prices=dict(battery=0, disk=0))
+MIN_POINTS, MIN_DAYS = 4, 30        # a forecast needs at least this many readings spread over at least this many days
+HORIZON_DAYS = 3650                 # a trend that reaches the threshold later than this is "not within ten years"
 
 
 def _watts(value):
@@ -45,7 +48,8 @@ def _overrides(value):
 
 def settings(value=None):
     """The energy settings with defaults filled in; ValueError for anything out of range (the server refuses it)."""
-    result = dict(DEFAULTS, group_watts={}, device_watts={}, hours=office_hours(OFFICE_HOURS))
+    result = dict(DEFAULTS, group_watts={}, device_watts={}, hours=office_hours(OFFICE_HOURS),
+                  unit_prices=dict(DEFAULTS['unit_prices']))
     for key, item in (value or {}).items():
         if key not in DEFAULTS:
             continue
@@ -61,6 +65,16 @@ def settings(value=None):
             result[key] = _watts(item)
         elif key == 'hours':
             result[key] = office_hours(item)
+        elif key in ('battery_replace', 'disk_replace'):
+            low, high = (50, 99) if key == 'battery_replace' else (1, 50)
+            if type(item) not in (int, float) or not low <= item <= high:
+                raise ValueError('Invalid replacement threshold')
+            result[key] = item
+        elif key == 'unit_prices':
+            if not isinstance(item, dict) or set(item) - {'battery', 'disk'} or any(
+                    type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1e12 for v in item.values()):
+                raise ValueError('Invalid unit prices')
+            result[key] = dict(result[key], **{k: float(v) for k, v in item.items()})
         else:
             result[key] = _overrides(item)
     return result
@@ -251,15 +265,155 @@ def summarize(items, config=None):
     return total
 
 
+def forecast(points, threshold, today, min_points=MIN_POINTS, min_days=MIN_DAYS):
+    """When a falling reading (battery health %, disk free %) reaches ``threshold``, from a least-squares line through
+    its dated readings [(date or 'YYYY-MM-DD', value)].
+
+    status: 'not-enough-data' (fewer than ``min_points`` readings or spread over fewer than ``min_days`` days: no
+    date is given, ever), 'reached' (the latest reading is at or below the threshold; date is today), 'not-declining' (the line
+    does not fall), 'beyond' (it falls but reaches the threshold more than ten years from today) or 'expected' with
+    ``date``. Always with the readings used: their number, first and last date and span in days."""
+    clean = {}
+    for date, value in points or ():
+        try:
+            date = date if isinstance(date, dt.date) else dt.date.fromisoformat(str(date)[:10])
+        except ValueError:
+            continue
+        if type(value) in (int, float) and math.isfinite(value):
+            clean[date] = float(value)
+    rows = sorted(clean.items())
+    result = dict(points=len(rows), first=rows[0][0].isoformat() if rows else None,
+                  last=rows[-1][0].isoformat() if rows else None,
+                  span_days=(rows[-1][0] - rows[0][0]).days if rows else 0, latest=rows[-1][1] if rows else None,
+                  threshold=threshold, date=None, per_year=None)
+    if len(rows) < min_points or result['span_days'] < min_days:
+        return dict(result, status='not-enough-data')
+    origin = rows[0][0]
+    xs, ys = [(date - origin).days for date, _ in rows], [value for _, value in rows]
+    mean_x, mean_y = sum(xs) / len(xs), sum(ys) / len(ys)
+    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / sum((x - mean_x) ** 2 for x in xs)
+    result['per_year'] = round(slope * 365, 2)
+    if ys[-1] <= threshold:
+        return dict(result, status='reached', date=today.isoformat())      # due now
+    if slope >= 0:
+        return dict(result, status='not-declining')
+    day = origin + dt.timedelta(days=math.ceil((threshold - (mean_y - slope * mean_x)) / slope))
+    if (day - today).days > HORIZON_DAYS:
+        return dict(result, status='beyond')
+    return dict(result, status='expected', date=max(day, today).isoformat())
+
+
+def battery_points(health, trends=()):
+    """Battery health readings: the computer's own battery report history (full charge against design capacity),
+    and the server's daily readings where the report has none for that day."""
+    battery = ((health or {}).get('detail') or {}).get('battery') or {}
+    packs = battery.get('packs') or []
+    design = packs[0].get('design') if len(packs) == 1 else None
+    points = {}
+    for row in [] if len(packs) > 1 else battery.get('history') or []:
+        value = row.get('health')
+        if value is None and design and row.get('full') is not None:
+            value = 100 * row['full'] / design
+        if value is not None:
+            points[str(row.get('date'))[:10]] = value
+    for day, value in trends:
+        if value is not None:
+            points.setdefault(day, value)
+    return sorted(points.items())
+
+
+def replacements(item, config, today):
+    """What this computer may need replaced and when, with the reason and the data behind it."""
+    found = []
+    readings = item.get('readings') or {}
+    specs = readings.get('specs') or {}
+    trends = item.get('trends') or []
+    if item.get('kind') != 'desktop':
+        health = item.get('health') if ((item.get('health') or {}).get('detail')) else readings.get('health')
+        points = battery_points(health, [(day, battery) for day, battery, _ in trends])
+        if points or item.get('kind') == 'laptop':
+            found.append(dict(part='battery', **forecast(points, config['battery_replace'], today)))
+    disk = forecast([(day, free) for day, _, free in trends if free is not None], config['disk_replace'], today)
+    if disk['points'] or readings:
+        found.append(dict(part='disk', **disk))
+    for drive in (specs.get('hardware') or {}).get('disks') or []:
+        if drive.get('health') and drive['health'] not in ('Healthy', 'OK'):
+            found.append(dict(part='disk-health', status='reached', date=today.isoformat(), model=drive.get('model'),
+                              health=drive['health'], points=1, span_days=0, first=None, last=None, latest=None,
+                              threshold=None, per_year=None))
+    return found
+
+
+def age(item, today):
+    """Years since the earliest known date (OS installation, else the first awake record) and awake hours so far."""
+    installed = (((item.get('readings') or {}).get('specs') or {}).get('hardware') or {}).get('os', {}).get('installed')
+    first = installed or (item.get('history') or {}).get('first_seen')
+    try:
+        years = round((today - dt.date.fromisoformat(str(first)[:10])).days / 365.25, 1) if first else None
+    except ValueError:
+        years = None
+    seconds = item.get('awake_seconds')
+    return dict(years=years, since=str(first)[:10] if years is not None else None,
+                awake_hours=round(seconds / 3600) if seconds is not None else None)
+
+
+PART_TEXT = {'battery': 'Battery', 'disk': 'System disk space', 'disk-health': 'Disk health'}
+
+
+def when_text(part):
+    """(text key, values) for a forecast's answer, always with the data behind it."""
+    data = dict(points=part['points'], days=part['span_days'])
+    if part['part'] == 'disk-health':
+        return 'now: the disk reports {health}', dict(health=part['health'])
+    if part['status'] == 'expected':
+        return '{date} (from {points} readings over {days} days)', dict(data, date=part['date'])
+    if part['status'] == 'reached':
+        return 'now ({latest} %, limit {threshold} %)', dict(latest=f"{part['latest']:g}", threshold=part['threshold'])
+    if part['status'] == 'not-declining':
+        return 'not falling ({points} readings over {days} days)', data
+    if part['status'] == 'beyond':
+        return 'not within ten years ({points} readings over {days} days)', data
+    return 'not enough data ({points} readings over {days} days)', data
+
+
+def reason_text(part):
+    if part['part'] == 'disk-health':
+        return 'Disk {model} reports {health}', dict(model=part.get('model') or '?', health=part['health'])
+    key = ('Battery health {latest} % now, replace below {threshold} %' if part['part'] == 'battery' else
+           'System disk {latest} % free now, act below {threshold} %')
+    return key, dict(latest=f"{part['latest']:.0f}", threshold=part['threshold'])
+
+
+def plan(computers, config, today):
+    """Replacements due now or within the next quarter (92 days) and within the year (365 days), with a budget when
+    the admin set unit prices (a part without a price is counted, not priced)."""
+    result = dict(quarter=[], year=[])
+    for c in computers:
+        for part in c.get('replace') or []:
+            if part['status'] not in ('reached', 'expected'):
+                continue
+            days = (dt.date.fromisoformat(part['date']) - today).days
+            if days <= 365:
+                result['quarter' if days <= 92 else 'year'].append(dict(device_id=c['device_id'], name=c['name'],
+                                                                        group=c['group'], **part))
+    for key in ('quarter', 'year'):
+        result[key].sort(key=lambda row: (row['date'], row['name'] or ''))
+        prices = [config['unit_prices'].get('battery' if row['part'] == 'battery' else 'disk') or 0 for row in result[key]]
+        result[key + '_budget'] = dict(total=round(sum(prices), 2), priced=sum(1 for p in prices if p),
+                                       unpriced=sum(1 for p in prices if not p))
+    return result
+
+
 def computer(item, config, today):
     """One computer's results from what it shares (lifetime_server_store.Store.insight_inputs shape, which the desktop
     app builds for itself too)."""
     watts = power(item.get('kind'), item.get('discharge'), item.get('device_id', ''), item.get('group', ''), config)
     history = item.get('history')
     return dict(device_id=item.get('device_id'), name=item.get('name'), group=item.get('group') or '',
-                room=item.get('room') or '', control=bool(item.get('control')), power=watts,
+                room=item.get('room') or '', control=bool(item.get('control')), kind=item.get('kind'), power=watts,
                 energy=energy(history['daily'], watts['watts'], today, config['price']) if history else None,
-                after=after_week(history, item.get('schedule'), watts['watts'], config, today))
+                after=after_week(history, item.get('schedule'), watts['watts'], config, today),
+                replace=replacements(item, config, today), age=age(item, today))
 
 
 def fleet(items, config, today):
@@ -277,4 +431,5 @@ def fleet(items, config, today):
     return dict(settings=config, today=today.isoformat(), computers=computers, fleet=summarize(computers, config),
                 groups={name: summarize(members, config) for name, members in sorted(groups.items())},
                 rooms={name: summarize(members, config) for name, members in sorted(rooms.items())},
-                top=[c['device_id'] for c in ranked[:10]], after_top=[c['device_id'] for c in late[:10]])
+                top=[c['device_id'] for c in ranked[:10]], after_top=[c['device_id'] for c in late[:10]],
+                plan=plan(computers, config, today))

@@ -115,6 +115,25 @@ class MonitorCase(unittest.TestCase):
 
 
 class PersistenceTests(MonitorCase):
+    def test_one_trend_reading_a_day_for_forecasts_and_none_once_readings_stop_being_shared(self):
+        self.fleet.add(metrics=dict(disk_free_percent=40, battery_health_percent=88, cpu_percent=1, ram_percent=1,
+                                    temperature_c=None))
+        self.monitor.tick()
+        self.fleet.devices[ID]['metrics']['disk_free_percent'] = 39
+        self.monitor.tick()                                     # same day: replaced, not added
+        self.clock.advance(days=1)
+        self.monitor.tick()
+        rows = self.monitor.trends()[ID]
+        self.assertEqual([row[1:] for row in rows], [(88, 39), (88, 39)])
+        self.assertEqual(len({row[0] for row in rows}), 2)
+        self.fleet.devices[ID]['metrics_fresh'] = False         # stale readings are not a new day's reading
+        self.clock.advance(days=1)
+        self.monitor.tick()
+        self.assertEqual(len(self.monitor.trends()[ID]), 2)
+        self.fleet.devices[ID]['resources'] = False             # consent withdrawn: the history goes
+        self.monitor.tick()
+        self.assertEqual(self.monitor.trends(), {})
+
     def test_new_database_has_schema_wal_identity_and_refuses_foreign_files(self):
         db = self.monitor._db
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], monitoring.SCHEMA_VERSION)

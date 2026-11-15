@@ -142,6 +142,60 @@ class AfterHoursTests(unittest.TestCase):
                 insights.settings(dict(hours=bad))
 
 
+class ForecastTests(unittest.TestCase):
+    START = dt.date(2026, 1, 1)
+
+    def points(self, *pairs):
+        return [((self.START + dt.timedelta(days=d)).isoformat(), v) for d, v in pairs]
+
+    def test_a_straight_decline_gives_the_day_it_crosses(self):
+        # 100, 97, 94, 91 % every 30 days: -0.1 % a day from 100, so 80 % on day 200 (20 July 2026).
+        result = insights.forecast(self.points((0, 100), (30, 97), (60, 94), (90, 91)), 80, self.START + dt.timedelta(days=90))
+        self.assertEqual((result['status'], result['date'], result['per_year']), ('expected', '2026-07-20', -36.5))
+        self.assertEqual((result['points'], result['first'], result['last'], result['span_days']), (4, '2026-01-01', '2026-04-01', 90))
+
+    def test_too_little_data_never_gives_a_date(self):
+        three = insights.forecast(self.points((0, 100), (60, 90), (90, 85)), 80, self.START)
+        short = insights.forecast(self.points((0, 100), (5, 95), (10, 90), (20, 85)), 80, self.START)   # 20 days
+        for result in (three, short, insights.forecast([], 80, self.START)):
+            self.assertEqual((result['status'], result['date']), ('not-enough-data', None))
+        self.assertEqual((three['points'], three['span_days']), (3, 90))
+        self.assertEqual((short['points'], short['span_days']), (4, 20))
+
+    def test_reached_flat_and_far_away(self):
+        today = self.START + dt.timedelta(days=90)
+        self.assertEqual(insights.forecast(self.points((0, 85), (30, 82), (60, 80), (90, 79)), 80, today)['status'], 'reached')
+        self.assertEqual(insights.forecast(self.points((0, 90), (30, 91), (60, 90), (90, 91)), 80, today)['status'], 'not-declining')
+        # -0.001 % a day from 95 % reaches 80 % in 15,000 days: more than ten years away.
+        slow = insights.forecast(self.points((0, 95), (30, 94.97), (60, 94.94), (90, 94.91)), 80, today)
+        self.assertEqual((slow['status'], slow['date']), ('beyond', None))
+
+    def test_battery_history_disk_trend_health_warning_and_plan(self):
+        today = dt.date(2026, 11, 16)
+        history = [dict(date=(today - dt.timedelta(days=30 * i)).isoformat(), full=50 - (3 - i) * 1.5) for i in range(4)]
+        # full 45.5, 47, 48.5, 50 Wh of a 50 Wh design: 91 % now, falling 3 % a month: 80 % in 110 days (6 Mar 2027).
+        item = dict(device_id='a', name='A', group='Lab', kind='laptop',
+                    health=dict(detail=dict(battery=dict(packs=[dict(design=50.0)], history=history))),
+                    readings=dict(specs=dict(hardware=dict(disks=[dict(model='Old HDD', health='Warning')]))),
+                    trends=[((today - dt.timedelta(days=d)).isoformat(), None, 30 - (40 - d) * 0.5) for d in (40, 20, 10, 0)])
+        config = insights.settings(dict(unit_prices=dict(battery=1_500_000)))
+        result = insights.fleet([item], config, today)
+        parts = {part['part']: part for part in result['computers'][0]['replace']}
+        self.assertEqual((parts['battery']['status'], parts['battery']['date']), ('expected', '2027-03-06'))
+        # disk free 30, 20, 15, 10 %... at day 0 it is 10 %: the threshold is reached.
+        self.assertEqual(parts['disk']['status'], 'reached')
+        self.assertEqual(parts['disk-health']['health'], 'Warning')
+        self.assertEqual([row['part'] for row in result['plan']['quarter']], ['disk', 'disk-health'])
+        self.assertEqual([row['part'] for row in result['plan']['year']], ['battery'])
+        self.assertEqual(result['plan']['year_budget'], dict(total=1_500_000.0, priced=1, unpriced=0))
+        self.assertEqual(result['plan']['quarter_budget'], dict(total=0, priced=0, unpriced=2))
+
+    def test_age_and_awake_hours(self):
+        item = dict(readings=dict(specs=dict(hardware=dict(os=dict(installed='2024-11-16')))), awake_seconds=7_200_000)
+        self.assertEqual(insights.age(item, dt.date(2026, 11, 16)), dict(years=2.0, since='2024-11-16', awake_hours=2000))
+        self.assertEqual(insights.age({}, dt.date(2026, 11, 16)), dict(years=None, since=None, awake_hours=None))
+
+
 class DesktopPanelTests(unittest.TestCase):
     """The desktop Reports page panel: its own on-battery readings (insights.json, never the ledger) and settings."""
 
@@ -183,6 +237,25 @@ class DesktopPanelTests(unittest.TestCase):
         panel.watts.setValue(0)
         panel._save()
         self.assertEqual(load_settings()['energy']['device_watts'], {})
+
+    def test_forecast_panel_from_the_battery_report_and_daily_disk_readings(self):
+        from lifetime_shell import shut_down
+        today = dt.date.today()
+        for d in (90, 60, 30, 0):
+            self.gui.add_samples(dict(disk=40 - (90 - d) * 0.1), now=dt.datetime.combine(
+                today - dt.timedelta(days=d), dt.time(12)).astimezone())
+        panel = self.gui.ForecastPanel()
+        self.addCleanup(shut_down, self.app, panel)
+        history = [dict(date=(today - dt.timedelta(days=d)).isoformat(), full=50 - (90 - d) * 0.05) for d in (90, 60, 30, 0)]
+        panel.set_data(dict(packs=[dict(design=50.0)], history=history), dict(installed=None))
+        # Battery 100 % -> 91 % over 90 days (-0.1 %/day): 80 % in 110 days. Disk 40 % -> 31 %: 10 % in 210 days.
+        self.assertEqual(panel.lines[0].text(), 'Battery: ' + (today + dt.timedelta(days=110)).isoformat()
+                         + ' (from 4 readings over 90 days)')
+        self.assertEqual(panel.lines[1].text(), 'System disk space: ' + (today + dt.timedelta(days=210)).isoformat()
+                         + ' (from 4 readings over 90 days)')
+        self.assertEqual(panel.lines[2].text(), 'Age: Not available')
+        panel.set_data(dict(packs=[], history=[]), None)
+        self.assertEqual(panel.lines[0].text(), 'Battery: No battery in this computer')
 
     def test_nothing_is_probed_without_the_battery_permission(self):
         self.assertEqual(self.real_probe(set()), {})

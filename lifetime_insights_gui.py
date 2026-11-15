@@ -41,22 +41,44 @@ def add_samples(found, directory=None, now=None):
                               [stamp, found['watts']]][-KEEP_READINGS:]
     if found.get('kind'):
         value['kind'] = found['kind']
+    if found.get('disk') is not None:      # one system-disk reading a day, for the replacement forecast
+        day = (now or dt.datetime.now(dt.timezone.utc)).astimezone().date().isoformat()
+        disk = value.get('disk') if isinstance(value.get('disk'), dict) else {}
+        disk[day] = found['disk']
+        value['disk'] = dict(sorted(disk.items())[-730:])
     atomic_json((data_dir() if directory is None else directory) / 'insights.json', value)
     return value
 
 
 def probe(allowed):
     """(this computer's on-battery draw in watts or None, 'laptop'/'desktop'/None) from the local probes allowed."""
-    if 'power' not in allowed:
-        return {}
     import lifetime_signals as signals
+    disk = None
+    if 'disks' in allowed:
+        import os
+        import sys
+        system = os.environ.get('SystemDrive', 'C:') + '\\' if sys.platform == 'win32' else '/'
+        drive = next((d for d in signals.safe(signals.probe_disks)() or [] if d.get('path') == system), {})
+        if drive.get('total'):
+            disk = round(100 * (drive['total'] - drive['used']) / drive['total'], 1)
+    if 'power' not in allowed:
+        return dict(disk=disk) if disk is not None else {}
     power = signals.safe(signals.probe_power)() or {}
     kind = 'desktop' if power.get('state') == 'No battery' else 'laptop' if power.get('percent') is not None else None
     watts = None
     if power.get('state') == 'On battery' and 'battery' in allowed:
         battery = signals.safe(signals.probe_battery)() or {}
         watts = battery.get('watts') or None
-    return dict(watts=watts, kind=kind)
+    return dict(watts=watts, kind=kind, disk=disk)
+
+
+def energy_config():
+    """The owner's energy settings (price, currency, this computer's wattage), defaults where unset or damaged."""
+    saved = load_settings().get('energy')
+    try:
+        return insights.settings(saved if isinstance(saved, dict) else None)
+    except ValueError:
+        return insights.settings()
 
 
 class EnergyPanel(QFrame):
@@ -139,11 +161,7 @@ class EnergyPanel(QFrame):
         self.render()
 
     def config(self):
-        saved = load_settings().get('energy')
-        try:
-            return insights.settings(saved if isinstance(saved, dict) else None)
-        except ValueError:
-            return insights.settings()
+        return energy_config()
 
     def _fill_form(self):
         config = self.config()
@@ -168,7 +186,7 @@ class EnergyPanel(QFrame):
         self.tasks.submit(lambda: probe(allowed))
 
     def _sampled(self, number, found):
-        if found and (found.get('watts') or found.get('kind') != self.samples.get('kind')):
+        if found and (found.get('watts') or found.get('kind') != self.samples.get('kind') or found.get('disk') is not None):
             try:
                 self.samples = add_samples(found)
             except OSError:
@@ -226,3 +244,57 @@ class EnergyPanel(QFrame):
                                if after['week']['hours'] else tr('Not on after hours in the last 7 days ({span}).', span=span))
         self.after.setVisible(bool(after))
         self.note.setText(tr(insights.ENERGY_NOTE))
+
+
+class ForecastPanel(QFrame):
+    """The Health page's replacement forecast for this computer: battery health from the battery report's history,
+    system disk free space from the app's daily readings, and the computer's age."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName('insetPanel')
+        box = QVBoxLayout(self)
+        box.setContentsMargins(20, 16, 20, 16)
+        box.setSpacing(8)
+        self.title = QLabel()
+        self.title.setObjectName('groupTitle')
+        box.addWidget(self.title)
+        self.lines = []
+        for _ in range(3):
+            line = QLabel()
+            line.setObjectName('caption')
+            line.setWordWrap(True)
+            box.addWidget(line)
+            self.lines.append(line)
+        self.note = QLabel()
+        self.note.setObjectName('caption')
+        self.note.setWordWrap(True)
+        box.addWidget(self.note)
+        self.battery, self.machine = None, None
+        on_language_change(self.render)
+
+    def set_data(self, battery, machine):
+        self.battery, self.machine = battery, machine
+        self.render()
+
+    def render(self, *unused):
+        config = energy_config()
+        today = dt.date.today()
+        samples = read_samples()
+        battery = self.battery if isinstance(self.battery, dict) else None
+        item = dict(kind='laptop' if battery and battery.get('packs') else 'desktop' if battery else None,
+                    health=dict(detail=dict(battery=battery)) if battery else None,
+                    readings=dict(specs=dict(hardware=dict(os=dict(installed=(self.machine or {}).get('installed'))))) if isinstance(self.machine, dict) else None,
+                    trends=[(day, None, value) for day, value in sorted((samples.get('disk') or {}).items())])
+        parts = {part['part']: part for part in insights.replacements(item, config, today)}
+        self.title.setText(tr('Replacement forecast'))
+        def say(part, title):
+            key, values = insights.when_text(part) if part else ('Not available', {})
+            return tr(title) + ': ' + tr(key, **values)
+        self.lines[0].setText(say(parts.get('battery'), 'Battery') if battery is None or battery.get('packs')
+                              else tr('Battery') + ': ' + tr('No battery in this computer'))
+        self.lines[1].setText(say(parts.get('disk'), 'System disk space'))
+        years = insights.age(item, today)['years']
+        self.lines[2].setText(tr('Age') + ': ' + (tr('{years} years', years=years) if years is not None else tr('Not available')))
+        self.note.setText(tr('A date is given only with at least 4 readings over 30 days. Battery: replace below {battery} %. '
+                             'Disk: act below {disk} % free.', battery=config['battery_replace'], disk=config['disk_replace']))
