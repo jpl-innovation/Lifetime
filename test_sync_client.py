@@ -6,6 +6,7 @@ in RuntimeIntegrationTests.
 """
 import copy
 import contextlib
+import datetime as dt
 import json
 from pathlib import Path
 import sqlite3
@@ -37,6 +38,7 @@ class SyncFixture(AgentFixture):
         self.bundle = tls.encode_bundle('https://localhost:8443', self.code, self.pem)
         self.calls = []
         self.transport = self.enterContext(patch.object(tls, 'request_json', side_effect=self.exchange))
+        self.enterContext(patch('lifetime_discovery.discover', return_value=[]))     # never multicast from tests
         self.client = SyncClient(self.machine)
 
     def exchange(self, bundle, path, payload, credential=None, timeout=10):
@@ -153,6 +155,10 @@ class SyncTests(SyncFixture):
             self.assertEqual((status['status'], status['error']), ('unreachable', kind))
             self.assertNotIn('secret-host', json.dumps(status))       # the raw message is never published
         self.assertEqual(error_kind(tls.HTTPSRequestError(500)), 'http-500')
+        for code, kind in ((10, 'expired'), (9, 'expired'), (62, 'hostname'), (64, 'hostname'), (18, 'certificate')):
+            error = ssl.SSLCertVerificationError('verify failed')
+            error.verify_code = code
+            self.assertEqual(error_kind(error), kind)
         self.transport.side_effect = self.exchange
         status = self.client.step(force=True)
         self.assertEqual((status['status'], status['error']), ('connected', None))
@@ -268,7 +274,7 @@ class SyncTests(SyncFixture):
         self.assertEqual(self.transport.call_count, count)
 
 
-class RuntimeIntegrationTests(AgentFixture):
+class RuntimeFixture(AgentFixture):
     def setUp(self):
         super().setUp()
         import lifetime_server as server
@@ -294,6 +300,8 @@ class RuntimeIntegrationTests(AgentFixture):
         self.admin.call('approve', request_id=request_id)
         self.assertEqual(self.client.step(force=True)['status'], 'approved')
 
+
+class RuntimeIntegrationTests(RuntimeFixture):
     def test_actual_tls_enrollment_claim_sync_restart_and_redacted_status(self):
         self.pair()
         self.sample(100)
@@ -317,6 +325,121 @@ class RuntimeIntegrationTests(AgentFixture):
         self.assertEqual(self.machine.status()['pending'], 1)
         self.sample(120)
         self.assertEqual(self.machine.ledger()['total_seconds'], 120)
+
+
+class TrustTests(RuntimeFixture):
+    """Design section 6 golden cases against a real server runtime: renewal, address change, key change."""
+
+    def setUp(self):
+        super().setUp()
+        self.discover = self.enterContext(patch('lifetime_discovery.discover', return_value=[]))
+
+    def connected(self):
+        self.tick = getattr(self, 'tick', 100) + 30
+        self.sample(self.tick)
+        return self.client.step(force=True)
+
+    def certificate(self, days_ago):
+        """A certificate from the server's own key, issued ``days_ago`` (an injected clock, no waiting)."""
+        names = tls.certificate_info((self.server_root / 'server-cert.pem').read_text())['names']
+        return tls.renew_certificate(self.server_root, names, dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days_ago))
+
+    def restart(self, pem=None):
+        import lifetime_server as server
+        from lifetime_admin import AdminClient
+        self.runtime.stop()
+        if pem:
+            (self.server_root / 'server-cert.pem').write_text(pem, encoding='ascii')
+        self.runtime = server.ServerRuntime(self.server_root, address='https://127.0.0.1:8443', host='127.0.0.1', port=0)
+        self.runtime.start()
+        self.addCleanup(self.runtime.stop)
+        self.admin = AdminClient(self.server_root, urlsplit(self.runtime.admin_address).port, timeout=3)
+
+    def use_address(self, address):
+        with self.machine._transaction() as state:
+            state['bundle']['address'] = address
+
+    def test_pairing_migrates_to_the_key_pin_from_the_certificate_it_checked(self):
+        self.pair()
+        bundle = self.machine._load()['bundle']
+        der = ssl.PEM_cert_to_DER_cert((self.server_root / 'server-cert.pem').read_text())
+        self.assertEqual(bundle['spki'], tls.spki_pin(der))
+        # Golden case 6: a computer still holding only the old certificate pin is not moved to a renewed
+        # certificate, even one with the same key: it must first match its own pinned certificate.
+        with self.machine._transaction() as state:
+            del state['bundle']['spki']
+        self.admin.call('names', names=['localhost'])
+        status = self.connected()
+        self.assertEqual((status['status'], status['error']), ('unreachable', 'certificate'))
+        self.assertNotIn('spki', self.machine._load()['bundle'])
+
+    def test_renewal_30_days_before_expiry_keeps_reporting_without_a_new_code(self):
+        self.pair()
+        self.assertEqual(self.connected()['status'], 'connected')
+        key = self.machine._load()['bundle']['spki']
+        old = self.certificate(days_ago=370)        # 27 days left
+        self.restart(old)                           # the server renews at start (and checks hourly)
+        current = (self.server_root / 'server-cert.pem').read_text()
+        self.assertNotEqual(current, old)
+        self.assertEqual((self.server_root / 'server-cert.previous.pem').read_text(), old)
+        self.assertEqual(tls.certificate_info(current)['key'], key)
+        self.use_address(self.runtime.public_address)       # same name; the test server only got a new port
+        codes = self.runtime._store._db.execute('SELECT count(*) FROM codes').fetchone()[0]
+        self.assertEqual(self.connected()['status'], 'connected')
+        self.assertEqual(self.machine._load()['bundle']['certificate_pem'], current)
+        self.assertEqual(self.machine._load()['bundle']['spki'], key)
+        self.assertEqual(self.runtime._store._db.execute('SELECT count(*) FROM codes').fetchone()[0], codes)
+
+    def test_offline_during_renewal_and_back_after_the_old_certificate_expired(self):
+        self.pair()
+        expired = self.certificate(days_ago=400)
+        with self.machine._transaction() as state:      # what this computer knew has expired meanwhile
+            state['bundle'].update(certificate_pem=expired, fingerprint=tls._certificate(expired))
+        self.assertEqual(self.connected()['status'], 'connected')
+        self.assertEqual(self.machine._load()['bundle']['certificate_pem'], (self.server_root / 'server-cert.pem').read_text())
+
+    def test_a_different_server_at_the_same_address_is_refused(self):
+        import lifetime_server as server
+        self.pair()
+        other = server.ServerRuntime(Path(self.temporary.name) / 'impostor', address='https://127.0.0.1:8443',
+                                     host='127.0.0.1', port=0)
+        other.start()
+        self.addCleanup(other.stop)
+        self.use_address(other.public_address)
+        for _ in range(2):
+            status = self.connected()
+        self.assertEqual((status['status'], status['error']), ('unreachable', 'certificate'))
+        self.assertEqual(other._store.list_devices(), [])
+        self.assertEqual(self.discover.call_count, 1)      # it looked for the real server, found nothing
+
+    def test_address_change_name_continues_and_old_ip_rediscovers_only_the_same_key(self):
+        import lifetime_server as server
+        # A computer that uses a name: the administrator adds and changes addresses; it keeps reporting.
+        self.admin.call('names', names=['localhost'])
+        self.bundle = tls.encode_bundle(self.runtime.public_address.replace('127.0.0.1', 'localhost'), self.admin.call('code')['code'],
+                                        (self.server_root / 'server-cert.pem').read_text(encoding='ascii'))
+        self.pair()
+        self.assertEqual(self.connected()['status'], 'connected')
+        self.admin.call('names', names=['localhost', '192.0.2.44'])
+        self.assertEqual(self.connected()['status'], 'connected')
+        self.assertIn('192.0.2.44', tls.certificate_info(self.machine._load()['bundle']['certificate_pem'])['names'])
+        # A computer that knows only the old address: the server moved; discovery is only a hint.
+        self.use_address(self.runtime.public_address)
+        self.restart()
+        impostor = server.ServerRuntime(Path(self.temporary.name) / 'impostor', address='https://127.0.0.1:8443',
+                                        host='127.0.0.1', port=0)
+        impostor.start()
+        self.addCleanup(impostor.stop)
+        port = urlsplit(self.runtime.public_address).port
+        self.discover.return_value = [      # any device on the network can answer; the first one is not ours
+            dict(instance='Fake', address=impostor.public_address, port=urlsplit(impostor.public_address).port, source='127.0.0.1'),
+            dict(instance='Real', address=self.runtime.public_address, port=port, source='127.0.0.1')]
+        for _ in range(2):
+            status = self.connected()
+        self.assertEqual(status['status'], 'unreachable')
+        self.assertEqual(self.machine._load()['bundle']['address'], self.runtime.public_address)
+        self.assertEqual(self.connected()['status'], 'connected')
+        self.assertEqual(impostor._store.list_devices(), [])
 
 
 class PowerSyncTests(SyncFixture):

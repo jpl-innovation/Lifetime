@@ -73,6 +73,7 @@ class StoreTests(unittest.TestCase):
         for table in ('invitations', 'guess_ips', 'events'):
             self.store._db.execute('DROP TABLE ' + table)
         self.store._db.execute('ALTER TABLE devices DROP COLUMN client_version')
+        self.store._db.execute('ALTER TABLE settings DROP COLUMN server_names')
         self.store._db.execute('ALTER TABLE settings DROP COLUMN organisation')
         self.store._db.execute('ALTER TABLE settings DROP COLUMN reporting_interval')
         self.store._db.execute('ALTER TABLE devices DROP COLUMN refresh_requested')
@@ -1058,6 +1059,19 @@ class SpecsControlTests(unittest.TestCase):
         self.policy['resources'] = False
         self.store.ingest(self.device, self.credential, message(self.device, [], policy=self.policy, version=2))
         self.assertEqual(self.store._db.execute('SELECT count(*) FROM performance_samples').fetchone()[0], 0)
+
+    def test_server_names_are_canonical_bounded_and_survive_backup(self):
+        self.assertEqual(self.store.server_names(), dict(names=[]))
+        self.assertEqual(self.store.server_names(['lifetime.school.local', '192.0.2.10'])['names'],
+                         ['lifetime.school.local', '192.0.2.10'])
+        for bad in (['Upper.Case'], ['a.local', 'a.local'], ['bad name'], 'a.local', [f'n{i}.local' for i in range(17)]):
+            with self.subTest(bad=str(bad)[:30]), self.assertRaises(StoreError):
+                self.store.server_names(bad)
+        backup = self.root/'names-backup.sqlite'
+        self.store.backup(backup)
+        self.store.server_names([])
+        self.store.restore(backup)
+        self.assertEqual(self.store.server_names()['names'], ['lifetime.school.local', '192.0.2.10'])
 
     def test_migrate_v6_and_backup_with_commands(self):
         self.online()

@@ -518,6 +518,11 @@ class ServerWindow(QMainWindow):
         self.overview_health.setWordWrap(True)
         self.overview_health.hide()     # only a failure is worth a line here
         layout.insertWidget(1, self.overview_health)     # in the column, under the title, not after the page
+        self.certificate_warning = QLabel()
+        self.certificate_warning.setWordWrap(True)
+        self.certificate_warning.setStyleSheet('color: #FF8A8A; font-weight: 600;')     # the danger colour, re-tinted in light mode
+        self.certificate_warning.hide()     # shown only when a renewal failed
+        layout.insertWidget(1, self.certificate_warning)
         # Cumulative source breakdown stays available under Administration.
         self.overview_usage = QWidget()
         usage_layout = QVBoxLayout(self.overview_usage)
@@ -1213,7 +1218,8 @@ class ServerWindow(QMainWindow):
         self.host_panels = []
         self.host_grid = QGridLayout()
         self.host_grid.setSpacing(16)
-        for heading, keys in (('Server', ('Server name', 'Listening address', 'Uptime', 'Certificate SHA-256')),
+        for heading, keys in (('Server', ('Server name', 'Listening address', 'Uptime', 'Certificate expires',
+                                          'Server key SHA-256', 'Certificate SHA-256')),
                               ('Hardware', ('CPU', 'RAM', 'Operating system')),
                               ('Right now', ('CPU usage', 'Memory used', 'Last seen')),
                               ('Connected computers', ('All devices', 'Connected', 'Pending approval', 'Database size'))):
@@ -1247,11 +1253,14 @@ class ServerWindow(QMainWindow):
                   'CPU usage': None if perf.get('cpu_percent') is None else f"{perf['cpu_percent']:.0f}%",
                   'Memory used': byte_text(perf.get('ram_used_bytes'), missing),
                   'Certificate SHA-256': info.get('certificate_fingerprint') or info.get('fingerprint'),
+                  'Server key SHA-256': info.get('key_fingerprint'),
+                  'Certificate expires': self._certificate_text(info.get('certificate') or {}),
                   'Database size': byte_text(info.get('database_size'), missing),
                   'All devices': counts.get('total'), 'Connected': counts.get('reporting'), 'Pending approval': counts.get('pending')}
-        fingerprint = values['Certificate SHA-256']
-        if fingerprint:     # groups of eight wrap inside the row instead of being cut off
-            values['Certificate SHA-256'] = ' '.join(fingerprint[i:i+8] for i in range(0, len(fingerprint), 8))
+        for key in ('Certificate SHA-256', 'Server key SHA-256'):
+            fingerprint = values[key]
+            if fingerprint:     # groups of eight wrap inside the row instead of being cut off
+                values[key] = ' '.join(fingerprint[i:i+8] for i in range(0, len(fingerprint), 8))
         for key, label in self.host_values.items():
             value = values.get(key)
             label.setText(missing if value is None else str(value))
@@ -1329,6 +1338,20 @@ class ServerWindow(QMainWindow):
         fingerprint_row.addWidget(self.fingerprint, 1)
         fingerprint_row.addWidget(self.button('Copy', lambda: QApplication.clipboard().setText(self.fingerprint.text())))
         form.addRow(self.label('Certificate SHA-256'), fingerprint_row)
+        self.certificate_expiry = QLabel()
+        self.certificate_expiry.setWordWrap(True)
+        self.certificate_expiry.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow(self.label('Certificate expires'), self.certificate_expiry)
+        self.names_edit = QLineEdit()
+        self.names_edit.setMaxLength(2000)
+        names_row = QHBoxLayout()
+        names_row.addWidget(self.names_edit, 1)
+        self.names_button = self.button('Save names', self.save_names)
+        names_row.addWidget(self.names_button)
+        form.addRow(self.label('Other server names and IPs'), names_row)
+        names_note = self.label('Separate them with commas. Lifetime renews the certificate with the same key, so connected computers keep working without a new code.')
+        names_note.setObjectName('muted')
+        form.addRow(names_note)
         self.server_name = QLabel()
         form.addRow(self.label('Server name'), self.server_name)
         self.organisation_edit = QLineEdit()
@@ -2677,6 +2700,15 @@ class ServerWindow(QMainWindow):
         self.local_server.setText(self.t('Local server: {name}', name=info['name']))
         self.server_information.setText(f"{info['host']}:{info['port']} · {info['address']}")
         self.fingerprint.setText(info['fingerprint'])
+        certificate = info.get('certificate') or {}
+        self.certificate_expiry.setText(self._certificate_text(certificate))
+        if not self.names_edit.hasFocus():
+            self.names_edit.setText(', '.join(info.get('server_names') or []))
+        self.names_edit.setAccessibleName(self.t('Other server names and IPs'))
+        failed = certificate.get('warning') == 'renewal-failed'
+        self.certificate_warning.setText(self.t('Lifetime Server could not renew its security certificate. The current one works until {date}. Check the server names under Administration.',
+                                                date=self._date(certificate['expires'])) if failed and certificate.get('expires') else '')
+        self.certificate_warning.setVisible(bool(self.certificate_warning.text()))
         self.server_name.setText(info['name'])
         selections = {}
         for table in (self.invitation_table, self.admin_pending):
@@ -2744,6 +2776,17 @@ class ServerWindow(QMainWindow):
                     table.selectRow(index)
                     break
         self._admin_selection_changed()
+
+    def _certificate_text(self, certificate):
+        """'8 Dec 2027 · renewed automatically' plus the names it covers; None when unknown."""
+        if not certificate.get('expires'):
+            return None
+        names = ', '.join(certificate.get('names') or [])
+        return self.t('{date} · renewed automatically', date=self._date(certificate['expires'])) + (f'\n{names}' if names else '')
+
+    def save_names(self):
+        names = [part.strip() for part in self.names_edit.text().replace(';', ',').split(',') if part.strip()]
+        self._mutate('names', dict(names=names), self.names_button)
 
     def add_device(self):
         if self._issuing_invitation:

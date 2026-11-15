@@ -19,6 +19,9 @@ from lifetime_agent import validate_policy
 MAX_BACKOFF = 300
 PENDING_POLL = 2    # seconds between approval checks, so a new computer is not left waiting for the 30 s report interval
 MAX_INTERVAL = 3600
+REDISCOVER_EVERY = 600      # while the stored address fails, ask local discovery at most this often
+TRUST = ('address', 'certificate_pem', 'fingerprint', 'spki')
+LOST = ('certificate', 'hostname', 'tls', 'name', 'refused', 'timeout', 'dropped', 'network')
 
 
 class ResponseError(ValueError):
@@ -35,6 +38,11 @@ def error_kind(error):
     if isinstance(status, int) and not isinstance(status, bool):
         return f'http-{status}'
     if isinstance(error, ssl.SSLCertVerificationError):
+        code = getattr(error, 'verify_code', None)
+        if code in (9, 10):
+            return 'expired'            # the server's certificate is out of date, or this computer's clock is wrong
+        if code in (62, 64):
+            return 'hostname'           # the address used is not one of the names in the server's certificate
         return 'certificate'            # a different or replaced server identity: never accepted silently
     if isinstance(error, ssl.SSLError):
         return 'tls'
@@ -73,6 +81,30 @@ class SyncClient:
             raise ValueError('Client timeout must be positive and at most 60 seconds')
         self.agent = agent
         self.timeout = timeout
+        self._rediscover_at = 0.0
+
+    def _rediscover(self, bundle):
+        """The stored address stopped working: ask local discovery where the server is now.
+
+        A discovered address is only a hint. It is kept only if a fully verified connection to it
+        presents the pinned key and a certificate that names that address; nothing else is sent."""
+        from lifetime_connection import address
+        from lifetime_discovery import discover
+        candidates = []
+        for server in discover(timeout=2):
+            for value in (server.get('address'), server.get('source') and f"https://{server['source']}:{server['port']}"):
+                try:
+                    value = address(value)
+                except (TypeError, ValueError):
+                    continue
+                if value != bundle['address'] and value not in candidates:
+                    candidates.append(value)
+        for candidate in candidates[:8]:
+            try:
+                return tls.verify_server(dict(bundle, address=candidate), timeout=min(3, self.timeout))
+            except (OSError, ValueError):
+                continue
+        return None
 
     def start_connection(self, code, address, identity, policy):
         from lifetime_connection import bootstrap
@@ -94,7 +126,8 @@ class SyncClient:
         with self.agent.reporting_lock():
             with self.agent._transaction() as state:
                 existing = state['enrollment']
-                resume = (state['phase'] in ('enrolling', 'pending') and state['bundle'] == trust
+                stored = {key: value for key, value in (state['bundle'] or {}).items() if key != 'spki'}
+                resume = (state['phase'] in ('enrolling', 'pending') and stored == trust
                           and existing and existing['identity'] == identity and existing['policy'] == policy)
                 if not resume:
                     self.agent._set_policy(state, policy)
@@ -211,10 +244,12 @@ class SyncClient:
             now = time.time()
             if not force and 0 < state['next_attempt']-now <= MAX_INTERVAL:
                 return self.agent.status()
+            lost = None
             try:
                 power_action = None
                 kind, response, message = self._exchange(state)
                 with self.agent._transaction() as current:
+                    self._keep_trust(current, state['bundle'])
                     current.update(failures=0, next_attempt=now+current['interval'])
                     if kind == 'sync':
                         sent_result = message.get('command_result')
@@ -274,10 +309,14 @@ class SyncClient:
                             current['next_attempt'] = 0
             except (OSError, http.client.HTTPException, ValueError) as error:
                 with self.agent._transaction() as current:
+                    self._keep_trust(current, state['bundle'])
                     current['failures'] = min(current['failures']+1, 20)
                     delay = min(MAX_BACKOFF, 2**(current['failures']-1))
                     current.update(next_attempt=now+delay, status='unreachable',
                                    last_error=error_kind(error), last_error_at=int(now))
+                    if (current['last_error'] in LOST and current['failures'] >= 2
+                            and time.monotonic() >= self._rediscover_at):
+                        lost = dict(current['bundle'])
                     status = getattr(error, 'status', None)
                     if status in (401, 403) and state['phase'] in ('enrolling', 'pending'):
                         current.update(status='invalid-code', phase='disabled', enabled=False,
@@ -292,7 +331,21 @@ class SyncClient:
                         current.update(status='revoked', phase='revoked', enabled=False, credential=None,
                                        enrollment=None)
                         self.agent._set_policy(current, dict(history=False, resources=False))
+            if lost is not None:
+                # Outside the state transaction: discovery and its verified probes take a few seconds.
+                self._rediscover_at = time.monotonic() + REDISCOVER_EVERY
+                found = self._rediscover(lost)
+                if found is not None:
+                    with self.agent._transaction() as current:
+                        self._keep_trust(current, found)
+                        current['next_attempt'] = 0
             # This truncates prior policy snapshots and rotated/retired credentials.
             self.agent._db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
             self.agent.write_status()
             return self.agent.status()
+
+    @staticmethod
+    def _keep_trust(current, bundle):
+        """Persist a key pin, renewed certificate or rediscovered address learned on a verified connection."""
+        if current.get('bundle') and bundle:
+            current['bundle'].update({key: bundle[key] for key in TRUST if key in bundle})

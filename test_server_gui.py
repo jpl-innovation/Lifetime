@@ -131,7 +131,7 @@ class FakeAdmin:
         if operation == 'retain':
             self.retained_before = arguments['before']
             return {'deleted': 1}
-        if operation in ('backup', 'restore', 'refresh', 'send_command', 'wake'):
+        if operation in ('backup', 'restore', 'refresh', 'send_command', 'wake', 'names'):
             return dict(arguments)
         if operation == 'code':
             return dict(code='secret-pairing-code', expires_at='2026-11-07T12:10:00Z', uses=arguments['uses'])
@@ -703,6 +703,28 @@ class ServerGuiTests(unittest.TestCase):
         self.window._render_server_info(result)
         self.assertIn(gui.text('month.1', 'vi'), invitation_table.item(0, 1).text())
         self.assertNotRegex(invitation_table.item(0, 1).text(), r'\d{4}-\d{2}-\d{2}')
+
+    def test_certificate_expiry_names_and_renewal_warning(self):
+        self.load([])
+        result = copy.deepcopy(self.window._admin_result)
+        result['info'].update(certificate=dict(expires='2027-12-08T10:00:00+00:00', names=['127.0.0.1', 'lifetime.school.local'],
+                                               key='a' * 64, warning=None),
+                              key_fingerprint='a' * 64, server_names=['lifetime.school.local'])
+        self.window._render_server_info(result)
+        self.assertIn('8 Dec 2027', self.window.certificate_expiry.text())
+        self.assertIn('lifetime.school.local', self.window.host_values['Certificate expires'].text())
+        self.assertEqual(self.window.names_edit.text(), 'lifetime.school.local')
+        self.assertTrue(self.window.certificate_warning.isHidden())
+        result['info']['certificate']['warning'] = 'renewal-failed'
+        self.window._render_server_info(result)
+        self.assertFalse(self.window.certificate_warning.isHidden())
+        self.assertIn('8 Dec 2027', self.window.certificate_warning.text())
+        self.window.language_button.click()
+        self.assertIn('không thể gia hạn', self.window.certificate_warning.text())
+        self.window.names_edit.setText('a.local, 192.0.2.5; b.local')
+        self.window.names_button.click()
+        self.wait_idle()
+        self.assertEqual(self.arguments('names'), [{'names': ['a.local', '192.0.2.5', 'b.local']}])
 
     def test_no_dummy_controls_or_local_database_access(self):
         self.assertNotIn('lifetime_server_store', gui.__dict__)

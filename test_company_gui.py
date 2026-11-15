@@ -135,6 +135,10 @@ class ConnectTests(unittest.TestCase):
         self.assertIn('firewall', self.page.unreachable.text())
         self.page.completed(0, dict(up, status='unreachable', error='http-503'))
         self.assertIn('503', self.page.unreachable.text())
+        self.page.completed(0, dict(up, status='unreachable', error='expired'))
+        self.assertIn('clock', self.page.unreachable.text())
+        self.page.completed(0, dict(up, status='unreachable', error='hostname'))
+        self.assertIn("server's names", self.page.unreachable.text())
         self.page.completed(0, up)                                 # and it recovers by itself
         self.assertEqual(self.page.connected_title.text(), 'Connected')
         self.assertTrue(self.page.unreachable.isHidden())

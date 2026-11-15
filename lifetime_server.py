@@ -35,6 +35,7 @@ MAX_CONNECTIONS = 32
 HANDSHAKE_TIMEOUT = 5
 HEADER_TIMEOUT = 10
 BODY_TIMEOUT = 10
+CERTIFICATE_CHECK = 3600    # seconds between renewal checks while the server runs
 
 
 def _regular(path, directory=False):
@@ -85,11 +86,27 @@ def _certificate(directory, address):
     # key match and the exact fingerprint using the normal pinned client.
     with cert.open('rb') as source:
         pem = source.read(tls.MAX_CERTIFICATE_BYTES + 1).decode('ascii')
+    return _context(cert, key, address, pem)
+
+
+def _context(cert, key, address, pem):
     bundle = tls.decode_bundle(tls.encode_bundle(address, 'runtime-validation', pem))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
     return context, bundle
+
+
+def _write_new(path, data):
+    """Replace a public runtime file by exclusive creation (never through a link)."""
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                 | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    with os.fdopen(fd, 'wb') as output:
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
 
 
 def _shutdown(connection):
@@ -224,6 +241,7 @@ _ADMIN = {
     'server_info': (None, (), ()),
     'pending_enrollments': ('pending_enrollments', (), ('limit', 'offset')),
     'organisation': ('organisation', (), ('name',)),
+    'names': (None, ('names',), ()),
 }
 
 
@@ -345,10 +363,14 @@ class _Handler(BaseHTTPRequestHandler):
                     runtime._check_backup_path(value['path'])
                 if operation == 'server_info':
                     result = runtime.server_info()
+                elif operation == 'names':
+                    result = runtime.set_names(**value)
                 elif operation == 'invitation':
                     result = runtime._store.create_invitation(runtime.fingerprint, **value)
                 else:
                     result = getattr(runtime._store, method)(**value)
+                    if operation == 'restore':
+                        runtime._renew_certificate()    # the restored names may differ
             elif self.path == '/v1/enroll':
                 result = runtime._store.enroll(value, peer_ip=self.client_address[0])
             elif self.path == '/v1/claim':
@@ -389,7 +411,12 @@ class ServerRuntime:
     ``http://127.0.0.1:<port>``. Properties are available after start only.
     """
     def __init__(self, directory, address='https://localhost:8443', host='0.0.0.0',
-                 port=8443, admin_port=0):
+                 port=8443, admin_port=0, clock=None):
+        self.clock = clock or (lambda: dt.datetime.now(dt.timezone.utc))     # injectable for renewal tests
+        self.certificate = {}
+        self._renew_lock = threading.Lock()
+        self._maintenance = None
+        self._maintenance_stop = threading.Event()
         self.directory = Path(directory).absolute()
         self.address, self._hostname, _ = tls._address(address)
         for number in (port, admin_port):
@@ -426,8 +453,8 @@ class ServerRuntime:
             raise ProtocolError('Invalid backup path')
         path = Path(value).resolve()
         protected = [self.directory / name for name in
-                     ('admin-token', 'server-key.pem', 'server-cert.pem',
-                      'server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm')]
+                     ('admin-token', 'server-key.pem', 'server-cert.pem', 'server-cert.new.pem',
+                      'server-cert.previous.pem', 'server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm')]
         if any(path == item.resolve() or
                (path.exists() and item.exists() and os.path.samefile(path, item))
                for item in protected):
@@ -442,7 +469,6 @@ class ServerRuntime:
                 _protect_directory(self.directory)
                 self._token = _admin_token(self.directory / 'admin-token')
                 context, bundle = _certificate(self.directory, self.address)
-                self.fingerprint = bundle['fingerprint']
                 for name in ('server.sqlite', 'server.sqlite-wal', 'server.sqlite-shm'):
                     path = self.directory / name
                     try:
@@ -453,6 +479,9 @@ class ServerRuntime:
                         _regular(path)
                         tls.protect_private(path)
                 self._store = Store(self.directory / 'server.sqlite')
+                if self._renew_certificate():       # due, or the names changed: same key, new certificate
+                    context, bundle = _certificate(self.directory, self.address)
+                self.fingerprint = bundle['fingerprint']
                 try:
                     from lifetime_ws_server import LiveHub
                     self.hub = LiveHub(self._store)
@@ -474,6 +503,9 @@ class ServerRuntime:
                                               name='Lifetime-listener')
                     thread.start()
                     self._threads.append(thread)
+                self._maintenance_stop.clear()
+                self._maintenance = threading.Thread(target=self._maintain, name='Lifetime-certificate', daemon=True)
+                self._maintenance.start()
                 # Loopback tests never multicast. LAN/VPN installations announce
                 # only public service metadata; failure leaves manual pairing.
                 try:
@@ -526,7 +558,9 @@ class ServerRuntime:
                           database_size=sum(p.stat().st_size for p in (self._store.path, Path(str(self._store.path)+'-wal')) if p.exists()),
                           device_counts=overview['counts'],
                           reporting_interval=self._store.get_configuration()['reporting_interval'],
-                          discovery=self._discovery is not None)
+                          discovery=self._discovery is not None,
+                          certificate=dict(self.certificate), key_fingerprint=self.certificate.get('key'),
+                          server_names=self._store.server_names()['names'])
             result.update(self._store.organisation())
             return result
 
@@ -563,8 +597,68 @@ class ServerRuntime:
             listener.close()
             thread.join()
 
+    def _maintain(self):
+        while not self._maintenance_stop.wait(CERTIFICATE_CHECK):
+            with contextlib.suppress(Exception):
+                self._renew_certificate()
+
+    def _renew_certificate(self):
+        """Issue a new certificate from the same key 30 days before expiry, or when the names changed.
+
+        The new certificate passes the same loopback check as at start (strict TLS, its name) before it
+        replaces the old one, which is kept as server-cert.previous.pem. If anything fails, the current
+        certificate stays in use, the dashboard shows a warning, and the next check tries again.
+        Returns True when a new certificate is in use.
+        """
+        with self._renew_lock:
+            path = self.directory / 'server-cert.pem'
+            with path.open('rb') as source:
+                old = source.read(tls.MAX_CERTIFICATE_BYTES + 1)
+            info = tls.certificate_info(old.decode('ascii'))
+            names = tls.server_names([self._hostname, *self._store.server_names()['names']])
+            now = self.clock()
+            self.certificate.update(expires=info['expires'].isoformat(), names=info['names'], key=info['key'])
+            if info['expires'] - now > tls.RENEW_BEFORE and set(info['names']) == set(names):
+                return False
+            staged = self.directory / 'server-cert.new.pem'
+            try:
+                pem = tls.renew_certificate(self.directory, names, now)
+                _write_new(staged, pem.encode('ascii'))
+                context, bundle = _context(staged, self.directory / 'server-key.pem', self.address, pem)
+                self._validate_certificate(context, bundle)
+                _write_new(self.directory / 'server-cert.previous.pem', old)
+                os.replace(staged, path)
+            except Exception:
+                with contextlib.suppress(OSError):
+                    staged.unlink()
+                self.certificate['warning'] = 'renewal-failed'
+                return False
+            renewed = tls.certificate_info(pem)
+            self.certificate.update(expires=renewed['expires'].isoformat(), names=renewed['names'],
+                                    warning=None, renewed_at=now.isoformat())
+            if self._servers:
+                self._servers[0].context = context      # new handshakes only; open connections finish as they are
+                self.fingerprint = bundle['fingerprint']
+            if self._discovery:
+                from lifetime_discovery import announcement
+                self._discovery.packet = announcement(self._discovery.instance, self._hostname,
+                                                      self._servers[0].server_port, self.fingerprint)
+            return True
+
+    def set_names(self, names):
+        """Extra names and IPs for the certificate (the address name always comes first); renews now."""
+        if not isinstance(names, list) or len(names) > tls.MAX_NAMES:
+            raise ProtocolError('Invalid server names')
+        self._store.server_names(tls.server_names([self._hostname, *names])[1:])
+        self._renew_certificate()
+        return self.server_info()
+
     def stop(self):
         with self._lock:
+            self._maintenance_stop.set()
+            if self._maintenance is not None:
+                self._maintenance.join()
+                self._maintenance = None
             if self.hub is not None:
                 self.hub.stop()
                 self.hub = None

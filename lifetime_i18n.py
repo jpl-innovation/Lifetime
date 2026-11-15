@@ -1616,3 +1616,23 @@ for _key, _text in _HARDWARE_VI.items():
     EN[_key] = _key
     VI[_key] = _text
     SERVER_DASHBOARD_VI[_key] = _text
+
+_TRUST_VI = {
+    'Certificate expires': 'Chứng chỉ hết hạn',
+    'Server key SHA-256': 'SHA-256 khóa máy chủ',
+    '{date} · renewed automatically': '{date} · tự động gia hạn',
+    'Other server names and IPs': 'Tên và IP khác của máy chủ',
+    'Save names': 'Lưu tên',
+    'Separate them with commas. Lifetime renews the certificate with the same key, so connected computers keep working without a new code.':
+        'Phân tách bằng dấu phẩy. Lifetime gia hạn chứng chỉ với cùng một khóa, nên các máy tính đã kết nối vẫn hoạt động mà không cần mã mới.',
+    'Lifetime Server could not renew its security certificate. The current one works until {date}. Check the server names under Administration.':
+        'Lifetime Server không thể gia hạn chứng chỉ bảo mật. Chứng chỉ hiện tại còn dùng được đến {date}. Hãy kiểm tra tên máy chủ trong mục Quản trị.',
+    "The server's security certificate is out of date, or this computer's clock is wrong. Check the date and time, or ask the administrator to check Lifetime Server.":
+        'Chứng chỉ bảo mật của máy chủ đã hết hạn, hoặc đồng hồ của máy tính này bị sai. Hãy kiểm tra ngày giờ, hoặc nhờ quản trị viên kiểm tra Lifetime Server.',
+    "This address is not one of the server's names. Ask the administrator to add it under Administration on Lifetime Server.":
+        'Địa chỉ này không nằm trong các tên của máy chủ. Hãy nhờ quản trị viên thêm địa chỉ này trong mục Quản trị của Lifetime Server.',
+}
+for _key, _text in _TRUST_VI.items():
+    EN[_key] = _key
+    VI[_key] = _text
+    SERVER_DASHBOARD_VI[_key] = _text

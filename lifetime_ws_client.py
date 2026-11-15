@@ -6,8 +6,6 @@ opened (an older server, a proxy, a closed network) the caller keeps using the H
 """
 import contextlib
 import datetime as dt
-import hmac
-import hashlib
 import random
 import ssl
 import subprocess
@@ -18,7 +16,7 @@ from websockets.sync.client import connect
 
 import lifetime_protocol as protocol
 import lifetime_ws as ws
-from lifetime_tls import _address, decode_bundle
+from lifetime_tls import _address, check_peer, decode_bundle
 
 BACKOFF_CAP = 60
 OLD_SERVER_RETRY = 300      # a server that answers 404 does not have the channel; ask again every five minutes
@@ -71,17 +69,17 @@ class LiveLink:
                           additional_headers={'Authorization': 'Bearer ' + state['credential']},
                           open_timeout=5, ping_interval=15, ping_timeout=15, close_timeout=2,
                           max_size=ws.MAX_FRAME, compression=None, proxy=None, user_agent_header=None)
-        return manager, value['fingerprint']
+        return manager, value
 
     def session(self, state, read_state, eligible):
-        """Run one socket until it ends. Returns True if it connected, False if the caller should use HTTPS."""
+        """Run one socket until it ends. Returns True if it connected, False if the caller should use HTTPS.
+
+        A renewed server certificate fails here until the HTTPS sync has learned it; meanwhile HTTPS carries on."""
         with contextlib.ExitStack() as stack:
             try:
-                manager, fingerprint = self._manager(state)
+                manager, trust = self._manager(state)
                 connection = stack.enter_context(manager)
-                actual = hashlib.sha256(connection.socket.getpeercert(binary_form=True)).hexdigest()
-                if not hmac.compare_digest(actual, fingerprint):
-                    raise ssl.SSLCertVerificationError('Server certificate fingerprint mismatch')
+                check_peer(connection.socket.getpeercert(binary_form=True), trust)
             except Exception as error:
                 self._later(error)
                 return False

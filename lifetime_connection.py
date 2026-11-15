@@ -100,22 +100,20 @@ def bootstrap(origin, code, timeout=5):
 
     The first handshake cannot use PKI validation for a private self-signed CA.
     It carries no application data. All subsequent requests use request_json's
-    existing strict CA, hostname, validity, extension and exact SHA-256 checks.
+    existing strict CA, hostname, validity and extension checks and the pin.
+
+    The commitment covers the whole certificate (unchanged since v1, so old and new
+    computers and servers interoperate). The certificate fixes its public key, so the
+    key pin taken from it after the first verified connection is equally authenticated.
+    A certificate renewed after the code was issued no longer matches: the server
+    issues codes against its current certificate, and an older code must be replaced.
     """
     origin, code = parse(code, origin)
     _, host, port = tls._address(origin)
     invitation_id, secret, expected = parts(code)
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 10:
         raise ValueError('Invalid bootstrap timeout')
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((host, port), timeout=timeout) as raw:
-        with context.wrap_socket(raw, server_hostname=host) as secured:
-            der = secured.getpeercert(binary_form=True)
-    if not der or len(der) > tls.MAX_CERTIFICATE_BYTES:
-        raise ValueError('Invalid server certificate')
+    der = tls.peer_certificate(host, port, timeout)
     fingerprint = hashlib.sha256(der).hexdigest()
     if not hmac.compare_digest(commitment(fingerprint, invitation_id, secret), expected):
         raise ssl.SSLCertVerificationError('Connection code does not match this server')

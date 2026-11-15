@@ -173,11 +173,13 @@ def discover(timeout=3, socket_factory=socket.socket):
             received = 0
             while time.monotonic() < deadline and received < 128:
                 try:
-                    packet, _ = sock.recvfrom(MAX_PACKET + 1)
+                    packet, peer = sock.recvfrom(MAX_PACKET + 1)
                 except socket.timeout:
                     continue
                 received += 1
                 for server in parse(packet):
+                    # Where the answer came from: the server's current IP even if its configured name is stale.
+                    server['source'] = peer[0]
                     found[(server['address'], server['instance'])] = server
                     if len(found) >= 32:
                         return list(found.values())

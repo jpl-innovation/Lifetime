@@ -320,19 +320,65 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.runtime._threads, [])
         self.assertIsNone(self.runtime._store)
 
-    def test_wrong_certificate_hostname_fails_start_preserves_identity_and_closes_listeners(self):
+    def test_new_address_at_start_renews_from_the_same_key_and_keeps_the_old_certificate(self):
+        self.runtime.stop()
+        before = (self.root / 'server-cert.pem').read_text()
+        key = (self.root / 'server-key.pem').read_bytes()
+        self.runtime = server.ServerRuntime(self.root, address='https://renamed.example:8443',
+                                            host='127.0.0.1', port=0)
+        self.runtime.start()
+        info = tls.certificate_info((self.root / 'server-cert.pem').read_text())
+        self.assertEqual(info['names'], ['renamed.example'])
+        self.assertEqual(info['key'], tls.certificate_info(before)['key'])
+        self.assertEqual((self.root / 'server-key.pem').read_bytes(), key)
+        self.assertEqual((self.root / 'server-cert.previous.pem').read_text(), before)
+        self.assertFalse((self.root / 'server-cert.new.pem').exists())
+
+    def test_wrong_identity_fails_start_preserves_it_and_closes_listeners(self):
         self.runtime.stop()
         before = (self.root / 'server-cert.pem').read_bytes()
-        self.runtime = server.ServerRuntime(self.root, address='https://wrong.example:8443',
-                                            host='127.0.0.1', port=0)
         started = time.monotonic()
-        with self.assertRaises(ssl.SSLCertVerificationError):
-            self.runtime.start()
+        with patch.object(server.tls, 'renew_certificate', side_effect=ValueError('no')):
+            self.runtime = server.ServerRuntime(self.root, address='https://wrong.example:8443',
+                                                host='127.0.0.1', port=0)
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                self.runtime.start()
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual((self.root / 'server-cert.pem').read_bytes(), before)
         self.assertEqual(self.runtime._servers, [])
         self.assertEqual(self.runtime._threads, [])
         self.assertIsNone(self.runtime._store)
+
+    def test_admin_names_renew_from_the_same_key_and_are_validated(self):
+        before = tls.certificate_info(self.pem)
+        request, credential = self.pair()           # this computer now pins the key
+        info = self.admin.call('names', names=['LOCALHOST', 'lifetime.school.local', '192.0.2.10', 'localhost'])
+        self.assertEqual(info['server_names'], ['localhost', 'lifetime.school.local', '192.0.2.10'])
+        self.assertEqual(set(info['certificate']['names']), {'127.0.0.1', 'localhost', 'lifetime.school.local', '192.0.2.10'})
+        self.assertEqual(info['key_fingerprint'], before['key'])
+        self.assertNotEqual(info['fingerprint'], tls._certificate(self.pem))       # new certificate, same key
+        self.assertIsNone(info['certificate']['warning'])
+        # The paired computer keeps working through the renewed certificate, which it learns.
+        self.assertEqual(self.public('sync', self.message(request), credential)['accepted'], [1])
+        self.assertEqual(self.bundle['certificate_pem'], (self.root / 'server-cert.pem').read_text())
+        for bad in (['bad name'], ['https://x.local'], [f'n{i}.local' for i in range(17)], 'localhost', [None]):
+            with self.subTest(bad=str(bad)[:30]), self.assertRaises(ValueError):
+                self.admin.call('names', names=bad)
+        self.assertEqual(self.admin.call('names', names=[])['server_names'], [])
+        self.assertEqual(self.admin.call('server_info')['certificate']['names'], ['127.0.0.1'])
+
+    def test_failed_renewal_keeps_the_current_certificate_and_warns(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        self.runtime.clock = lambda: now + dt.timedelta(days=370)   # 27 days left: renewal is due ...
+        self.assertFalse(self.runtime._renew_certificate())          # ... but a certificate from the future fails the check
+        self.assertEqual((self.root / 'server-cert.pem').read_text(), self.pem)
+        self.assertFalse((self.root / 'server-cert.new.pem').exists())
+        self.assertEqual(self.admin.call('server_info')['certificate']['warning'], 'renewal-failed')
+        request, credential = self.pair()       # the current certificate is still served
+        self.runtime.clock = lambda: dt.datetime.now(dt.timezone.utc)
+        info = self.admin.call('names', names=['localhost'])            # the next renewal succeeds ...
+        self.assertIsNone(info['certificate']['warning'])               # ... and clears the warning
+        self.assertEqual(self.public('sync', self.message(request), credential)['accepted'], [1])
 
     def test_partially_started_listeners_are_joined_on_start_failure(self):
         self.runtime.stop()

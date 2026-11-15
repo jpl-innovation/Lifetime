@@ -668,6 +668,8 @@ class ConnectPage(QWidget):
 
     REASONS = {
         'certificate': "The server's security certificate has changed. Connect again with a new code from the server.",
+        'expired': "The server's security certificate is out of date, or this computer's clock is wrong. Check the date and time, or ask the administrator to check Lifetime Server.",
+        'hostname': "This address is not one of the server's names. Ask the administrator to add it under Administration on Lifetime Server.",
         'tls': 'The secure connection to the server failed.',
         'name': "The server's name could not be found on this network.",
         'refused': 'The server computer answered, but Lifetime Server is not running on it.',

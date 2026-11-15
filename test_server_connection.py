@@ -201,6 +201,7 @@ class DiscoveryTests(unittest.TestCase):
         with patch.object(discovery.time, 'monotonic', side_effect=[0, .1, .2, 4]):
             found = discovery.discover(socket_factory=lambda *args: sock)
         self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['source'], '127.0.0.1')      # where the answer came from: a rediscovery hint
         sock.sendto.assert_called_once_with(discovery.query(), discovery.GROUP)
         sock.setsockopt.assert_called_with(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
 
@@ -245,6 +246,18 @@ class RealConnectionTests(unittest.TestCase):
         self.agent.sample(110, 'demo-boot', dt.datetime.now(dt.timezone.utc).isoformat())
         self.assertEqual(client.step(force=True)['status'], 'revoked')
         self.assertEqual(len(self.agent.batch()['records']), 1)
+
+    def test_codes_commit_to_the_current_certificate_across_a_renewal(self):
+        import lifetime_tls as tls
+        old = self.admin.call('invitation')
+        self.admin.call('names', names=['localhost'])      # renewed from the same key
+        with self.assertRaises(ssl.SSLCertVerificationError):
+            connection.bootstrap(self.runtime.public_address, old['code'])     # it committed to the old certificate
+        new = self.admin.call('invitation')
+        bundle = tls.decode_bundle(connection.bootstrap(self.runtime.public_address, new['code']))
+        self.assertEqual(bundle['certificate_pem'], (self.root/'server'/'server-cert.pem').read_text())
+        self.assertEqual(tls.spki_pin(ssl.PEM_cert_to_DER_cert(bundle['certificate_pem'])),
+                         self.admin.call('server_info')['key_fingerprint'])
 
     def test_commitment_mismatch_before_http_data_or_enrollment_state(self):
         wrong = connection.issue('0'*64)

@@ -21,7 +21,7 @@ import uuid
 
 from lifetime_protocol import ProtocolError, number, validate_identity, validate_sync, validate_performance
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 APPLICATION_ID = 0x4C544D45
 MAX_BYTES = 1024 * 1024
 MAX_CODES = 1000
@@ -113,6 +113,19 @@ def _policy(value):
 def _identity_columns(device_id, identity):
     return ('\n'.join([device_id, *identity.values()]).casefold(),
             identity.get('department', '').casefold())
+
+
+def _server_names(value):
+    from lifetime_tls import MAX_NAMES, server_names
+    try:
+        if not isinstance(value, list) or len(value) > MAX_NAMES:
+            raise ValueError()
+        names = server_names(value) if value else []
+    except ValueError:
+        raise StoreError('Invalid server names') from None
+    if names != value:
+        raise StoreError('Server names must be unique and in canonical form')
+    return names
 
 
 def _page(limit, position, maximum=2**63 - 1):
@@ -236,6 +249,10 @@ def _migrate(db):
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL, detail TEXT NOT NULL)''')
             db.execute("CREATE UNIQUE INDEX IF NOT EXISTS commands_active ON commands(device_id) WHERE status IN ('pending','delivered')")
             db.execute('PRAGMA user_version=7')
+        if version < 8:
+            if 'server_names' not in {row[1] for row in db.execute('PRAGMA table_info(settings)')}:
+                db.execute("ALTER TABLE settings ADD COLUMN server_names TEXT NOT NULL DEFAULT '[]'")
+            db.execute('PRAGMA user_version=8')
         db.commit()
     except BaseException:
         db.rollback()
@@ -477,6 +494,15 @@ class Store:
             if name is not None:
                 db.execute('UPDATE settings SET organisation=? WHERE singleton=1', (name.strip(),))
             return dict(organisation=db.execute('SELECT organisation FROM settings WHERE singleton=1').fetchone()[0])
+
+    def server_names(self, names=None):
+        """Extra names and IPs for the server certificate (the configured address is always included)."""
+        if names is not None:
+            names = _server_names(names)
+        with self._transaction() as db:
+            if names is not None:
+                db.execute('UPDATE settings SET server_names=? WHERE singleton=1', (_json(names),))
+            return dict(names=json.loads(db.execute('SELECT server_names FROM settings WHERE singleton=1').fetchone()[0]))
 
     def invitations(self, limit=100, offset=0):
         _page(limit, offset)
@@ -1065,6 +1091,7 @@ class Store:
             raise StoreError('Invalid organisation')
         if db.execute('SELECT count(*) FROM settings WHERE singleton=1').fetchone()[0] != 1:
             raise StoreError('Missing retention metadata')
+        _server_names(json.loads(db.execute('SELECT server_names FROM settings WHERE singleton=1').fetchone()[0]))
         boundary = db.execute('SELECT retained_before FROM settings').fetchone()[0]
         if boundary:
             _time(boundary)

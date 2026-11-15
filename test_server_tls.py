@@ -142,6 +142,15 @@ class BundleTests(StdlibCertificateFixture):
             with self.subTest(change=list(change)), self.assertRaises(ValueError):
                 tls.decode_bundle(self.encode_raw(dict(version=1, **(self.bundle() | change))))
 
+    def test_key_pin_must_belong_to_the_stored_certificate(self):
+        key = tls.spki_pin(self.der)
+        self.assertEqual(tls._bundle(self.bundle() | dict(spki=key))['spki'], key)
+        for wrong in ('0'*64, key.upper(), None, 5):
+            with self.subTest(spki=wrong), self.assertRaises(ValueError):
+                tls._bundle(self.bundle() | dict(spki=wrong))
+        with self.assertRaises(ValueError):
+            tls.spki_pin(self.der[:40])
+
     def test_bad_bundle_shapes_versions_and_codes(self):
         cases = [[], {}, dict(version=2, **self.bundle()), dict(version=True, **self.bundle()),
                  dict(version=1.0, **self.bundle()), self.bundle(),
@@ -349,6 +358,25 @@ class CertificateTests(RealTLSFixture):
             self.assertEqual(cert.read_bytes(), b'existing identity')
             self.assertFalse(Path(directory, 'server-key.pem').exists())
 
+    def test_renewal_keeps_the_key_pin_and_lists_every_name(self):
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+        cert = x509.load_pem_x509_certificate(self.dns_identity['certificate_pem'].encode())
+        public = cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        key = tls.spki_pin(ssl.PEM_cert_to_DER_cert(self.dns_identity['certificate_pem']))
+        self.assertEqual(key, hashlib.sha256(public).hexdigest())
+        renewed = tls.renew_certificate(self.root / 'dns', ['localhost', '127.0.0.1', 'lifetime.school.local'])
+        info = tls.certificate_info(renewed)
+        self.assertEqual(info['key'], key)                                     # same key, so the same pin
+        self.assertNotEqual(tls._certificate(renewed), self.dns_identity['fingerprint'])
+        self.assertEqual(info['names'], ['localhost', 'lifetime.school.local', '127.0.0.1'])
+        lifetime = info['expires'] - dt.datetime.now(dt.timezone.utc)
+        self.assertLessEqual(lifetime, dt.timedelta(days=397))
+        self.assertGreater(lifetime, dt.timedelta(days=396))
+        for names in ([], ['bad name'], ['https://x'], [f'n{i}.local' for i in range(18)]):
+            with self.subTest(names=names), self.assertRaises(ValueError):
+                tls.renew_certificate(self.root / 'dns', names)
+
     @unittest.skipIf(sys.platform == 'win32', 'Real POSIX permissions require POSIX')
     def test_generated_key_is_mode_600(self):
         self.assertEqual(Path(self.identity['key_file']).stat().st_mode & 0o777, 0o600)
@@ -478,6 +506,63 @@ class HTTPSIntegrationTests(RealTLSFixture):
                     tls.request_json(self.bundle_for(self.identity, port), '/v1/ingest',
                                      {'code': 'pairing-secret'}, 'device-secret')
                 self.assertEqual(caught.exception.verify_code, 10)  # X509_V_ERR_CERT_HAS_EXPIRED
+                self.assertEqual(requests, [])
+
+    def renewed(self, directory, names=('127.0.0.1',), days_ago=0):
+        """A certificate re-issued from the pinned identity's own key (what the server does on renewal)."""
+        pem = tls.renew_certificate(self.root / 'ip', list(names),
+                                    dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days_ago))
+        path = Path(directory, f"renewed-{'-'.join(names)}-{days_ago}.pem")
+        path.write_text(pem)
+        return dict(cert_file=str(path), key_file=self.identity['key_file'], certificate_pem=pem)
+
+    def test_legacy_pin_migrates_to_the_key_only_after_an_exact_match(self):
+        # Golden case 6: the old full-certificate pin is checked first; the key pin comes from that same certificate.
+        with self.server(self.identity) as (port, requests):
+            bundle = tls.decode_bundle(self.bundle_for(self.identity, port))
+            self.assertNotIn('spki', bundle)
+            tls.request_json(bundle, '/v1/sync', {'n': 1})
+            self.assertEqual(bundle['spki'], tls.spki_pin(ssl.PEM_cert_to_DER_cert(self.identity['certificate_pem'])))
+            self.assertEqual(bundle['certificate_pem'], self.identity['certificate_pem'])
+        # A legacy pin never learns anything, even a certificate from the same key: no trust on first use.
+        with tempfile.TemporaryDirectory() as directory, self.server(self.renewed(directory)) as (port, requests):
+            legacy = tls.decode_bundle(self.bundle_for(self.identity, port))
+            before = dict(legacy)
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                tls.request_json(legacy, '/v1/sync', {'n': 2})
+            self.assertEqual((legacy, requests), (before, []))
+
+    def test_key_pin_learns_a_renewed_certificate_but_never_another_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pinned = dict(tls.decode_bundle(self.bundle_for(self.identity, 1)),
+                          spki=tls.spki_pin(ssl.PEM_cert_to_DER_cert(self.identity['certificate_pem'])))
+            # Golden case 1: renewed with more names, same key -> learned, and the request goes through.
+            renewed = self.renewed(directory, ('127.0.0.1', 'localhost'))
+            with self.server(renewed) as (port, requests):
+                bundle = dict(pinned, address=f'https://localhost:{port}')
+                self.assertEqual(tls.request_json(bundle, '/v1/sync', {'n': 1})['ok'], True)
+                self.assertEqual(bundle['certificate_pem'], renewed['certificate_pem'])
+                self.assertEqual(bundle['spki'], pinned['spki'])
+                self.assertEqual(len(requests), 1)
+            # Golden case 4: the stored certificate expired while the computer was away; the key still matches.
+            expired = self.renewed(directory, days_ago=400)
+            with self.server(self.renewed(directory, ('127.0.0.1',), days_ago=1)) as (port, requests):
+                bundle = dict(pinned, address=f'https://127.0.0.1:{port}', certificate_pem=expired['certificate_pem'],
+                              fingerprint=tls._certificate(expired['certificate_pem']))
+                tls.request_json(bundle, '/v1/sync', {'n': 2})
+                self.assertEqual(len(requests), 1)
+            # Golden case 3: another server (another key) at the same address is refused before any request.
+            with self.server(self.rotated_identity) as (port, requests):
+                bundle = dict(pinned, address=f'https://127.0.0.1:{port}')
+                before = dict(bundle)
+                with self.assertRaisesRegex(ssl.SSLCertVerificationError, 'pinned key'):
+                    tls.request_json(bundle, '/v1/sync', {'code': 'pairing-secret'}, 'device-secret')
+                self.assertEqual((bundle, requests), (before, []))
+            # Same key, but the certificate does not name this address: name checks still apply.
+            with self.server(self.renewed(directory, ('localhost',))) as (port, requests):
+                with self.assertRaises(ssl.SSLCertVerificationError) as caught:
+                    tls.request_json(dict(pinned, address=f'https://127.0.0.1:{port}'), '/v1/sync', {})
+                self.assertIn(caught.exception.verify_code, (62, 64))
                 self.assertEqual(requests, [])
 
     def test_real_redirect_is_not_followed(self):
