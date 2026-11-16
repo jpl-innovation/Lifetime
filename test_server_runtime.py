@@ -602,8 +602,8 @@ class RuntimeTests(unittest.TestCase):
         try:
             for _ in range(server.MAX_CONNECTIONS):
                 sockets.append(socket.create_connection(('127.0.0.1', public.server_port), 3))
-            self.assertTrue(eventually(lambda: self.runtime._slots._value == 0))
-            self.assertEqual(len(public._connections), 32)
+            # The slot is taken a moment before the connection is recorded, so wait for both.
+            self.assertTrue(eventually(lambda: self.runtime._slots._value == 0 and len(public._connections) == 32))
             extra = socket.create_connection(('127.0.0.1', self.admin.port), 3)
             with extra:
                 with contextlib.suppress(ConnectionResetError):
