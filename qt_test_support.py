@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import sys
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import QApplication
 
@@ -33,3 +34,19 @@ def qt_app():
         for name in ('segoeui.ttf', 'segoeuib.ttf', 'seguisb.ttf', 'segoeuii.ttf'):
             QFontDatabase.addApplicationFont(str(root/name))
     return app
+
+
+def dispose(widget):
+    """Close a window or dialog and delete it now, while the application still exists.
+
+    A widget only closed stays alive until Python's exit, which then tears Qt objects down in no particular order
+    and, with background tasks or timers still attached, crashes the process after the tests have passed.
+    """
+    from lifetime_shell import shut_down
+    from PyQt6 import sip
+    if sip.isdeleted(widget):       # already disposed by the test itself
+        return
+    for timer in widget.findChildren(QTimer):
+        timer.stop()
+    widget.close()
+    shut_down(QApplication.instance(), widget)

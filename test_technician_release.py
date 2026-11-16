@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from qt_test_support import qt_app
+from qt_test_support import dispose, qt_app
 import lifetime_i18n as i18n
 import lifetime_reports as reports
 import lifetime_settings as settings
@@ -42,7 +42,7 @@ class ReleaseTechnicianTests(unittest.TestCase):
                 reports.write_pdf(report, output)
                 self.assertIn(b'/FontFile', output.read_bytes())
             finally:
-                window.close()
+                dispose(window)
 
     @classmethod
     def setUpClass(cls):
@@ -111,7 +111,7 @@ class ReleaseTechnicianTests(unittest.TestCase):
             settings.save_settings(choices, directory)
             self.assertEqual(settings.load_settings(directory)['identity']['display_name'], 'Reception')
             self.assertEqual(settings.load_settings(directory)['identity']['asset_tag'], 'PC-014')
-            dialog.close()
+            dispose(dialog)
 
     def test_language_preference_does_not_grant_first_run_consent(self):
         import lifetime_gui as gui
@@ -122,7 +122,7 @@ class ReleaseTechnicianTests(unittest.TestCase):
             self.assertFalse(value['completed'])
             self.assertFalse(value['history'])
             self.assertFalse(value['resources'])
-            dialog.close()
+            dispose(dialog)
 
     def test_dated_hourly_corruption_is_reported_without_rewriting(self):
         with tempfile.TemporaryDirectory() as directory:

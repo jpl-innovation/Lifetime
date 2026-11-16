@@ -8,8 +8,7 @@ from unittest.mock import patch
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from PyQt6.QtCore import QAbstractAnimation
-from PyQt6.QtTest import QTest
-from qt_test_support import qt_app
+from qt_test_support import dispose, qt_app
 from lifetime_health_gui import HealthPage
 from lifetime_i18n import set_language
 from test_health import REPORT, summary
@@ -45,7 +44,7 @@ class HealthPageTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
-        self.page.close(); self.page.deleteLater(); self.app.processEvents()
+        dispose(self.page)
         set_language('en')
 
     def test_off_does_not_submit_and_has_settings_button(self):
@@ -106,9 +105,7 @@ class HealthPageTests(unittest.TestCase):
                     self.assertIn('Crashes in 30 days',contents)
                     self.assertIn('107.4%',contents)
                 finally:
-                    window.close()
-                    for _ in range(30):
-                        self.app.processEvents(); QTest.qWait(5)
+                    dispose(window)
 
 
 if __name__ == '__main__': unittest.main()

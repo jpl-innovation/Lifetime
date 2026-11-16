@@ -17,7 +17,7 @@ import lifetime_reports as report_engine
 import lifetime_settings as settings
 import lifetime_technician as ui
 
-from qt_test_support import qt_app
+from qt_test_support import dispose, qt_app
 APP = qt_app()
 
 
@@ -40,7 +40,7 @@ class TechnicianDialogsTests(unittest.TestCase):
         large = dict(self.ledger, total_seconds=10**18, longest_session_seconds=10**16)
         with patch.object(gui, 'data_dir', return_value=self.directory), patch.object(gui, 'read_ledger', return_value=large):
             window = gui.Window()
-            self.addCleanup(window.close)
+            self.addCleanup(dispose, window)
             window.resize(390, 440)
             window.show()
             APP.processEvents()
@@ -72,7 +72,7 @@ class TechnicianDialogsTests(unittest.TestCase):
         settings.update_settings({'identity': {'display_name': 'Reception PC'}}, self.directory)
         with patch.object(gui, 'data_dir', return_value=self.directory), patch.object(gui, 'read_ledger', return_value=self.ledger):
             window = gui.Window()
-            self.addCleanup(window.close)
+            self.addCleanup(dispose, window)
             window.show()
             APP.processEvents()
             window.navigation.group.button(3).click()
@@ -128,7 +128,7 @@ class TechnicianDialogsTests(unittest.TestCase):
 
     def dialog(self, cls=ui.ExportDialog, language='en'):
         value = cls(directory=self.directory, language=language)
-        self.addCleanup(value.close)
+        self.addCleanup(dispose, value)
         return value
 
     def destination(self, path):
@@ -325,7 +325,7 @@ class TechnicianDialogsTests(unittest.TestCase):
             for caption in dialog.findChildren(QLabel):
                 if caption.buddy():
                     self.assertTrue(caption.buddy().accessibleName())
-            dialog.close()
+            dispose(dialog)
 
 
 if __name__ == '__main__':

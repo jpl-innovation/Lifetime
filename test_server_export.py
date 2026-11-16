@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from qt_test_support import qt_app
+from qt_test_support import dispose, qt_app
 import lifetime_insights as insights
 from lifetime_server_export import ServerExportDialog
 from test_server_reports import device, measured
@@ -36,7 +36,7 @@ class ServerExportTests(unittest.TestCase):
             return [copy.deepcopy(self.source)] if operation == 'devices' else copy.deepcopy(self.source)
         self.client = SimpleNamespace(directory=Path(self.root.name), call=call)
         self.dialog = ServerExportDialog(self.client, ['one'])
-        self.addCleanup(self.dialog.close)
+        self.addCleanup(dispose, self.dialog)
 
     def wait(self):
         deadline = time.monotonic() + 5
@@ -118,7 +118,7 @@ class ServerExportTests(unittest.TestCase):
         self.assertTrue(first[0]['daily'])
         self.assertIn('Observed availability', path.read_text(encoding='utf-8-sig'))
         fleet = ServerExportDialog(self.client, None, groups=['Sales', 'Lab'])
-        self.addCleanup(fleet.close)
+        self.addCleanup(dispose, fleet)
         self.assertEqual(fleet.scope.count(), 3)
         fleet.scope.setCurrentIndex(1)
         self.dialog = fleet
