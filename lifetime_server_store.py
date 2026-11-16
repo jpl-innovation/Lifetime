@@ -1741,6 +1741,8 @@ class Store:
         """The computers with a command waiting to be sent: one read of the active-command index, so the live hub's
         periodic pass does not open a write transaction per connected computer."""
         with self._lock:
+            # The IN (...) repeats the commands_active partial index's own condition so SQLite uses that index;
+            # status='pending' then picks the waiting ones. It is not a leftover.
             return {row[0] for row in self._db.execute(
                 "SELECT device_id FROM commands WHERE status IN ('pending','delivered') AND status='pending'")}
 
@@ -1824,7 +1826,7 @@ class Store:
         return dict(id=row['command_id'], action=row['action'], issued_at=row['created_at'])
 
     def wake(self, device_id):
-        from lifetime_wol import send_magic_packet
+        from lifetime_wol import local_broadcasts, send_magic_packet
         with self._transaction() as db:
             row = self._device_row(db, device_id)
             if row['status'] != 'approved' or not json.loads(row['policy']).get('control') or self._online(db, row):
@@ -1833,7 +1835,12 @@ class Store:
             macs = readings.get('specs', {}).get('mac_addresses', [])
             if not macs:
                 raise StoreError('No MAC addresses are available')
-            for mac in macs:
-                send_magic_packet(mac)
+        # Sent after the transaction: finding the broadcast addresses starts PowerShell on Windows and each
+        # packet is network I/O. Inside the transaction every other request waited behind them on the store lock.
+        broadcasts = local_broadcasts()
+        for mac in macs:
+            send_magic_packet(mac, broadcasts=broadcasts)
+        with self._transaction() as db:
+            self._device_row(db, device_id)      # still there
             self._event(db, device_id, 'wake')
-            return dict(device_id=device_id, sent=len(macs))
+        return dict(device_id=device_id, sent=len(macs))

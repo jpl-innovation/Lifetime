@@ -1235,12 +1235,26 @@ class SpecsControlTests(unittest.TestCase):
     def test_wake_only_offline_with_consent_and_macs(self):
         self.online()
         self.sync(readings=dict(observed_at=STAMP, specs=dict(mac_addresses=['AA:BB:CC:DD:EE:FF'])))
-        with patch('lifetime_wol.send_magic_packet') as send:
+        free = []
+
+        def sending(*_, **__):
+            # Bug B1: the packets (and a PowerShell start on Windows) went out inside the transaction, under the
+            # store lock, so every other request waited. Another thread must be able to take the lock meanwhile.
+            self.assertFalse(self.store._db.in_transaction)
+            thread = threading.Thread(target=lambda: free.append(self.store._lock.acquire(timeout=2) and (self.store._lock.release() or True)))
+            thread.start()
+            thread.join()
+            return ['192.0.2.255']
+        with patch('lifetime_wol.send_magic_packet', side_effect=sending) as send, \
+                patch('lifetime_wol.local_broadcasts', side_effect=sending) as broadcasts:
             with self.assertRaises(StoreError):
                 self.store.wake(self.device)
             with patch.object(storage, '_now', return_value=NOW+dt.timedelta(minutes=11)):
                 self.assertEqual(self.store.wake(self.device)['sent'], 1)
-            send.assert_called_once_with('AA:BB:CC:DD:EE:FF')
+            send.assert_called_once_with('AA:BB:CC:DD:EE:FF', broadcasts=['192.0.2.255'])
+            broadcasts.assert_called_once_with()         # looked up once, not once per address
+        self.assertEqual(free, [True, True])
+        self.assertEqual(self.store._db.execute("SELECT count(*) FROM events WHERE kind='wake'").fetchone()[0], 1)
 
 
 if __name__ == '__main__':

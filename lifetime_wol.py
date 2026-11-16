@@ -34,7 +34,7 @@ def local_broadcasts():
     return sorted(result)
 
 
-def send_magic_packet(mac, sock_factory=socket.socket):
+def send_magic_packet(mac, sock_factory=socket.socket, broadcasts=None):
     if not isinstance(mac, str) or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}', mac):
         raise ValueError('Invalid MAC address')
     packet = b'\xff' * 6 + bytes.fromhex(mac.replace(':', '')) * 16
@@ -42,7 +42,7 @@ def send_magic_packet(mac, sock_factory=socket.socket):
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(2)
-        for broadcast in local_broadcasts():
+        for broadcast in (local_broadcasts() if broadcasts is None else broadcasts):
             sock.sendto(packet, (broadcast, 9))
     finally:
         sock.close()
