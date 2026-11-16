@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import tempfile
 import threading
@@ -90,7 +91,9 @@ def valid_principal(sid):
     """A Windows SID, or on Linux ``unix:uid:N`` / ``unix:gid:N``."""
     if not isinstance(sid, str):
         return False
-    if sid.startswith('S-1-'):
+    # The whole string, not its start: a SID is written into the admin pipe's security descriptor, where
+    # 'S-1-1-0)(A;;FA;;;WD' from a crafted backup would add an entry of its own.
+    if re.fullmatch(r'S-1-[0-9]{1,15}(-[0-9]{1,10}){1,15}', sid):
         return True
     for prefix in (UNIX_USER, UNIX_GROUP):
         if sid.startswith(prefix) and sid[len(prefix):].isdigit() and len(sid) <= 32:
@@ -223,7 +226,7 @@ class Access:
     def pipe_descriptor(self, server_sid):
         """SDDL for the admin pipe: no network logons; full control for SYSTEM, Administrators and the server's own
         account; read/write (never create-instance) for each assigned account or group."""
-        grants = ''.join(f'(A;;0x12019b;;;{row["sid"]})' for row in self.roles())
+        grants = ''.join(f'(A;;0x12019b;;;{row["sid"]})' for row in self.roles() if valid_principal(row['sid']))
         own = f'(A;;FA;;;{server_sid})' if server_sid not in (SYSTEM, ADMINISTRATORS) else ''
         return f'D:P(D;;FA;;;NU)(A;;FA;;;SY)(A;;FA;;;BA){own}{grants}'
 
@@ -319,7 +322,7 @@ class Access:
                         or db.execute('PRAGMA integrity_check').fetchall()[0][0] != 'ok'):
                     raise AccessError('Invalid access database')
                 for row in db.execute('SELECT * FROM roles'):
-                    if row['role'] not in ROLES or not valid_principal(row['sid']):
+                    if row['role'] not in ROLES or row['kind'] not in ('user', 'group') or not valid_principal(row['sid']):
                         raise AccessError('Invalid role assignment')
                 return Access._verify(db)
         except (sqlite3.Error, KeyError, TypeError, json.JSONDecodeError) as error:

@@ -353,6 +353,28 @@ class AccessTests(unittest.TestCase):
 
     # ---- backup and restore (item 5) ----
 
+    def test_a_role_whose_sid_carries_extra_descriptor_text_is_refused_everywhere(self):
+        """Audit L7: 'S-1-1-0)(A;;FA;;;WD' began with S-1- and was written into the admin pipe's access list."""
+        import sqlite3
+        crafted = 'S-1-1-0)(A;;FA;;;WD'
+        for sid in ('S-1-5-18', DOMAIN + '1001', 'S-1-5-32-544', 'unix:uid:1000'):
+            self.assertTrue(access.valid_principal(sid), sid)
+        for sid in (crafted, 'S-1-', 'S-1-5', 'S-1-5-x', 'S-1-5-21 ', 'S-1-5-21\n', 's-1-5-18', None):
+            self.assertFalse(access.valid_principal(sid), sid)
+        with self.assertRaises(access.AccessError):
+            self.runtime.access.set_role(crafted, 'x', 'user', 'viewer', 'test')
+        copy = self.root / 'access-copy.sqlite'
+        self.runtime.access.backup(copy)
+        self.assertTrue(access.Access.validate(copy)['ok'])
+        with contextlib.closing(sqlite3.connect(copy)) as db, db:      # what a crafted backup archive would carry
+            db.execute("INSERT INTO roles VALUES (?,'x','user','viewer','x','2026-01-01T00:00:00+00:00')", (crafted,))
+        with self.assertRaises(access.AccessError):
+            access.Access.validate(copy)
+        # Even a row already in the live database never reaches the descriptor.
+        with self.runtime.access._transaction() as db:
+            db.execute("INSERT INTO roles VALUES (?,'x','user','viewer','x','2026-01-01T00:00:00+00:00')", (crafted,))
+        self.assertNotIn('WD', self.runtime.access.pipe_descriptor('S-1-5-18'))
+
     def test_archive_backup_verify_and_restore_into_a_stopped_server(self):
         request, credential = self.pair()
         self.public('sync', self.message(request), credential)
