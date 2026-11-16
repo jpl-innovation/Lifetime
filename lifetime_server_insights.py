@@ -7,8 +7,9 @@ Estimated figures always say so; a computer that does not share its awake histor
 import math
 
 from PyQt6.QtCore import QTime, Qt
-from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QHeaderView, 
                              QLineEdit, QSizePolicy, QTableWidget, QTableWidgetItem, QTimeEdit, QWidget)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 import lifetime_insights as insights
 from lifetime_charts import Plot

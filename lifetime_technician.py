@@ -6,9 +6,10 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog,
-                            QFormLayout, QGridLayout, QLabel, QLineEdit,
+                            QFormLayout, QGridLayout, QLineEdit,
                             QMessageBox, QPushButton, QScrollArea, QTextBrowser,
                             QSizePolicy, QVBoxLayout, QWidget)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 from lifetime_i18n import TABLES
 from lifetime_settings import read_settings, update_settings

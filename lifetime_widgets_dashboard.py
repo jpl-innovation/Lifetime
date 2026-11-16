@@ -9,11 +9,12 @@ docs/design/dashboard-research.md); no code, assets or names were taken from the
 """
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
-from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QToolTip,
+from PyQt6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QPushButton, QSizePolicy, QToolTip,
                              QVBoxLayout, QWidget)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 from lifetime_health import health_score  # the one score, shared with the server (re-exported)
-from lifetime_theme import PANEL_RADIUS, active_theme, tokens
+from lifetime_theme import PANEL_RADIUS, active_theme, tokens, plain_tip
 
 KINDS = ('good', 'warning', 'danger', 'info', 'neutral')
 _TOKEN = {'good': 'good', 'warning': 'accent', 'danger': 'danger', 'info': 'info', 'neutral': 'muted'}
@@ -275,7 +276,7 @@ class HeartbeatBar(QWidget):
         slot = min(range(len(rects)), key=lambda i: abs(rects[i].center().x() - x))
         size = len(self.ticks) / len(rects)
         group = self.ticks[int(slot * size):max(int(slot * size) + 1, int((slot + 1) * size))]
-        QToolTip.showText(event.globalPosition().toPoint(), '\n'.join(tip for _, tip in group[-4:]), self)
+        QToolTip.showText(event.globalPosition().toPoint(), plain_tip('\n'.join(tip for _, tip in group[-4:])), self)
 
 
 def interval_ticks(intervals, start, end, slots):

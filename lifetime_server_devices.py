@@ -3,9 +3,10 @@ import math
 
 from PyQt6.QtCore import Qt, QEvent, QPointF, QPropertyAnimation, QEasingCurve, QRectF, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QShortcut
-from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayout,
+from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QVBoxLayout,
                             QHBoxLayout, QPushButton, QProgressBar, QStyle, QStyledItemDelegate,
                             QStyleOptionViewItem, QGraphicsOpacityEffect)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 from lifetime_server_widgets import reduced_motion, more_icon
 from lifetime_theme import CONTROL_RADIUS, SOFT_RADIUS, T, active_theme

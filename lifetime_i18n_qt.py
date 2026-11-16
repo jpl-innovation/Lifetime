@@ -1,6 +1,6 @@
 """Qt text bindings. Keep source keys so open widgets relabel without rebuilding."""
 from PyQt6 import QtWidgets
-from PyQt6.QtCore import QTranslator
+from PyQt6.QtCore import Qt, QTranslator
 from lifetime_i18n import EN, Text, tr, on_language_change
 
 
@@ -27,6 +27,17 @@ def native_translator():
         app._lifetime_translator = NativeTranslator(app)
         app.installTranslator(app._lifetime_translator)
         on_language_change(app._lifetime_translator.retranslate)
+
+
+class PlainLabel(QtWidgets.QLabel):
+    """The label both apps use. Text is plain unless a label asks for RichText and escapes what it shows.
+
+    A stock QLabel guesses: text that looks like HTML is rendered as HTML, so a computer named
+    <img src="//host/x.png"> made the administrator's console fetch that file.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setTextFormat(Qt.TextFormat.PlainText)
 
 
 class Localized:
@@ -60,4 +71,4 @@ for _method in ('setText', 'setWindowTitle', 'setToolTip', 'setAccessibleName', 
 # These are ordinary PyQt6 widgets with a small, shared text-binding mixin.
 for _name in ('QLabel', 'QPushButton', 'QCheckBox', 'QRadioButton', 'QWidget',
               'QFrame', 'QDialog', 'QDoubleSpinBox', 'QTableWidget'):
-    globals()[_name] = type(_name, (Localized, getattr(QtWidgets, _name)), {'__module__': __name__})
+    globals()[_name] = type(_name, (Localized, PlainLabel if _name == 'QLabel' else getattr(QtWidgets, _name)), {'__module__': __name__})

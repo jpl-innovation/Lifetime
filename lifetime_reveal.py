@@ -5,7 +5,8 @@ import os
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPointF, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QFontMetricsF, QPainter, QPalette
-from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel, QWidget
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QWidget
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 ROLL_DELAY = 160    # ms: numbers start rolling just after the entrance does
 

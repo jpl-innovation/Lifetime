@@ -8,8 +8,9 @@ so Glass/Classic, light/dark and English/Vietnamese follow the window.
 import sys
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLineEdit,
                              QTableWidget, QTableWidgetItem, QWidget)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 import lifetime_access as access
 

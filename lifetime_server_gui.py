@@ -15,10 +15,11 @@ from PyQt6.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt6 import sip
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
                             QFileDialog, QFormLayout, QGridLayout, QFrame,
-                            QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+                            QHBoxLayout, QLineEdit, QMainWindow,
                             QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QHeaderView,
                             QSizePolicy, QSpinBox, QMenu, QTableWidget,
                             QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 from lifetime_admin import AdminClient
 from lifetime_server_access_ui import AccessUI

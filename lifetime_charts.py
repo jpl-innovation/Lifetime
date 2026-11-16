@@ -13,7 +13,7 @@ import time
 
 from PyQt6.QtCore import Qt, QRectF, QPointF, QTimer, QVariantAnimation, QEasingCurve, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QFontMetrics
-from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
+from PyQt6.QtWidgets import (QWidget, QFrame, QPushButton, QVBoxLayout,
                             QHBoxLayout, QGridLayout, QButtonGroup, QScrollArea,
                             QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget

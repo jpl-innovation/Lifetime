@@ -10,7 +10,7 @@ import tempfile
 import time
 from PyQt6.QtCore import Qt, QTimer, QPointF, QPropertyAnimation, QRectF, QParallelAnimationGroup, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen
-from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QLineEdit, QPushButton,
+from PyQt6.QtWidgets import (QWidget, QFrame, QLineEdit, QPushButton,
                             QCheckBox, QVBoxLayout, QHBoxLayout, QMessageBox,
                             QGraphicsOpacityEffect)
 from lifetime_tasks import Tasks

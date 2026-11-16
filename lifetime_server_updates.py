@@ -3,7 +3,8 @@ choose the share of computers it is offered to, pause, roll back, and see what c
 so it shares its loading, saving and translations; Glass/Classic and light/dark follow the window.
 """
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFileDialog, QLabel, QLineEdit, QSpinBox, QTableWidgetItem
+from PyQt6.QtWidgets import QFileDialog, QLineEdit, QSpinBox, QTableWidgetItem
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 from lifetime_layout import ControlRow
 from lifetime_widgets_dashboard import VISUAL_ROLE

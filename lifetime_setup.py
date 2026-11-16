@@ -6,7 +6,7 @@ import sys
 from lifetime_i18n import tr, language, set_language, on_language_change
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel,
+from PyQt6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, 
                             QMessageBox, QPushButton, QScrollArea, QSizePolicy,
                             QStackedWidget, QVBoxLayout, QWidget, QFrame)
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, QFrame

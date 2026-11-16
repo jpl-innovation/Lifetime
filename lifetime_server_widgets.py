@@ -5,8 +5,9 @@ import sys
 
 from PyQt6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
+from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QHBoxLayout, QLineEdit,
                             QPushButton, QVBoxLayout, QWidget)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 from lifetime_theme import install, T
 from lifetime_reveal import Intro, phase

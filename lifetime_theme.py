@@ -244,6 +244,28 @@ def server_surfaces():
     return f"QWidget#panel, QScrollArea#detailScroll {{ border-radius: {SOFT_RADIUS}px; }}"
 
 
+def plain_tip(text):
+    """Qt renders a tooltip that looks like HTML as HTML. Names and reasons from other computers are text."""
+    import html
+    text = str(text)
+    return '<p style="white-space:pre-wrap">' + html.escape(text) + '</p>' if '<' in text else text
+
+
+def _tip_at(widget, position):
+    """The tooltip Qt is about to show for this widget: its own, or the cell, menu entry or tab under the pointer."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QAbstractItemView, QMenu, QTabBar
+    if isinstance(widget, QMenu):
+        action = widget.actionAt(position)
+        return action.toolTip() if action else ''
+    if isinstance(widget, QTabBar):
+        return widget.tabToolTip(widget.tabAt(position))
+    view = widget.parent()
+    if isinstance(view, QAbstractItemView) and view.viewport() is widget:
+        return str(view.indexAt(position).data(Qt.ItemDataRole.ToolTipRole) or '')
+    return widget.toolTip()
+
+
 def configure_high_dpi():
     """Keep physical screen scale intact, identically in the two entry points."""
     from PyQt6.QtCore import Qt
@@ -259,7 +281,7 @@ def install():
     """
     from PyQt6.QtCore import QObject, QEvent, Qt, QPointF, QRectF, QVariantAnimation, QEasingCurve
     from PyQt6.QtGui import QPainter, QColor, QPolygonF, QPen
-    from PyQt6.QtWidgets import (QApplication, QWidget, QMenu, QAbstractScrollArea, QCheckBox,
+    from PyQt6.QtWidgets import (QApplication, QWidget, QMenu, QAbstractScrollArea, QCheckBox, QLabel, QToolTip,
                                 QComboBox, QAbstractSpinBox, QDateTimeEdit, QHeaderView, QToolButton,
                                 QStyle, QStyleOptionComboBox, QStyleOptionSpinBox, QStyleOptionButton)
     app = QApplication.instance()
@@ -428,11 +450,19 @@ def install():
                              QEvent.Type.FocusOut, QEvent.Type.Enter, QEvent.Type.Leave, QEvent.Type.EnabledChange,
                              QEvent.Type.Polish, QEvent.Type.KeyPress, QEvent.Type.MouseButtonPress,
                              QEvent.Type.MouseButtonRelease, QEvent.Type.StyleChange, QEvent.Type.LayoutDirectionChange,
-                             QEvent.Type.FontChange, QEvent.Type.LayoutRequest))
+                             QEvent.Type.FontChange, QEvent.Type.LayoutRequest, QEvent.Type.ToolTip))
 
         def eventFilter(self, widget, event):
             kind = event.type()
             if kind not in self.WATCHED or not isinstance(widget, QWidget):
+                return False
+            if kind == QEvent.Type.ToolTip:
+                # No tooltip in either app is written as HTML, so one that looks like HTML is somebody
+                # else's text (a computer name, a group, a reason). Show its characters, never its markup.
+                tip = _tip_at(widget, event.pos())
+                if '<' in tip:
+                    QToolTip.showText(event.globalPos(), plain_tip(tip), widget)
+                    return True
                 return False
             checkbox = isinstance(widget, QCheckBox)
             if kind == QEvent.Type.Paint and not checkbox and not widget.isWindow():
@@ -479,6 +509,10 @@ def install():
                     arrows.raise_()
                     arrows.update()
             if kind == QEvent.Type.Polish:
+                if isinstance(widget, QLabel) and widget.textFormat() == Qt.TextFormat.AutoText:
+                    # Backstop for labels Qt builds itself (message boxes, input dialogs): AutoText would
+                    # render a name such as <img src=...> as HTML. The apps' own labels are PlainLabel.
+                    widget.setTextFormat(Qt.TextFormat.PlainText)
                 if checkbox and not hasattr(widget, '_lifetime_switch'):
                     widget.setAttribute(Qt.WidgetAttribute.WA_Hover)
                     widget._lifetime_switch = SwitchOverlay(widget)

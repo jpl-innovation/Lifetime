@@ -14,7 +14,7 @@ import platform
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, QRectF, QVariantAnimation, QEasingCurve, QPointF, QProcess
 from PyQt6.QtGui import QColor, QIcon, QPalette, QPainter, QPen, QFont, QShortcut, QKeySequence, QFontMetrics
 from PyQt6.QtWidgets import (QApplication, QAbstractSpinBox, QDoubleSpinBox,
-                            QGraphicsOpacityEffect, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
+                            QGraphicsOpacityEffect, QFrame, QGridLayout, QHBoxLayout, QMessageBox,
                             QPushButton, QButtonGroup, QToolTip, QScrollArea, QVBoxLayout, QWidget)
 from PyQt6.QtWidgets import QSizePolicy
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QDoubleSpinBox
@@ -35,7 +35,7 @@ from lifetime_widgets_dashboard import CapacityBar, StatusChip, Icon as Glyph
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase, progress, warm_pages
 from lifetime_tasks import Tasks
 
-from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all
+from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all, plain_tip
 ENTRANCE_MS = 1700
 REDUCE_MOTION = os.environ.get('LIFETIME_REDUCE_MOTION') == '1'
 
@@ -449,7 +449,7 @@ class BarChart(QWidget):
         if self.values and rect.contains(event.position()):
             index = min(len(self.values)-1, int((event.position().x()-rect.left())/rect.width()*len(self.values)))
             key = self.keys[index] if self.hourly else date_text(self.keys[index])
-            QToolTip.showText(event.globalPosition().toPoint(), f'{key} · {hours_minutes(self.values[index])}', self)
+            QToolTip.showText(event.globalPosition().toPoint(), plain_tip(f'{key} · {hours_minutes(self.values[index])}'), self)
         else:
             QToolTip.hideText()
 

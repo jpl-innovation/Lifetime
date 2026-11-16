@@ -9,8 +9,9 @@ import html
 
 from PyQt6.QtCore import QDateTime, QTime, Qt
 from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QHBoxLayout,
-                             QHeaderView, QLabel, QLineEdit, QPushButton, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem,
+                             QHeaderView, QLineEdit, QPushButton, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem,
                              QTimeEdit, QVBoxLayout, QWidget)
+from lifetime_i18n_qt import PlainLabel as QLabel
 
 from lifetime_layout import ControlRow
 from lifetime_server_checks import ChecksUI
