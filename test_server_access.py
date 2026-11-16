@@ -160,6 +160,37 @@ class AccessTests(unittest.TestCase):
             refused.stop()
 
     @unittest.skipUnless(WINDOWS, 'Windows named pipe')
+    def test_refresh_applies_the_current_access_list_to_the_running_pipe(self):
+        """Windows keeps one access list per pipe, from its first instance: the descriptor given to a later instance is
+        ignored. A role granted after the server started therefore never reached the pipe until the next start."""
+        import lifetime_pipe
+        name = lifetime_pipe.PREFIX + 'test-' + uuid.uuid4().hex
+        pipe = lifetime_pipe.PipeServer(name, lambda identity, raw: b'{}', lambda: 'D:P(A;;FA;;;SY)(A;;FA;;;BA)').start()
+        try:
+            applied, real = [], lifetime_pipe._adv.SetKernelObjectSecurity
+
+            def record(handle, flags, descriptor):
+                applied.append((handle, flags))
+                return real(handle, flags, descriptor)
+            listening = pipe._listening
+            with patch.object(lifetime_pipe._adv, 'SetKernelObjectSecurity', side_effect=record):
+                self.assertTrue(pipe.refresh())
+            self.assertEqual(applied, [(listening, lifetime_pipe.DACL_PROTECTED)])
+        finally:
+            pipe.stop()
+
+    @unittest.skipUnless(WINDOWS, 'Windows named pipe')
+    def test_giving_or_removing_a_role_renews_the_pipe_access_list_at_once(self):
+        from unittest.mock import Mock
+        pipe = Mock()
+        with patch.object(self.runtime, '_pipe', pipe, create=True), \
+                patch('lifetime_pipe.lookup_account', return_value=(DOMAIN + '78', 'LAB\\help', 'user')):
+            self.runtime.set_role(person('admin', 1), 'LAB\\help', 'viewer')
+            self.assertEqual(pipe.refresh.call_count, 1)
+            self.runtime.delete_role(DOMAIN + '78')
+            self.assertEqual(pipe.refresh.call_count, 2)
+
+    @unittest.skipUnless(WINDOWS, 'Windows named pipe')
     def test_pipe_large_reply_after_a_slow_operation_and_concurrent_clients(self):
         import threading
         import time

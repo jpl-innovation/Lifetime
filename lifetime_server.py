@@ -819,12 +819,23 @@ class ServerRuntime:
         previous = self.access.set_role(sid, name, kind, role, identity.get('name') or 'unknown')
         if previous in ('admin', 'operator') and role not in ('admin', 'operator'):
             self._store.cancel_power_commands()
+        self._refresh_pipe()
         return self.access.roles()
 
     def delete_role(self, sid):
         if self.access.delete_role(sid) in ('admin', 'operator'):
             self._store.cancel_power_commands()
+        self._refresh_pipe()
         return self.access.roles()
+
+    def _refresh_pipe(self):
+        """The pipe's access list names the accounts that hold a role: renew it now, not at the next server start."""
+        refresh = getattr(getattr(self, '_pipe', None), 'refresh', None)
+        if refresh is not None:
+            try:
+                refresh()
+            except OSError:
+                pass
 
     def _pipe_request(self, identity, raw, channel='pipe'):
         """A request on the Windows pipe (or the Linux socket): {operation, arguments} -> {status, result}. The identity
