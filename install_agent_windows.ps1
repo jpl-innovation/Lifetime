@@ -155,7 +155,10 @@ try {
         }
     }
     if (Test-Path -LiteralPath $InstallDirectory -PathType Container) {
-        if ((Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1) -and -not (Test-Path -LiteralPath (Join-Path $InstallDirectory 'lifetime_agent.py') -PathType Leaf)) { Stop-Install 2 'The existing nonempty install directory is not a Lifetime Agent installation.' }
+        # A Source install holds lifetime_agent.py, a Packaged install only LifetimeAgent.exe. Both are ours, otherwise
+        # connecting again over a Packaged agent (the desktop's Finish passes -Reinstall) stopped here with exit 2.
+        $ours = (Test-Path -LiteralPath (Join-Path $InstallDirectory 'lifetime_agent.py') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $InstallDirectory 'LifetimeAgent.exe') -PathType Leaf)
+        if ((Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1) -and -not $ours) { Stop-Install 2 'The existing nonempty install directory is not a Lifetime Agent installation.' }
     }
     if (Test-Path -LiteralPath $DataDirectory -PathType Container) {
         if ((Get-ChildItem -LiteralPath $DataDirectory -Force | Select-Object -First 1) -and -not (Test-Path -LiteralPath (Join-Path $DataDirectory 'machine.sqlite') -PathType Leaf)) { Stop-Install 2 'The nonempty data directory must contain an existing Lifetime machine database.' }

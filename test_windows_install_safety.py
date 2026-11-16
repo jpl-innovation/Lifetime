@@ -168,6 +168,15 @@ class InstallerScriptTests(unittest.TestCase):
         self.assertIn('$_.ExecutablePath -eq $executable', uninstall)
         self.assertLess(uninstall.index('Stop-Process'), uninstall.index('Unregister-ScheduledTask'))
 
+    def test_a_packaged_agent_folder_counts_as_an_agent_installation_so_connecting_again_can_replace_it(self):
+        """A Packaged install holds LifetimeAgent.exe and no lifetime_agent.py. The desktop's Finish passes -Reinstall,
+        and the ownership check used to refuse that folder: 'not a Lifetime Agent installation' (exit 2)."""
+        install = (PROJECT / 'install_agent_windows.ps1').read_text(encoding='utf-8')
+        check = install[install.index('$ours ='):install.index("'The existing nonempty install directory is not a Lifetime Agent installation.'")]
+        self.assertIn("'lifetime_agent.py'", check)
+        self.assertIn("'LifetimeAgent.exe'", check)
+        self.assertIn('-not $ours', check)
+
     @WINDOWS
     def test_the_link_check_refuses_a_junction_and_a_file_link_and_accepts_real_and_missing_paths(self):
         function = re.search(r'function Assert-NotLinked.*?\n}\r?\n', self.text, re.S).group(0)
