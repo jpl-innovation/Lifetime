@@ -599,6 +599,18 @@ class StoreTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(StoreError):
                 self.store.add_group(bad)
 
+    def test_renaming_a_group_onto_another_groups_name_is_refused_not_merged(self):
+        self.store.add_group('Lab A')
+        self.store.add_group('Sales')
+        request, _credential = self.pair()
+        self.store.update_identity(request['device_id'], {'display_name': 'PC 1', 'department': 'Office'})
+        for taken in (' sales ', 'SALES', 'office'):        # a created group, or one only a computer is in
+            with self.subTest(taken=taken), self.assertRaises(ConflictError) as caught:
+                self.store.rename_group('Lab A', taken)
+            self.assertEqual(caught.exception.refusal, 'group-exists')
+        self.assertEqual([g['name'] for g in self.store.list_groups()], ['Lab A', 'Office', 'Sales'])
+        self.assertEqual([g['name'] for g in self.store.rename_group('Lab A', 'LAB A')], ['LAB A', 'Office', 'Sales'])
+
     def test_created_groups_survive_backup_and_restore_and_are_capped(self):
         self.store.add_group('Lab A')
         backup = self.root / 'groups.sqlite'

@@ -356,8 +356,13 @@ class GroupsDialog(QDialog):
         name, ok = QInputDialog.getText(self, self.t('Rename group'),
                                         self.t('New name for {name}. Its computers and settings move with it.', name=chosen['name']),
                                         text=chosen['name'])
-        if ok and name.strip() and name.strip() != chosen['name']:
-            self._call('rename_group', dict(group=chosen['name'], new_name=name.strip()))
+        name = name.strip()
+        if not ok or not name or name == chosen['name']:
+            return
+        if name.casefold() != chosen['name'].casefold() and any(name.casefold() == g['name'].casefold() for g in self.groups):
+            self.message.setText(self.t('A group with that name already exists.'))      # the server refuses it too
+            return
+        self._call('rename_group', dict(group=chosen['name'], new_name=name))
 
     def _remove(self):
         chosen = self.selected()

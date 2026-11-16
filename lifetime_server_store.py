@@ -1063,6 +1063,11 @@ class Store:
         group's monitoring settings too)."""
         group, new_name = self._group_name(group), self._group_name(new_name)
         with self._transaction() as db:
+            if new_name.casefold() != group.casefold():     # onto another group's name would merge the two
+                taken = {row[0].casefold() for row in db.execute('SELECT name FROM named_groups')}
+                taken |= {json.loads(row[0]).get('department', '').casefold() for row in db.execute('SELECT identity FROM devices')}
+                if new_name.casefold() in taken:
+                    raise ConflictError('A group with that name already exists', 'group-exists')
             if db.execute('SELECT 1 FROM named_groups WHERE name=?', (group,)).fetchone():
                 db.execute('DELETE FROM named_groups WHERE name=?', (group,))
                 db.execute('INSERT OR IGNORE INTO named_groups (name,created_at) VALUES (?,?)', (new_name, _stamp(_now())))

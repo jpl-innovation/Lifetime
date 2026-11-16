@@ -37,6 +37,7 @@ REFUSALS = {
     'power-consent': 'This computer does not allow remote sleep, restart, shut down or turn on. Turn on power control on that computer first.',
     'not-online': 'This computer needs a recent sync first.',
     'command-pending': 'A command is already pending for this computer.',
+    'group-exists': 'A group with that name already exists.',
 }
 
 

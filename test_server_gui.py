@@ -1901,6 +1901,21 @@ class AddComputerSheetTests(unittest.TestCase):
         dialog.remove_button.click()
         self.assertEqual(calls[-1], ('remove_group', dict(group='Sales')))
 
+    def test_groups_dialog_refuses_a_rename_onto_another_groups_name(self):
+        from PyQt6.QtWidgets import QInputDialog
+        from lifetime_server_widgets import GroupsDialog
+        from lifetime_i18n import tr
+        calls, groups = [], [dict(name='Lab A', computers=2, created=True), dict(name='Sales', computers=0, created=True)]
+        dialog = GroupsDialog(tr, lambda operation, arguments, done: (calls.append(operation), done(list(groups), True)))
+        self.addCleanup(dialog.deleteLater)
+        dialog.list.setCurrentRow(0)
+        with patch.object(QInputDialog, 'getText', return_value=(' sales ', True)):
+            dialog.rename_button.click()
+        self.assertEqual((calls, dialog.message.text()), (['groups'], 'A group with that name already exists.'))
+        with patch.object(QInputDialog, 'getText', return_value=('LAB A', True)):     # its own name in other letters
+            dialog.rename_button.click()
+        self.assertEqual(calls[-1], 'rename_group')
+
     def test_groups_dialog_says_when_there_are_none_and_drops_a_late_answer(self):
         from PyQt6 import sip
         from lifetime_server_widgets import GroupsDialog

@@ -1322,6 +1322,7 @@ SERVER_P2_VI = {
     'Select a computer first.': 'Hãy chọn một máy tính trước.',
     'A request is in progress.': 'Đang xử lý yêu cầu.',
     'The owner has not allowed remote power control.': 'Chủ máy chưa cho phép điều khiển nguồn từ xa.',
+    'A group with that name already exists.': 'Đã có một nhóm mang tên này.',
     'This computer does not allow remote sleep, restart, shut down or turn on. Turn on power control on that computer first.':
         'Máy tính này không cho phép ngủ, khởi động lại, tắt hoặc bật máy từ xa. Hãy bật điều khiển nguồn trên máy đó trước.',
     'This computer must be approved first.': 'Máy tính này cần được phê duyệt trước.',
