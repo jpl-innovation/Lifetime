@@ -6,11 +6,9 @@ import sys
 import weakref
 
 _POWER_VI = {
-    'Offline': 'Ngoại tuyến',
     'Disk almost full': 'Ổ đĩa gần đầy',
     'Battery worn': 'Pin đã chai',
     'Running hot': 'Đang quá nóng',
-    'Unstable': 'Không ổn định',
     'Waiting to run a command': 'Đang chờ thực hiện lệnh',
     'Command accepted': 'Đã chấp nhận lệnh',
     'Unsupported command action': 'Thao tác lệnh không được hỗ trợ',
@@ -132,7 +130,7 @@ VI = {
     'Lifetime': 'Lifetime',
     'Lifetime · JPL Innovation': 'Lifetime · JPL Innovation',
     'Lifetime · Made by JPL Innovation': 'Lifetime · Phát triển bởi JPL Innovation',
-    'Settings': 'Cài đặt', 'Overview': 'Tổng quan', 'System': 'Hệ thống', 'Insights': 'Phân tích',
+    'Settings': 'Cài đặt', 'Overview': 'Tổng quan', 'Insights': 'Phân tích',
     'Total time awake': 'Tổng thời gian hoạt động',
     'First used': 'Ngày bắt đầu sử dụng', 'Boots observed': 'Số lần khởi động',
     'Current session': 'Phiên hiện tại', 'Longest session': 'Phiên dài nhất',
@@ -161,7 +159,7 @@ VI = {
     'Earlier usage could not be added. Check that the history importer is installed.': 'Không thể thêm thời gian đã dùng trước đó. Hãy kiểm tra công cụ nhập lịch sử đã được cài đặt.',
     'Login tracking could not be updated': 'Không thể cập nhật tùy chọn theo dõi khi đăng nhập',
     'Login tracking could not be updated. Check your user task or service permissions.': 'Không thể cập nhật tùy chọn theo dõi khi đăng nhập. Hãy kiểm tra quyền đối với tác vụ hoặc dịch vụ của tài khoản.',
-    'Not available': 'Chưa có dữ liệu', 'Unavailable': 'Chưa có dữ liệu', 'No record': 'Chưa ghi nhận',
+    'No record': 'Chưa ghi nhận',
     'Not available · Windows event log could not be read': 'Chưa có dữ liệu · không đọc được nhật ký sự kiện Windows',
     'Not available · Windows event log does not cover this boot': 'Chưa có dữ liệu · nhật ký Windows không bao quát lần khởi động này',
     'Not available · Windows event log has incomplete sleep intervals': 'Chưa có dữ liệu · nhật ký Windows thiếu các mốc ngủ và thức',
@@ -173,12 +171,12 @@ VI = {
     'Compared journal suspend intervals with the awake clock': 'Đã đối chiếu thời gian ngủ trong nhật ký với bộ đếm thời gian hoạt động',
     'Reading local system…': 'Đang đọc thông tin hệ thống…',
     'System readings are off. Choose what to collect in Settings.': 'Đang tắt thông tin hệ thống. Chọn dữ liệu cần thu thập trong Cài đặt.',
-    'Power': 'Nguồn điện', 'Network': 'Mạng', 'Graphics': 'Đồ họa', 'Computer': 'Máy tính',
+    'Power': 'Nguồn điện', 'Network': 'Mạng',
     'Battery': 'Pin', 'State': 'Trạng thái', 'Time remaining': 'Thời gian còn lại',
-    'Capacity': 'Dung lượng', 'Voltage': 'Điện áp', 'Design capacity': 'Dung lượng thiết kế', 'Battery wear': 'Độ chai pin',
+    'Voltage': 'Điện áp', 'Design capacity': 'Dung lượng thiết kế', 'Battery wear': 'Độ chai pin',
     'No battery': 'Không có pin', '0 W · battery idle': '0 W · pin không nạp hoặc xả',
     'Charging': 'Đang sạc', 'Discharging': 'Đang dùng pin', 'Plugged in': 'Đang cắm nguồn',
-    'Fully charged': 'Đã sạc đầy', 'Full': 'Đã sạc đầy', 'Unknown': 'Chưa xác định',
+    'Fully charged': 'Đã sạc đầy', 'Full': 'Đã sạc đầy',
     'On battery': 'Đang dùng pin', 'AC power': 'Nguồn điện ngoài', 'On AC power': 'Đang dùng nguồn điện ngoài', 'Not charging': 'Không sạc',
     'Local time': 'Giờ địa phương', 'Not available from this system': 'Hệ thống chưa cung cấp dữ liệu này',
     'live.latest': '{value:,.1f} {unit} · mới nhất',
@@ -192,11 +190,11 @@ VI = {
     'Model': 'Mẫu thiết bị', 'Frequency': 'Xung nhịp', 'Temperature': 'Nhiệt độ', 'Utilization': 'Mức sử dụng', 'Memory': 'Bộ nhớ',
     'Processor': 'Bộ xử lý', 'CPU': 'CPU', 'RAM': 'RAM', 'Disks': 'Ổ đĩa',
     'Uptime · incl. sleep': 'Thời gian từ lúc khởi động · gồm cả ngủ',
-    'Awake since boot': 'Hoạt động từ lúc khởi động', 'Last boot': 'Khởi động gần nhất',
+    'Awake since boot': 'Hoạt động từ lúc khởi động',
     'Fast Startup': 'Khởi động nhanh', 'On': 'Bật', 'Off': 'Tắt',
     'Local readings · 2 s / 10 s': 'Dữ liệu trên máy · mỗi 2 giây / 10 giây',
     'Awake time by hour of day': 'Thời gian hoạt động theo giờ trong ngày', 'Daily awake time': 'Thời gian hoạt động theo ngày',
-    '30 days': '30 ngày', '90 days': '90 ngày', '1 year': '1 năm', 'All': 'Tất cả',
+    '90 days': '90 ngày', '1 year': '1 năm', 'All': 'Tất cả',
     '<15m': '<15p', '15–60m': '15–60p', '1–3h': '1–3g', '3–6h': '3–6g', '6–12h': '6–12g', '12h+': '12g+',
     'Needs recorded days': 'Cần dữ liệu theo ngày',
     'Recorded hourly totals / recorded days; boot credit excluded': 'Tổng theo giờ / số ngày đã ghi nhận; chưa gồm số giờ khởi động cũ',
@@ -218,14 +216,14 @@ VI = {
     'Hour-of-day profile': 'Mức sử dụng theo giờ', 'Average awake hours in each local hour slot': 'Thời gian hoạt động trung bình ở mỗi khung giờ địa phương',
     'Weekday average': 'Trung bình theo thứ', 'Average per recorded weekday; today is a partial day': 'Trung bình theo thứ đã ghi nhận; hôm nay chưa kết thúc',
     'Session length distribution': 'Phân bố thời lượng phiên', 'Retained sessions, grouped by local start date': 'Các phiên đã lưu, nhóm theo ngày bắt đầu tại địa phương',
-    'Local date': 'Ngày địa phương', 'Awake time': 'Thời gian hoạt động', 'Daily': 'Theo ngày', '7-day average': 'Trung bình 7 ngày',
+    'Local date': 'Ngày địa phương', 'Daily': 'Theo ngày', '7-day average': 'Trung bình 7 ngày',
     'Needs 7 days of data': 'Cần ít nhất 7 ngày dữ liệu', 'Needs 7 consecutive days': 'Cần 7 ngày liên tiếp',
     'Lifetime total': 'Tổng tích lũy', 'Live start date unavailable': 'Chưa có ngày bắt đầu theo dõi trực tiếp',
     'Opening balance included · ': 'Đã gồm số giờ ban đầu · ', 'Local hour': 'Giờ địa phương', 'Average awake': 'Hoạt động trung bình',
     'Weekday': 'Thứ', 'No recorded sessions in this range': 'Chưa có phiên nào trong khoảng này',
     ' total awake': ' hoạt động tổng cộng', 'Session length': 'Thời lượng phiên', 'Sessions': 'Số phiên',
     'Total awake time': 'Tổng thời gian hoạt động', 'Selected date range: ': 'Khoảng thời gian đã chọn: ',
-    'Collecting live samples': 'Đang thu thập dữ liệu trực tiếp', 'Last 5 minutes · samples stay in memory': '5 phút gần nhất · dữ liệu chỉ lưu trong bộ nhớ',
+    'Collecting live samples': 'Đang thu thập dữ liệu trực tiếp',
     'Battery power': 'Công suất pin', 'GPU power': 'Công suất GPU', 'Waiting for a local reading': 'Đang chờ dữ liệu từ máy',
     'Lifetime settings': 'Cài đặt Lifetime', 'Set up Lifetime': 'Thiết lập Lifetime',
     'What would you like to track?': 'Bạn muốn theo dõi những gì?',
@@ -243,7 +241,7 @@ VI = {
     'Start tracking at login?': 'Theo dõi khi đăng nhập?',
     'Starts the awake-time tracker when you sign in. You can also start it yourself from Lifetime.': 'Bắt đầu ghi thời gian hoạt động khi bạn đăng nhập. Bạn cũng có thể tự bắt đầu từ Lifetime.',
     'Yes, add my earlier usage': 'Có, thêm thời gian đã dùng trước đó', 'Yes, start tracking at login': 'Có, theo dõi khi đăng nhập',
-    'No, count from now on': 'Không, chỉ đếm từ bây giờ', 'No, I will start it myself': 'Không, tôi sẽ tự bắt đầu',
+    'No, count from now on': 'Không, chỉ đếm từ bây giờ',
     'Ready to start': 'Sẵn sàng bắt đầu', 'You can change these choices at any time in Settings.': 'Bạn có thể thay đổi các lựa chọn này bất cứ lúc nào trong Cài đặt.',
     'Only the readings you choose will be collected.': 'Chỉ thu thập những dữ liệu bạn đã chọn.',
     'To report to a Lifetime Server on your network, open Connect after setup.': 'Để báo cáo cho Lifetime Server trong mạng của bạn, hãy mở mục Kết nối sau khi cài đặt.',
@@ -256,8 +254,8 @@ VI = {
     'History deleted': 'Đã xóa lịch sử', 'History could not be deleted': 'Không thể xóa lịch sử',
     'Language / Ngôn ngữ': 'Ngôn ngữ / Language', 'English': 'English', 'Tiếng Việt': 'Tiếng Việt',
     'Choose your language. You can change it at any time.': 'Chọn ngôn ngữ hiển thị. Bạn có thể thay đổi bất cứ lúc nào.',
-    'Language': 'Ngôn ngữ', 'EN': 'EN', 'VI': 'VI',
-    '&Yes': '&Có', '&No': '&Không', 'OK': 'Đồng ý', 'Cancel': 'Hủy',
+    'EN': 'EN', 'VI': 'VI',
+    '&Yes': '&Có', '&No': '&Không', 'OK': 'Đồng ý',
     'Close': 'Đóng', '&Copy': '&Sao chép', '&Paste': '&Dán', 'Select All': 'Chọn tất cả',
     'history.note': 'Ngày thiếu dữ liệu được xem là chưa xác định. Giá trị trung bình chỉ tính các ngày đã ghi nhận, gồm cả ngày có giá trị 0. Mỗi ngày không vượt quá 24 giờ. Lưu tối đa 100 phiên; phạm vi dữ liệu theo giờ được ghi trên biểu đồ.',
     'history.estimated': 'Phân bổ theo ngày có phần ước tính.',
@@ -347,7 +345,6 @@ _RELEASE_TECHNICIAN_VI = {
     'The PDF page layout is unavailable.': 'Không xác định được bố cục trang PDF.',
     'PDF generation failed or produced no text.': 'Không tạo được PDF hoặc PDF không có nội dung chữ.',
     'Awake time is the time the computer was running and awake. It does not measure human activity, component health or remaining lifespan.': 'Thời gian thức là thời gian máy tính đang chạy và không ngủ. Chỉ số này không đo hoạt động của người dùng, tình trạng linh kiện hoặc tuổi thọ còn lại.',
-    'OS date clue; true first use unknown': 'Mốc từ hệ điều hành; chưa rõ lần dùng đầu',
     'Could not open details': 'Không mở được chi tiết',
     'Live intervals are split across local days. Boot-time allocation uses retained sleep/resume evidence when available; otherwise its calendar distribution is estimated.': 'Các khoảng ghi trực tiếp được chia theo ngày địa phương. Thời gian khởi động được phân bổ theo bản ghi ngủ/thức còn lưu nếu có; nếu không, phân bố theo ngày là ước tính.',
     'History collection is disabled in Settings. Dated history and retained session records are excluded, including previously stored records.': 'Thu thập lịch sử đang tắt trong Cài đặt. Báo cáo không gồm lịch sử theo ngày hoặc phiên còn lưu, kể cả bản ghi cũ.',
@@ -366,7 +363,6 @@ EN.update({key: key for key in _RELEASE_TECHNICIAN_VI})
 # Optional technician identity, coverage and local report workflow.
 _TECHNICIAN_VI = {'Department / location': 'Phòng ban / vị trí',
  'None recorded': 'Chưa có bản ghi',
- 'Export report': 'Xuất báo cáo',
 'Export': 'Xuất',
  'Device identity': 'Thông tin nhận diện thiết bị',
  'Verify / Coverage details': 'Kiểm tra / Chi tiết dữ liệu',
@@ -385,14 +381,10 @@ _TECHNICIAN_VI = {'Department / location': 'Phòng ban / vị trí',
  'End date': 'Ngày kết thúc',
  'Include identity fields': 'Kèm thông tin thiết bị',
  'Include system fields': 'Kèm thông tin hệ thống',
- 'Operating system': 'Hệ điều hành',
  'OS version': 'Phiên bản hệ điều hành',
- 'Architecture': 'Kiến trúc',
- 'Python version': 'Phiên bản Python',
  'Directly tracked': 'Ghi trực tiếp',
  'Reconstructed from OS records': 'Khôi phục từ bản ghi hệ điều hành',
  'Tracked and reconstructed': 'Ghi trực tiếp và khôi phục',
- 'Partial': 'Một phần',
  'Gap observations': 'Các mốc gián đoạn đã ghi',
  'Preview the current selection before saving.': 'Xem trước lựa chọn hiện tại trước khi lưu.',
  'Preview ready. Choose PDF or CSV to save.': 'Đã có bản xem trước. Chọn PDF hoặc CSV để lưu.',
@@ -420,7 +412,6 @@ _TECHNICIAN_VI = {'Department / location': 'Phòng ban / vị trí',
                                                                             'đã lưu. Không nhập dữ liệu hoặc '
                                                                             'quét hệ thống.',
  'Source': 'Nguồn',
- 'Status': 'Trạng thái',
  'Recording started': 'Bắt đầu ghi nhận',
  'Earliest record': 'Bản ghi sớm nhất',
  'First record': 'Bản ghi đầu tiên',
@@ -858,27 +849,15 @@ for _key, _text in _SERVER_VI.items():
     VI[_key] = _text
 _COMPANY_VI = {
     'Company server': 'Máy chủ công ty',
-    'Company reporting is optional. Standalone Lifetime sends no company-server requests.': 'Báo cáo về công ty là tùy chọn. Lifetime độc lập không gửi yêu cầu đến máy chủ công ty.',
-    'Pairing sends awake-time totals to the selected server. History and system information are optional. No employee account is required.': 'Ghép nối gửi tổng thời gian máy chạy và thức đến máy chủ đã chọn. Lịch sử và thông tin hệ thống là tùy chọn. Nhân viên không cần tài khoản.',
     'Reading local status…': 'Đang đọc trạng thái trên máy…',
     'Enrollment bundle': 'Gói ghép nối',
-    'Paste an enrollment bundle or open its file.': 'Dán gói ghép nối hoặc mở tệp chứa gói.',
     'Open enrollment file': 'Mở tệp ghép nối',
-    'Send dated awake-time history': 'Gửi lịch sử thời gian chạy và thức theo ngày',
     'Send basic system information': 'Gửi thông tin hệ thống cơ bản',
-    'Include saved device identity when pairing': 'Kèm thông tin nhận diện máy đã lưu khi ghép nối',
-    'Enable reporting to this company server': 'Bật báo cáo đến máy chủ công ty này',
-    'Review the server address and fingerprint before pairing.': 'Kiểm tra địa chỉ máy chủ và dấu vân tay chứng chỉ trước khi ghép nối.',
     'Pair computer': 'Ghép nối máy tính',
     'Check enrollment': 'Kiểm tra ghép nối',
     'Refresh local status': 'Làm mới trạng thái trên máy',
     'Stop company reporting': 'Dừng báo cáo về công ty',
-    'Pairing and reporting changes require a technician with administrator rights. Install the machine-agent startup task for background recording and reporting.': 'Ghép nối và thay đổi báo cáo cần kỹ thuật viên có quyền quản trị. Cài tác vụ khởi động của bộ ghi máy để ghi nhận và báo cáo trong nền.',
-    'Stopping reporting prevents future requests. Data already stored on the server must be managed by its administrator or retention policy.': 'Dừng báo cáo sẽ ngăn các yêu cầu tiếp theo. Dữ liệu đã lưu trên máy chủ cần được quản trị viên hoặc chính sách lưu giữ của máy chủ xử lý.',
-    'Server: {server}\nCertificate SHA-256: {fingerprint}': 'Máy chủ: {server}\nSHA-256 chứng chỉ: {fingerprint}',
-    'Enter a valid enrollment bundle to review the server.': 'Nhập gói ghép nối hợp lệ để kiểm tra máy chủ.',
     'Reporting enabled': 'Đã bật báo cáo',
-    'Server address': 'Địa chỉ máy chủ',
     'Reporting status': 'Trạng thái báo cáo',
     'Last successful sync': 'Lần đồng bộ thành công gần nhất',
     'Pending records': 'Bản ghi chờ gửi',
@@ -943,9 +922,6 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
                                                                                                'mới.',
  'Working…': 'Đang xử lý…',
  'Changes saved.': 'Đã lưu thay đổi.',
- 'Loaded page only; filters apply. Counts are not fleet totals.': 'Chỉ trang đã tải, có áp dụng bộ '
-                                                                  'lọc. Số lượng không phải tổng '
-                                                                  'toàn bộ thiết bị.',
  'Loaded devices': 'Thiết bị đã tải',
  'Reporting': 'Đang báo cáo',
  'Report overdue': 'Quá hạn báo cáo',
@@ -956,23 +932,12 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
  'Unavailable': 'Chưa có dữ liệu',
  'All statuses': 'Tất cả trạng thái',
  'Search': 'Tìm kiếm',
- 'Search name or asset tag': 'Tìm tên hoặc mã tài sản',
  'Group': 'Nhóm',
- 'All groups (exact department filter)': 'Tất cả nhóm (lọc chính xác phòng ban)',
- 'Status': 'Trạng thái',
  'Page size': 'Số dòng mỗi trang',
  'Previous': 'Trước',
  'Next': 'Tiếp',
- 'Page {page} · {count} devices': 'Trang {page} · {count} thiết bị',
  'Last report received': 'Lần nhận báo cáo gần nhất',
  'Device ID': 'Mã thiết bị',
- 'No devices match. Create a pairing code in Administration to enroll a computer.': 'Không có '
-                                                                                    'thiết bị phù '
-                                                                                    'hợp. Tạo mã '
-                                                                                    'ghép nối '
-                                                                                    'trong Quản '
-                                                                                    'trị để đăng '
-                                                                                    'ký máy tính.',
  'Select a device to view its usage, permissions and server-owned identity.': 'Chọn thiết bị để '
                                                                               'xem thời gian sử '
                                                                               'dụng, quyền và '
@@ -1036,31 +1001,6 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
  'Backup and restore': 'Sao lưu và khôi phục',
  'Save backup': 'Lưu bản sao',
  'Restore backup': 'Khôi phục bản sao',
- 'Restore invalidates every device credential, pairing code and polling token. Computers must enroll again.': 'Khôi '
-                                                                                                              'phục '
-                                                                                                              'vô '
-                                                                                                              'hiệu '
-                                                                                                              'hóa '
-                                                                                                              'mọi '
-                                                                                                              'thông '
-                                                                                                              'tin '
-                                                                                                              'xác '
-                                                                                                              'thực '
-                                                                                                              'thiết '
-                                                                                                              'bị, '
-                                                                                                              'mã '
-                                                                                                              'ghép '
-                                                                                                              'nối '
-                                                                                                              'và '
-                                                                                                              'mã '
-                                                                                                              'thăm '
-                                                                                                              'dò. '
-                                                                                                              'Máy '
-                                                                                                              'tính '
-                                                                                                              'phải '
-                                                                                                              'đăng '
-                                                                                                              'ký '
-                                                                                                              'lại.',
  'Continue?': 'Tiếp tục?',
  'Continue': 'Tiếp tục',
  'Found {server}': 'Đã tìm thấy {server}',
@@ -1083,11 +1023,6 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
                                                                                             'thời '
                                                                                             'điểm '
                                                                                             'gốc.',
- 'Immediately reject this device credential? Re-enrollment requires approval.': 'Từ chối ngay '
-                                                                                'thông tin xác '
-                                                                                'thực của thiết '
-                                                                                'bị? Đăng ký lại '
-                                                                                'cần phê duyệt.',
  'Identity is invalid. Use an optional YYYY-MM-DD deployment date.': 'Thông tin không hợp lệ. Ngày '
                                                                      'đưa vào sử dụng là tùy chọn, '
                                                                      'theo dạng NNNN-TT-NN.',
@@ -1122,10 +1057,8 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
                                                                                             'khiển '
                                                                                             'máy '
                                                                                             'tính.',
- 'Interval not loaded. Refresh to retry.': 'Chưa tải được khoảng thời gian. Làm mới để thử lại.',
  'No pending requests': 'Không có yêu cầu đang chờ',
  'Configuration': 'Cấu hình',
- 'No report has been received.': 'Chưa nhận được báo cáo nào.',
  'Current boundary (UTC): {time}': 'Mốc lưu giữ hiện tại (UTC): {time}',
  'All devices': 'Tất cả thiết bị',
  'Fleet overview; independent of the device search and filters.': 'Tổng quan toàn bộ thiết bị; độc '
@@ -1174,18 +1107,15 @@ for _key, _text in SERVER_DASHBOARD_VI.items():
 DASHBOARD_VI = {
     'Activity': 'Hoạt động',
     'Reports': 'Báo cáo',
-    'Made by JPL Innovation': 'Phát triển bởi JPL Innovation',
     'Last 14 days': '14 ngày gần đây',
     'Last 14 days; open Activity': '14 ngày gần đây; mở Hoạt động',
     'View Activity': 'Xem hoạt động',
     'How this is counted': 'Cách tính thời gian',
     'Hide counting details': 'Ẩn chi tiết cách tính',
-    'The ring repeats every 100 awake hours.': 'Vòng hiển thị lặp lại sau mỗi 100 giờ máy thức.',
     'Reports and details for this computer.': 'Báo cáo và thông tin chi tiết về máy tính này.',
     'Save a report of recorded awake time and coverage.': 'Lưu báo cáo thời gian máy thức và phạm vi dữ liệu.',
     'Manage the device name, asset tag and ownership.': 'Quản lý tên thiết bị, mã tài sản và chủ sở hữu.',
     'Review sources, dates and gaps in the record.': 'Xem nguồn, mốc thời gian và khoảng trống trong dữ liệu.',
-    'Manage enrollment and report sharing with your company.': 'Quản lý đăng ký và chia sẻ báo cáo với công ty.',
     'Open': 'Mở',
 }
 EN.update({key: key for key in DASHBOARD_VI})
@@ -1213,7 +1143,6 @@ EN.update({key: key for key in _TRAY_VI})
 
 _HEALTH_VI = {
     'Sleep is grouped into local noon-to-noon nights. Only completed sleep intervals are included.': 'Thời gian ngủ được nhóm theo đêm từ trưa hôm trước đến trưa hôm sau theo giờ địa phương. Chỉ tính các khoảng ngủ đã kết thúc.',
-    'Health reporting consent could not be updated. Ask the machine-agent administrator to update its Health policy.': 'Chưa cập nhật được quyền báo cáo sức khỏe. Hãy nhờ quản trị viên tác nhân máy cập nhật chính sách Sức khỏe.',
     '{count} events': '{count} sự kiện',
     '{count} cycles': '{count} chu kỳ',
     'Health': 'Sức khỏe',
@@ -1260,7 +1189,6 @@ EN.update({key: key for key in _HEALTH_VI})
 SERVER_S1_VI = {
     'Check the connection code and server address.': 'Kiểm tra mã kết nối và địa chỉ máy chủ.',
     'Awake on selected date': 'Chạy trong ngày đã chọn',
-    'Awake time': 'Thời gian chạy',
     'Organisation': 'Tổ chức',
     'Save organisation': 'Lưu tên tổ chức',
     'Device access': 'Quyền kết nối thiết bị',
@@ -1277,7 +1205,6 @@ SERVER_S1_VI = {
     'Report date': 'Ngày báo cáo',
     'Today · {date}': 'Hôm nay · {date}',
     'Add device': 'Thêm thiết bị',
-    'Connected': 'Đã kết nối',
     'Awake today': 'Chạy hôm nay',
     'Review': 'Xem xét',
     'No devices yet. Add device': 'Chưa có thiết bị. Thêm thiết bị',
@@ -1294,7 +1221,6 @@ SERVER_S1_VI = {
     'No dated reports yet': 'Chưa có báo cáo theo ngày',
     'Local server: {name}': 'Máy chủ nội bộ: {name}',
     'Updated {time}': 'Cập nhật lúc {time}',
-    'of {count} enrolled devices': 'trên {count} thiết bị đã đăng ký',
     'Check the reporting connection': 'Kiểm tra kết nối gửi báo cáo',
     '{count} reporting devices': '{count} thiết bị có dữ liệu',
     'Administrator review required': 'Cần quản trị viên xét duyệt',
@@ -1325,14 +1251,12 @@ SERVER_S1_VI = {
     'Wrong guesses': 'Lần nhập sai',
     'Revoke invitation': 'Thu hồi lời mời',
     'Expires in (hours)': 'Hết hạn sau (giờ)',
-    'Listening: {address}\nCertificate SHA-256: {fingerprint}': 'Địa chỉ lắng nghe: {address}\nSHA-256 chứng chỉ: {fingerprint}',
     'Locked': 'Đã khóa',
     'Used': 'Đã dùng hết',
     'Expired': 'Đã hết hạn',
     'Active': 'Còn hiệu lực',
     'Made by JPL Innovation': 'Phát triển bởi JPL Innovation',
     'Connect a computer': 'Kết nối máy tính',
-    'Open Company server on the computer, select this server and enter the code.': 'Mở Máy chủ công ty trên máy tính, chọn máy chủ này và nhập mã.',
     'Connection code': 'Mã kết nối',
     'Copy code': 'Sao chép mã',
     'Connection line': 'Dòng kết nối',
@@ -1340,18 +1264,11 @@ SERVER_S1_VI = {
     'Allowed uses: {uses}': 'Số lượt được dùng: {uses}',
     'Approval is required. Share privately. Revoke this invitation in Administration.': 'Cần được phê duyệt. Chỉ chia sẻ riêng. Thu hồi lời mời trong Quản trị.',
     'Done': 'Xong',
-    'Choose a discovered server': 'Chọn máy chủ tìm thấy',
     'Company servers': 'Máy chủ công ty',
     'Find local servers': 'Tìm máy chủ nội bộ',
-    'Discovery takes about 3 seconds. For another subnet or VPN, enter the server address or paste a connection line.': 'Tìm kiếm mất khoảng 3 giây. Với mạng khác hoặc VPN, nhập địa chỉ máy chủ hoặc dán dòng kết nối.',
-    'Server name or IP (optional with connection line)': 'Tên hoặc IP máy chủ (có thể bỏ qua nếu dán dòng kết nối)',
     'Server address': 'Địa chỉ máy chủ',
     'Connection code or full connection line': 'Mã kết nối hoặc dòng kết nối đầy đủ',
     'Advanced: import an enrollment bundle': 'Nâng cao: nhập gói đăng ký',
-    'The code will verify the certificate before enrollment data is sent. Server: {server}': 'Mã sẽ xác minh chứng chỉ trước khi gửi dữ liệu đăng ký. Máy chủ: {server}',
-    'Choose a server, then enter its connection code.': 'Chọn máy chủ rồi nhập mã kết nối.',
-    'No servers found. Enter the server name/IP and code, or paste a connection line.': 'Không tìm thấy máy chủ. Nhập tên/IP cùng mã, hoặc dán dòng kết nối.',
-    'Linux reporting uses a separate user agent. Run install_linux.sh --company-agent and consent to the systemd user service for background reporting while signed in.': 'Linux dùng tiến trình riêng cho người dùng. Chạy install_linux.sh --company-agent và đồng ý bật dịch vụ systemd để gửi báo cáo nền khi đăng nhập.',
 }
 for _key, _text in SERVER_S1_VI.items():
     EN.setdefault(_key, _key)
@@ -1362,7 +1279,6 @@ for _key, _text in SERVER_S1_VI.items():
 SERVER_S2_VI = {
     'Server name': 'Tên máy chủ',
     'Apply': 'Áp dụng',
-    'Copy': 'Sao chép',
     'Pending approvals': 'Yêu cầu chờ duyệt',
     'No pending approvals': 'Không có yêu cầu chờ duyệt',
     'Server': 'Máy chủ',
@@ -1398,7 +1314,7 @@ SERVER_P2_VI = {
     'Sort by last seen': 'Sắp xếp theo lần kết nối cuối', 'Sort computers': 'Sắp xếp máy tính',
     'Computer specifications': 'Thông số máy tính', 'Manufacturer': 'Nhà sản xuất',
     'Model': 'Mẫu máy', 'Cores / threads': 'Nhân / luồng', 'Graphics': 'Đồ họa',
-    'Operating system': 'Hệ điều hành', 'Storage': 'Ổ lưu trữ',
+    'Storage': 'Ổ lưu trữ',
     'Battery design capacity': 'Dung lượng pin thiết kế',
     'Performance in the last 24 hours': 'Hiệu suất trong 24 giờ qua',
     'Commands are delivered on the next sync. Turn on uses Wake-on-LAN.':
@@ -1411,7 +1327,6 @@ SERVER_P2_VI = {
     'Turn on is available when the computer is offline.': 'Có thể bật máy khi máy tính ngoại tuyến.',
     'No network adapter address has been recorded.': 'Chưa ghi nhận địa chỉ bộ điều hợp mạng.',
     'This computer needs a recent sync first.': 'Máy tính này cần đồng bộ gần đây trước.',
-    'Confirm {action} for {name}?': 'Xác nhận {action} cho {name}?',
     'Command status: {status}': 'Trạng thái lệnh: {status}',
     'Low disk space': 'Sắp hết dung lượng ổ đĩa', 'High temperature': 'Nhiệt độ cao',
     'Command pending': 'Lệnh đang chờ', 'CPU: {cpu} · RAM: {ram}': 'CPU: {cpu} · RAM: {ram}',
@@ -1517,7 +1432,6 @@ CONNECT_VI = {
     'Other network?': 'Mạng khác?',
     '{name} wants to connect': '{name} muốn kết nối',
     '{name} connected': '{name} đã kết nối',
-    'Group (optional)': 'Nhóm (không bắt buộc)',
     'Choose or type a group': 'Chọn hoặc nhập một nhóm',
     'Group: {group}': 'Nhóm: {group}',
     'The group was not saved. Set it on the Devices page under Group.': 'Chưa lưu được nhóm. Hãy đặt nhóm trong trang Thiết bị, mục Nhóm.',
@@ -1577,8 +1491,6 @@ _REPORT_SOURCES_VI = {
     'Measured: {time}': 'Đo trực tiếp: {time}',
     'OS logs: {time}': 'Nhật ký hệ điều hành: {time}',
     'Manual baseline: {time}': 'Số giờ nền nhập tay: {time}',
-    'Server address': 'Địa chỉ máy chủ',
-    'Last report': 'Báo cáo gần nhất',
     'Shared with the server': 'Đang chia sẻ với máy chủ',
 }
 for _key, _text in _REPORT_SOURCES_VI.items():
@@ -1734,7 +1646,6 @@ _ALERTS_VI = {
     '1 open alert': '1 cảnh báo đang mở',
     '{count} open alerts': '{count} cảnh báo đang mở',
     'Current problems': 'Sự cố hiện tại',
-    'Needs attention': 'Cần xử lý',
     'Acknowledged': 'Đã xác nhận',
     'Paused by maintenance': 'Tạm dừng do bảo trì',
     'Resolved': 'Đã khắc phục',
@@ -1794,12 +1705,10 @@ _ALERTS_VI = {
     'Opens at': 'Bắt đầu lúc',
     'Closes at': 'Kết thúc lúc',
     'Time zone': 'Múi giờ',
-    'Group name or computer ID': 'Tên nhóm hoặc ID máy tính',
     'Holidays (YYYY-MM-DD, comma separated)': 'Ngày nghỉ (YYYY-MM-DD, phân tách bằng dấu phẩy)',
     'server time': 'giờ máy chủ',
     '{days} · {start}–{end} ({zone})': '{days} · {start}–{end} ({zone})',
     '{count} holidays': '{count} ngày nghỉ',
-    'Save hours': 'Lưu giờ',
     'Remove selected': 'Xóa mục đã chọn',
     'Maintenance windows': 'Thời gian bảo trì',
     'No alert opens during a window. A problem still there when it ends opens then; one that clears is closed quietly.':
@@ -2067,8 +1976,6 @@ _UPDATES_VI = {
     'No package uploaded.': 'Chưa tải gói nào lên.',
     'Ready to install: {staged} · Installed: {installed} · Failed: {failed}': 'Sẵn sàng cài đặt: {staged} · Đã cài đặt: {installed} · Thất bại: {failed}',
     'Ready to install': 'Sẵn sàng cài đặt',
-    'Installed': 'Đã cài đặt',
-    'Failed': 'Thất bại',
     'download failed': 'tải về không thành công',
     'wrong size': 'sai kích thước',
     'SHA-256 did not match': 'SHA-256 không khớp',
