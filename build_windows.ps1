@@ -2,7 +2,7 @@
 # Run on a Windows PC with Python 3.11+: builds Lifetime.exe, LifetimeTracker.exe, LifetimeImport.exe and a ready-to-install "package" folder.
 # Native tools (pip, PyInstaller) print progress on stderr; Windows PowerShell 5.1 would treat that as an error, so check exit codes instead.
 $ErrorActionPreference = 'Continue'
-python -m pip install --upgrade --disable-pip-version-check PyQt6 pyinstaller
+python -m pip install --disable-pip-version-check -r requirements-build.txt      # exact, tested versions
 if ($LASTEXITCODE) { throw 'pip install failed' }
 $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--onefile', '--icon', 'assets\lifetime.ico')
 python -m PyInstaller @common --noconsole --name LifetimeTracker lifetime_tracker.py

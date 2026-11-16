@@ -1,6 +1,12 @@
 # Server edition only. Desktop and client require no additional packages.
-cryptography>=43
-websockets>=15
+# Exact versions: a release is built from what was tested, not from whatever was newest that day.
+# These are the versions the CI runs of 2026-11-09 to 2026-11-15 installed and tested. To update: change a
+# version here, let CI run on Windows and Linux, and only then tag. Prefer versions that are a few weeks old.
+cryptography==50.0.2
+websockets==17.4
 # IANA time zone names (Asia/Ho_Chi_Minh) for alert schedules and availability; pure data, no native code.
-tzdata>=2024.1
-pywin32>=306; sys_platform == "win32"
+tzdata==2026.6
+pywin32==312; sys_platform == "win32"
+# What cryptography itself installs.
+cffi==2.1.1; platform_python_implementation != "PyPy"
+pycparser==3.12; platform_python_implementation != "PyPy"

@@ -10,12 +10,12 @@ Set-StrictMode -Version Latest
 if ($env:OS -ne 'Windows_NT') { throw 'Build this package on Windows.' }
 Push-Location $PSScriptRoot
 try {
-    foreach ($entry in @('lifetime_server.py', 'lifetime_server_gui.py', 'lifetime_agent.py', 'requirements-server.txt')) {
+    foreach ($entry in @('lifetime_server.py', 'lifetime_server_gui.py', 'lifetime_agent.py', 'requirements-server.txt', 'requirements-build.txt', 'requirements-desktop.txt')) {
         if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { throw "Missing build input: $entry" }
     }
     # PowerShell 5.1 treats native progress on stderr as ErrorRecords.
     $ErrorActionPreference = 'Continue'
-    & $Python -m pip install --disable-pip-version-check -r requirements-server.txt PyQt6 pyinstaller
+    & $Python -m pip install --disable-pip-version-check -r requirements-server.txt -r requirements-build.txt
     if ($LASTEXITCODE -ne 0) { throw 'Server build dependencies could not be installed.' }
     $ErrorActionPreference = 'Stop'
     # A fresh output avoids stale modules from previous release bundles. Keep older

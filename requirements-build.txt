@@ -1,0 +1,10 @@
+# Building the Windows executables (build_windows.ps1, build_server_windows.ps1).
+# Exact versions, as used by the successful CI build of 2026-11-09 (see requirements-server.txt for how to update).
+-r requirements-desktop.txt
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+altgraph==0.17.5
+pefile==2024.8.26; sys_platform == "win32"
+pywin32-ctypes==0.2.3; sys_platform == "win32"
+setuptools==84.2.1
+packaging==26.3

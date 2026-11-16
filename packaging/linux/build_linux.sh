@@ -22,9 +22,12 @@ build() {
         fontconfig freetype dbus-libs glib2 libX11-xcb libxkbcommon libxkbcommon-x11 mesa-libEGL mesa-libGL \
         xcb-util-wm xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-cursor \
         libwayland-client libwayland-cursor libwayland-egl
-    python3.12 -m pip install --disable-pip-version-check 'pyinstaller==6.11.1' -r "$root/requirements-server.txt"
+    # Exact versions (see requirements-server.txt). PyInstaller 6.11.1 and Qt 6.9 are the ones this glibc 2.28
+    # build has always used: newer PyQt6 wheels need glibc 2.34.
+    python3.12 -m pip install --disable-pip-version-check 'pyinstaller==6.11.1' 'pyinstaller-hooks-contrib==2026.9' \
+        'altgraph==0.17.5' 'packaging==26.3' -r "$root/requirements-server.txt"
     if [[ "$server_only" == false ]]; then
-        python3.12 -m pip install --disable-pip-version-check 'PyQt6>=6.7,<6.10'
+        python3.12 -m pip install --disable-pip-version-check 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.2' 'PyQt6-sip==13.13.0'
     fi
     export LIFETIME_SERVER_ONLY=$([[ "$server_only" == true ]] && echo 1 || echo 0)
     python3.12 -m PyInstaller --noconfirm --clean --distpath "$work/dist" --workpath "$work/pyinstaller" \
