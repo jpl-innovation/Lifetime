@@ -3115,12 +3115,6 @@ class ServerWindow(QMainWindow):
             self._issuing_invitation = False
             self.invitation_button.setEnabled(True)
 
-    def admin_decide(self, operation):
-        indexes = self.admin_pending.selectionModel().selectedRows()
-        if len(indexes) == 1:
-            request = self.admin_pending.item(indexes[0].row(), 0).data(Qt.ItemDataRole.UserRole)
-            self._mutate(operation, dict(request_id=request))
-
     def _admin_selection_changed(self):
         for button in self._admin_row_actions:
             button.setEnabled(not self._mutation_busy)

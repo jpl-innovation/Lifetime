@@ -17,7 +17,6 @@ from lifetime_glass import Glass, active_style, paint_glass, paint_track
 
 
 from lifetime_theme import tokens, active_theme
-GREEN = '#4CC38A'   # use tokens()['good'] where the background can be light
 
 
 def shut_down(app, window):

@@ -64,46 +64,6 @@ def reduced_motion():
     return False
 
 
-class FleetTabBar(QTabBar):
-    """One interruptible underline; keyboard and reduced-motion changes are instant."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # No native tab frame: the sliding underline is the only selection mark.
-        self.setDrawBase(False)
-        self.setDocumentMode(True)
-        self.indicator = QLabel(self)
-        self.indicator.setStyleSheet('background: #FFC93C; ')
-        self.indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.animation = QPropertyAnimation(self.indicator, b'geometry', self)
-        self.animation.setDuration(180)
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.currentChanged.connect(self.move_indicator)
-
-    def move_indicator(self, index, animate=True):
-        target = self.tabRect(index)
-        target = QRect(target.x() + 12, target.bottom() - 2, max(0, target.width() - 24), 3)
-        self.animation.stop()
-        if reduced_motion() or not animate or not self.isVisible():
-            self.indicator.setGeometry(target)
-        else:
-            self.animation.setStartValue(self.indicator.geometry())
-            self.animation.setEndValue(target)
-            self.animation.start()
-        self.indicator.raise_()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.move_indicator(self.currentIndex(), False)
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.move_indicator(self.currentIndex(), False)
-
-    def keyPressEvent(self, event):
-        super().keyPressEvent(event)
-        self.move_indicator(self.currentIndex(), False)
-
-
 class DailyChart(QLabel):
     """One series with explicit missing dates and contributor counts in tooltips."""
     def __init__(self, parent=None):

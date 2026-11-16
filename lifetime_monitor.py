@@ -33,7 +33,6 @@ RETENTION_DAYS = 180
 QUOTA_BYTES = 64 * 1024 * 1024
 MAX_DELIVERIES = 5000
 HOUSEKEEPING_SECONDS = 3600
-PRESENCE = ('online', 'offline', 'unknown')
 BACKOFF = (60, 300, 900, 3600)  # seconds before the 2nd to 5th attempt; after the 5th the delivery has failed
 RECOVER_SECONDS = 300           # a problem must stay away this long before its incident resolves (no flapping storms)
 ACTIVE = ('pending', 'open', 'acknowledged', 'suppressed')

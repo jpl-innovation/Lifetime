@@ -125,9 +125,6 @@ class ValueLabel(QLabel):
         painter.drawText(self.contentsRect(), self.alignment() | Qt.AlignmentFlag.AlignVCenter, shown)
 
 
-STATUS_GOOD = '#4CC38A'   # dark-mode green; light mode uses tokens()['good']
-
-
 class LiveDot(PulseDot):
     """Tracking: green dot with a ripple wave. Paused: grey dot. Label beside it names the state."""
 
@@ -161,45 +158,6 @@ class Backdrop(QWidget):
         p = QPainter(self)
         t = THEMES[self.window().theme or 'dark']
         p.fillRect(self.rect(), QColor(t['bg']))
-
-
-class Icon(QWidget):
-    """Small, resolution-independent line symbols; no font glyph dependencies."""
-    def __init__(self, kind):
-        super().__init__()
-        self.kind = kind
-        self.setFixedSize(20, 20)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor(THEMES[self.window().theme]['muted']), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        if self.kind == 'calendar':
-            p.drawRoundedRect(QRectF(3, 5, 14, 12), 2, 2)
-            p.drawLine(3, 9, 17, 9)
-            p.drawLine(7, 3, 7, 6)
-            p.drawLine(13, 3, 13, 6)
-        elif self.kind == 'power':
-            p.drawArc(QRectF(4, 4, 12, 13), 130*16, 280*16)
-            p.drawLine(10, 2, 10, 10)
-        elif self.kind == 'restart':
-            p.drawArc(QRectF(3, 3, 14, 14), 40*16, 290*16)
-            p.drawLine(16, 2, 16, 7)
-            p.drawLine(12, 7, 16, 7)
-        elif self.kind == 'average':
-            p.drawArc(QRectF(3, 4, 14, 14), 0, 180*16)
-            p.drawLine(10, 11, 14, 7)
-            p.drawLine(3, 14, 17, 14)
-        elif self.kind == 'longest':
-            p.drawLine(5, 3, 5, 18)
-            p.drawLine(5, 3, 16, 3)
-            p.drawLine(16, 3, 13, 7)
-            p.drawLine(13, 7, 16, 11)
-            p.drawLine(16, 11, 5, 11)
-        else:
-            p.drawEllipse(QRectF(3, 3, 14, 14))
-            p.drawLine(10, 6, 10, 10)
-            p.drawLine(10, 10, 14, 12)
 
 
 class Hero(QWidget):
@@ -307,7 +265,6 @@ class StatCard(QFrame):
     def __init__(self, title, kind, progress=False):
         super().__init__()
         self.setObjectName('statCell')
-        self.hover = 0.0
         self.number = 0.0
         self.target = None
         self.formatter = None
@@ -404,19 +361,6 @@ class StatCard(QFrame):
                 p.drawLine(16, self.height()-1, self.width()-16, self.height()-1)
             else:
                 p.drawLine(self.width()-1, 16, self.width()-1, self.height()-16)
-
-    def set_hover(self, value):
-        self.hover = value
-        self.effect.offset = 0 if REDUCE_MOTION else -2 * value
-        self.effect.update()
-        self.update()
-
-    def enterEvent(self, event):
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        super().leaveEvent(event)
-
 
 def hours_minutes(seconds):
     return duration(seconds, days=False)
