@@ -242,8 +242,8 @@ def execute_power(action, runner=subprocess.run):
         if action == 'sleep':
             args = ['rundll32.exe', 'powrprof.dll,SetSuspendState', '0,1,0']
         else:
-            message = ('Lifetime: your IT technician restarted this computer. Save your work.' if action == 'restart'
-                       else 'Lifetime: your IT technician shut down this computer. Save your work.')
+            message = ('Lifetime: your IT team is restarting this computer in 1 minute. Save your work now.' if action == 'restart'
+                       else 'Lifetime: your IT team is shutting down this computer in 1 minute. Save your work now.')
             args = ['shutdown', '/r' if action == 'restart' else '/s', '/t', '60', '/c', message]
     else:
         args = linux_power_command(action)

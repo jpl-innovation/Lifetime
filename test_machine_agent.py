@@ -402,7 +402,7 @@ class PowerAndResourcesTests(AgentFixture):
                 agent.execute_power(action, runner)
                 args = runner.call_args.args[0]
                 self.assertEqual(args[:5], ['shutdown', flag, '/t', '60', '/c'])
-                self.assertIn('Save your work.', args[5])
+                self.assertIn('Save your work now.', args[5])
             agent.execute_power('sleep', runner)
             self.assertEqual(runner.call_args.args[0], ['rundll32.exe', 'powrprof.dll,SetSuspendState', '0,1,0'])
         with patch.object(agent.sys, 'platform', 'linux'), patch.object(agent.shutil, 'which', return_value='/sbin/shutdown'), \

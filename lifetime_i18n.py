@@ -22,8 +22,8 @@ _POWER_VI = {
     'Command is no longer pending': 'Lệnh không còn ở trạng thái chờ',
     'Wake requires an approved offline device with remote power consent': 'Đánh thức yêu cầu thiết bị ngoại tuyến đã được phê duyệt và đồng ý điều khiển nguồn từ xa',
     'No MAC addresses are available': 'Không có địa chỉ MAC',
-    'Lifetime: your IT technician restarted this computer. Save your work.': 'Lifetime: kỹ thuật viên CNTT đã yêu cầu khởi động lại máy tính này. Hãy lưu công việc của bạn.',
-    'Lifetime: your IT technician shut down this computer. Save your work.': 'Lifetime: kỹ thuật viên CNTT đã yêu cầu tắt máy tính này. Hãy lưu công việc của bạn.',
+    'Lifetime: your IT team is restarting this computer in 1 minute. Save your work now.': 'Lifetime: bộ phận IT sẽ khởi động lại máy tính này sau 1 phút. Hãy lưu công việc ngay.',
+    'Lifetime: your IT team is shutting down this computer in 1 minute. Save your work now.': 'Lifetime: bộ phận IT sẽ tắt máy tính này sau 1 phút. Hãy lưu công việc ngay.',
 }
 
 
