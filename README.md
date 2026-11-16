@@ -319,8 +319,11 @@ python lifetime_server_gui.py --directory C:\ProgramData\Lifetime\Server --admin
 
 Use **Add device** on the server and **Connect** on the computer as described above.
 Windows Finish asks for administrator permission once and starts the machine agent.
-A packaged installation uses the adjacent `install_agent_windows.ps1` and
-`LifetimeAgent.exe`; a source run starts a detached hidden agent directly.
+A packaged installation runs `install_agent_windows.ps1` and `LifetimeAgent.exe` from
+`%ProgramFiles%\LifetimeAgentSetup`, where only administrators can write: the installer
+puts them there when it is approved, and otherwise the approved step copies them there
+and checks their SHA-256 first. The copies in the per-user folder are never run elevated.
+A source run starts a detached hidden agent directly.
 Linux uses a private user reporting directory and tries to enable the user service.
 Approval appears in the same server window that shows the code.
 

@@ -103,6 +103,51 @@ def _ps_quote(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
+AGENT_SETUP = ('LifetimeAgent.exe', 'install_agent_windows.ps1', 'uninstall_agent_windows.ps1')
+AGENT_SETUP_TARGET = "(Join-Path $env:ProgramFiles 'LifetimeAgentSetup')"      # evaluated by the elevated process
+
+
+def agent_setup_directory():
+    """Where the machine agent's setup files are kept on Windows. Only administrators can write there, so what
+    the Connect page asks approval for cannot be replaced by the signed-in user or a program running as them."""
+    return Path(os.environ.get('ProgramFiles') or 'C:/Program Files') / 'LifetimeAgentSetup'
+
+
+def _linked(path):
+    """A symbolic link or junction (a Windows reparse point): it leads somewhere other than where it sits."""
+    try:
+        return os.path.islink(path) or bool(getattr(os.lstat(path), 'st_file_attributes', 0) & 0x400)
+    except OSError:
+        return False
+
+
+def _real_file(path):
+    return os.path.isfile(path) and not _linked(path)
+
+
+def stage_script(source, names, target=AGENT_SETUP_TARGET):
+    """PowerShell for the elevated process: put the agent setup files where only administrators can write, and
+    check that each copy is byte for byte what this app read (its SHA-256) before anything runs. Used only when
+    the installer has not already put them there (it was run without administrator approval).
+    install_windows_common.ps1 does the same from the package at install time."""
+    import hashlib
+    files = ', '.join('@(' + _ps_quote(name) + ', ' + _ps_quote(Path(source) / name) + ', ' +
+                      _ps_quote(hashlib.sha256((Path(source) / name).read_bytes()).hexdigest()) + ')' for name in names)
+    return ("$ErrorActionPreference='Stop'; $target = " + target + "; "
+            "function Assert-NotLinked($path) { $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; "
+            "if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Links are refused.' } }; "
+            "Assert-NotLinked $target; New-Item -ItemType Directory -Force -Path $target | Out-Null; " + STAGE_ACL +
+            "foreach ($file in @(" + files + ")) { $copy = Join-Path $target $file[0]; Assert-NotLinked $copy; "
+            "Copy-Item -LiteralPath $file[1] -Destination $copy -Force; "
+            "if ((Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash -ne $file[2]) { Remove-Item -LiteralPath $copy -Force; throw 'The agent setup files changed while waiting for approval.' } }; ")
+
+
+# Administrators and SYSTEM: full control. Users: read and run. Nothing inherited from the parent folder.
+STAGE_ACL = ("$security = [Security.AccessControl.DirectorySecurity]::new(); "
+             "$security.SetSecurityDescriptorSddlForm('D:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)'); "
+             "Set-Acl -LiteralPath $target -AclObject $security; ")
+
+
 def run_agent(action, policy, bundle=None, directory=None, display_name=None):
     """One waited elevation, including the packaged installer when present."""
     from lifetime_agent import reporting_directory
@@ -136,18 +181,32 @@ def run_agent(action, policy, bundle=None, directory=None, display_name=None):
             from lifetime_settings import bundled_command
             command = bundled_command('LifetimeAgent') + args
         elif getattr(sys, 'frozen', False):
-            executable = Path(sys.executable).with_name('LifetimeAgent.exe')
-            if not executable.is_file():
+            beside = Path(sys.executable).parent
+            if not (beside / 'LifetimeAgent.exe').is_file():
                 raise FileNotFoundError('LifetimeAgent.exe is missing beside Lifetime.exe')
-            command = [str(executable)] + args
-            installer = Path(sys.executable).with_name('install_agent_windows.ps1')
-            if action == 'finish' and installer.is_file() and sys.platform == 'win32':
+            # Never ask for administrator approval to run a file from the per-user folder: anything running as
+            # this user can replace it. The copies under Program Files are run instead; if the installer could
+            # not put them there, the elevated step copies and verifies them first.
+            setup = agent_setup_directory()
+            staged = not _linked(setup) and _real_file(setup / 'LifetimeAgent.exe')       # the installer's copies win
+            names = [name for name in AGENT_SETUP if _real_file((setup if staged else beside) / name)]
+            stage = '' if staged else stage_script(beside, names)
+            command = [str(setup / 'LifetimeAgent.exe')] + args
+            installer = setup / 'install_agent_windows.ps1'
+            if action == 'finish' and installer.name in names:
                 command = ['powershell.exe', '-NoProfile', '-File', str(installer), '-Mode', 'Packaged',
                            '-EnableReporting', '-BundleFile', str(path), '-Start', '-DisplayName', display_name or socket.gethostname()]
                 for key, flag in dict(history='TrackHistory', resources='ResourceReadings', health='HealthReadings', control='PowerControl',
                                       updates='AllowUpdates').items():
                     if policy.get(key):
                         command.append('-' + flag)
+            if stage:
+                import base64
+                run = ("$p = Start-Process -FilePath " + _ps_quote(command[0]) + " -ArgumentList " +
+                       _ps_quote(subprocess.list2cmdline(command[1:])) +
+                       " -PassThru -WindowStyle Hidden; $null = $p.Handle; $p.WaitForExit(); exit $p.ExitCode")
+                command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
+                           base64.b64encode((stage + run).encode('utf-16-le')).decode('ascii')]
         else:
             command = [sys.executable, str(Path(__file__).with_name('lifetime_agent.py'))] + args
         if sys.platform == 'win32':

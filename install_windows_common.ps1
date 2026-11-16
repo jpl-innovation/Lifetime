@@ -30,8 +30,18 @@ if (-not $Admin -and -not $ElevationAttempted) {
     }
 }
 if (-not $Admin -and $ElevationAttempted) { Write-Host 'Continuing per-user; earlier usage may be incomplete.' }
+function Assert-NotLinked([string]$Path) {
+    # This script may be running as an administrator inside a folder the signed-in user controls. A junction or
+    # symbolic link there would send its copies, and the ownership it hands back, to whatever the link points at.
+    $Item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($Item -and ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Lifetime does not install through a link or junction: $Path. Remove it and run the installer again."
+    }
+}
 $InstallDir = Join-Path $OriginalLocalAppData 'Lifetime'
+Assert-NotLinked $InstallDir
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+$Written = @($InstallDir)      # exactly what this run created or replaced; nothing else is touched afterwards
 if ($ExePackage) {
     $Names = @('Lifetime.exe', 'LifetimeTracker.exe', 'LifetimeImport.exe', 'LifetimeAgent.exe',
                'install_agent_windows.ps1', 'uninstall_agent_windows.ps1')
@@ -45,22 +55,28 @@ if ($ExePackage) {
 foreach ($Name in $Names) {
     $Source = Join-Path $PSScriptRoot $Name
     $Target = Join-Path $InstallDir $Name
+    Assert-NotLinked $Target
     if ([IO.Path]::GetFullPath($Source) -ne [IO.Path]::GetFullPath($Target)) {
         Copy-Item -LiteralPath $Source -Destination $Target -Force
     }
+    $Written += $Target
 }
 if ($ExePackage) {
     $Gui = Join-Path $InstallDir 'Lifetime.exe'
     $Tracker = Join-Path $InstallDir 'LifetimeTracker.exe'
     $TaskAction = New-ScheduledTaskAction -Execute $Tracker -Argument '--run' -WorkingDirectory $InstallDir
 } else {
+    Assert-NotLinked (Join-Path $InstallDir 'assets')
     New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'assets') | Out-Null
+    $Written += Join-Path $InstallDir 'assets'
     foreach ($Name in @('lifetime.png', 'lifetime.ico', 'jpl_innovation.png', 'jpl_innovation_light.png')) {
         $Source = Join-Path $PSScriptRoot "assets\$Name"
         $Target = Join-Path $InstallDir "assets\$Name"
+        Assert-NotLinked $Target
         if ([IO.Path]::GetFullPath($Source) -ne [IO.Path]::GetFullPath($Target)) {
             Copy-Item -LiteralPath $Source -Destination $Target -Force
         }
+        $Written += $Target
     }
     $Gui = Join-Path $InstallDir 'lifetime_gui.py'
     $Tracker = Join-Path $InstallDir 'lifetime_tracker.py'
@@ -111,11 +127,30 @@ $Shortcut.Description = 'Total computer awake time'
 $Shortcut.Save()
 if ($Admin) {
     $Owner = [Security.Principal.NTAccount]::new($OriginalUser)
-    $Items = @((Get-Item -LiteralPath $InstallDir)) + @(Get-ChildItem -LiteralPath $InstallDir -Recurse) + @((Get-Item -LiteralPath $ShortcutPath))
-    foreach ($Item in $Items) {
-        $Acl = Get-Acl -LiteralPath $Item.FullName
+    # Hand back only the folder, the files written above and the shortcut. Walking the whole folder while elevated
+    # would follow a junction inside it and make the signed-in user the owner of everything behind it.
+    foreach ($Path in ($Written + @($ShortcutPath))) {
+        Assert-NotLinked $Path
+        $Acl = Get-Acl -LiteralPath $Path
         $Acl.SetOwner($Owner)
-        Set-Acl -LiteralPath $Item.FullName -AclObject $Acl
+        Set-Acl -LiteralPath $Path -AclObject $Acl
     }
+    if ($ExePackage) {
+        # The machine agent is installed and started as SYSTEM from the Connect page. Keep its setup files where
+        # only administrators can write: the Connect page asks for approval to run these copies, never the ones in
+        # the per-user folder, which the signed-in user (or anything running as them) can replace.
+        $AgentSetup = Join-Path $env:ProgramFiles 'LifetimeAgentSetup'
+        Assert-NotLinked $AgentSetup
+        New-Item -ItemType Directory -Force -Path $AgentSetup | Out-Null
+        $Security = [Security.AccessControl.DirectorySecurity]::new()
+        $Security.SetSecurityDescriptorSddlForm('D:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)')
+        Set-Acl -LiteralPath $AgentSetup -AclObject $Security
+        foreach ($Name in @('LifetimeAgent.exe', 'install_agent_windows.ps1', 'uninstall_agent_windows.ps1')) {
+            Assert-NotLinked (Join-Path $AgentSetup $Name)
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot $Name) -Destination (Join-Path $AgentSetup $Name) -Force
+        }
+    }
+} elseif ($ExePackage -and (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'LifetimeAgentSetup\LifetimeAgent.exe'))) {
+    Write-Host 'The machine agent setup files in Program Files were not updated (no administrator approval). Run this installer again and approve it before connecting this computer to a server.'
 }
 Write-Host 'Installed for the original user. Open Lifetime from the Start menu to choose what to collect and whether to track at login.'

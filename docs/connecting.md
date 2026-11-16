@@ -24,7 +24,21 @@ Temporary connection material is protected for its owner, Administrators and
 SYSTEM, then removed in finally, including on UAC cancellation. Source runs spawn
 a detached hidden agent after connecting. A frozen build needs LifetimeAgent.exe
 beside the desktop executable. If install_agent_windows.ps1 is also beside it,
-Finish calls Packaged mode with the selected policy and display name. The installer
+Finish calls Packaged mode with the selected policy and display name.
+
+What is run with administrator approval is never the copy in the per-user folder
+(%LOCALAPPDATA%\Lifetime), which the signed-in user and anything running as them can
+replace. install_windows_common.ps1, when approved, copies LifetimeAgent.exe and the
+two agent scripts to %ProgramFiles%\LifetimeAgentSetup (Administrators and SYSTEM
+write, Users read) and the Connect page runs those. If that folder is missing
+(the installer was not approved), the single approved step first creates it, copies
+the three files, compares each copy's SHA-256 with what the app read, and only then
+runs them from there; later runs use those copies. A link or junction in place of
+the folder or a file is refused. Reinstall with approval to refresh the copies after
+an upgrade. The desktop installer also refuses a per-user folder that is a link and
+changes ownership only of the files it wrote. Not yet exercised on a real standard-user
+PC with a separate administrator account. A source (Python) install still elevates
+lifetime_agent.py from the per-user folder; it is meant for development. The installer
 still refuses an existing registered task rather than silently replacing it;
 upgrades need the documented uninstall/install process with data preserved.
 
