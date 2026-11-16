@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "language": "vi",
+  "completed": true,
+  "awake": true,
+  "rebuild": false,
+  "autostart": false,
+  "identity": {
+    "display_name": "",
+    "asset_tag": "LT-0042",
+    "department": "Ph\u00f2ng K\u1ebf to\u00e1n",
+    "deployment_date": "",
+    "location": ""
+  },
+  "history": true,
+  "battery": true,
+  "network": false,
+  "wifi_name": false,
+  "graphics": false,
+  "resources": true,
+  "health": false,
+  "remote_power": false,
+  "theme": "dark"
+}

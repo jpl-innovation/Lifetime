@@ -1,0 +1,39 @@
+{
+ "agent_total": 150.0,
+ "cpu_name": "Example CPU",
+ "device_id": "aa870c6f-be61-4974-8e39-b81dde225876",
+ "history_daily": {
+  "2026-11-16": 150.0
+ },
+ "identity": {
+  "asset_tag": "LT-0042",
+  "department": "Kế toán",
+  "deployment_date": "",
+  "display_name": "Máy kế toán 01",
+  "location": ""
+ },
+ "ledger": {
+  "baseline_seconds": 5400000,
+  "boots": 10,
+  "daily_sum": 285600.0,
+  "days": 10,
+  "total_seconds": 285600.0
+ },
+ "policy": {
+  "control": false,
+  "health": false,
+  "history": true,
+  "resources": true
+ },
+ "record_count": 5,
+ "retained_usage": {
+  "awake_seconds": 150.0,
+  "imported_seconds": 0.0,
+  "measured_seconds": 150.0
+ },
+ "totals": {
+  "baseline_seconds": 0.0,
+  "imported_seconds": 0.0,
+  "measured_seconds": 150.0
+ }
+}
