@@ -139,7 +139,7 @@ class SetupDialog(QDialog):
         self.notice = self.text(tr('Only the readings you choose will be collected.'), 'description')
         last.addWidget(self.notice)
         # Setup never said this computer can report to a company server; the page for it is easy to miss.
-        self.connect_hint = self.text(tr('To report to a Lifetime Server on your network, open Connect after setup.'), 'description')
+        self.connect_hint = self.text(tr("Workplace computers only: to report to your IT team's Lifetime Server, open Connect after setup."), 'description')
         last.addWidget(self.connect_hint)
         if self.initial['completed']:
             self.delete_button = QPushButton(tr('Delete collected history'))

@@ -244,7 +244,7 @@ VI = {
     'No, count from now on': 'Không, chỉ đếm từ bây giờ',
     'Ready to start': 'Sẵn sàng bắt đầu', 'You can change these choices at any time in Settings.': 'Bạn có thể thay đổi các lựa chọn này bất cứ lúc nào trong Cài đặt.',
     'Only the readings you choose will be collected.': 'Chỉ thu thập những dữ liệu bạn đã chọn.',
-    'To report to a Lifetime Server on your network, open Connect after setup.': 'Để báo cáo cho Lifetime Server trong mạng của bạn, hãy mở mục Kết nối sau khi cài đặt.',
+    "Workplace computers only: to report to your IT team's Lifetime Server, open Connect after setup.": 'Chỉ dành cho máy tính ở nơi làm việc: để báo cáo cho Lifetime Server của bộ phận IT, hãy mở mục Kết nối sau khi cài đặt.',
     'Delete collected history': 'Xóa lịch sử đã thu thập', 'Back': 'Quay lại', 'Next': 'Tiếp tục',
     'Save settings': 'Lưu cài đặt', 'Start': 'Bắt đầu', 'Tracking\n': 'Nội dung theo dõi\n',
     '\n\nEarlier usage: ': '\n\nThời gian đã dùng trước đó: ', 'Add from the computer\'s own log': 'Thêm từ nhật ký của máy', 'Do not add': 'Không thêm',
