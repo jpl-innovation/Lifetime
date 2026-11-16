@@ -34,7 +34,7 @@ from lifetime_server_insights import InsightsUI
 from lifetime_server_alerts import AlertsUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, GroupField, DeviceDetailsDialog, GroupsDialog, local_expiry, reduced_motion, table_action
 from lifetime_reveal import RollLabel, fade_in, later, warm_pages
-from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, ATTENTION, problems, byte_text, Skeleton,
+from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, problems, byte_text, Skeleton,
                                      LoadingBar, StatusNotice, TileIcon, FleetGauge, RowDelegate)
 from lifetime_charts import Plot, Insights
 from lifetime_health_gui import HealthPage

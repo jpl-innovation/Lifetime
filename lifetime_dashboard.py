@@ -1,14 +1,14 @@
 """Qt presentation and nonblocking scheduling for the local system probes."""
 from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
-from lifetime_i18n import tr, language, set_language, on_language_change, date_text, datetime_text, month, weekdays
+from lifetime_i18n import tr, language, datetime_text
 from html import escape
 import sys
 import time
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor
-from PyQt6.QtWidgets import QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QProgressBar, QSizePolicy, QPushButton
+from PyQt6.QtWidgets import QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy, QPushButton
 from lifetime_i18n_qt import QLabel, QWidget, QFrame, QPushButton
 from lifetime_i18n import duration, ui_text
 

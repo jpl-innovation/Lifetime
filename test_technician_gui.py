@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 os.environ['QT_STYLE_OVERRIDE'] = 'Fusion'
-from PyQt6.QtWidgets import QApplication, QLabel, QMessageBox
+from PyQt6.QtWidgets import QLabel, QMessageBox
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
 

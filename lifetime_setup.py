@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel,
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, QFrame
 
 from lifetime_theme import stylesheet, install
-from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
+from lifetime_glass import set_style, active_style, desktop_sheet
 from lifetime_settings import defaults, delete_history, normalize, save_settings, load_settings, update_settings
 
 CHOICES = (

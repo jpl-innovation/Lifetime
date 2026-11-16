@@ -21,7 +21,7 @@ from lifetime_client import SyncClient
 import lifetime_protocol as protocol
 import lifetime_server_store as storage
 import lifetime_tls as tls
-from test_machine_agent import AgentFixture, STAMP
+from test_machine_agent import AgentFixture
 
 
 class SyncFixture(AgentFixture):

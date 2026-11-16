@@ -1,15 +1,15 @@
 """Reusable server presentation widgets. No network or filesystem access."""
 import math
 
-from PyQt6.QtCore import Qt, QEvent, QObject, QPointF, QPropertyAnimation, QEasingCurve, QRectF, QTimer, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QShortcut
+from PyQt6.QtCore import Qt, QEvent, QPointF, QPropertyAnimation, QEasingCurve, QRectF, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QShortcut
 from PyQt6.QtWidgets import (QWidget, QStackedWidget, QTabBar, QLabel, QVBoxLayout,
                             QHBoxLayout, QPushButton, QProgressBar, QStyle, QStyledItemDelegate,
                             QStyleOptionViewItem, QGraphicsOpacityEffect)
 
 from lifetime_server_widgets import reduced_motion, more_icon
-from lifetime_theme import CONTROL_RADIUS, PANEL_RADIUS, SOFT_RADIUS, T, active_theme
-from lifetime_glass import STYLES, set_style, active_style, paint_classic, paint_glass, Glass, glass   # shared with the desktop app
+from lifetime_theme import CONTROL_RADIUS, SOFT_RADIUS, T, active_theme
+from lifetime_glass import STYLES, set_style, active_style, paint_glass, Glass, glass   # shared with the desktop app
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase
 from lifetime_widgets_dashboard import VISUAL_ROLE, HeartbeatBar, MiniSpark, StatusChip, chip_width, paint_cell
 

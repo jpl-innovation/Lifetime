@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Palette-aware, compact desktop view of the lifetime ledger."""
 import datetime as dt
-from lifetime_i18n import tr, language, set_language, on_language_change, date_text, datetime_text, month, weekdays
+from lifetime_i18n import tr, language, set_language, on_language_change, date_text, month
 import json
 import os
 from pathlib import Path
@@ -15,7 +15,7 @@ from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, QRectF, QVariantAnimation,
 from PyQt6.QtGui import QColor, QIcon, QPalette, QPainter, QPen, QFont, QShortcut, QKeySequence, QFontMetrics
 from PyQt6.QtWidgets import (QApplication, QAbstractSpinBox, QDoubleSpinBox,
                             QGraphicsOpacityEffect, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
-                            QProgressBar, QPushButton, QButtonGroup, QToolTip, QScrollArea, QVBoxLayout, QWidget)
+                            QPushButton, QButtonGroup, QToolTip, QScrollArea, QVBoxLayout, QWidget)
 from PyQt6.QtWidgets import QSizePolicy
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QDoubleSpinBox
 from lifetime_tracker import average_awake, data_dir, read_ledger, set_baseline, repair_daily, awake_clock, MAX_DELTA

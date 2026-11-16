@@ -4,7 +4,6 @@ Everything runs against servers on 127.0.0.1 that each test explicitly allows (P
 that must fail are patched, so nothing reaches the internet.
 """
 import asyncio
-import datetime as dt
 import http.server
 from pathlib import Path
 import shutil

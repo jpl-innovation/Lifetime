@@ -1,7 +1,6 @@
 """Saved-data safety regressions. All I/O is isolated in temporary directories."""
 import contextlib
 import copy
-import datetime as dt
 import io
 import json
 import os

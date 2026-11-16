@@ -5,7 +5,7 @@ All public aggregation values are seconds; presentation converts to hours.
 """
 from collections import deque
 import datetime as dt
-from lifetime_i18n import tr, language, set_language, on_language_change, date_text, datetime_text, month, weekdays
+from lifetime_i18n import tr, language, on_language_change, date_text, datetime_text, month, weekdays
 import math
 import os
 import sys
@@ -15,8 +15,7 @@ from PyQt6.QtCore import Qt, QRectF, QPointF, QTimer, QVariantAnimation, QEasing
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QFontMetrics
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QPushButton, QVBoxLayout,
                             QHBoxLayout, QGridLayout, QButtonGroup, QScrollArea,
-                            QTableWidget, QTableWidgetItem, QHeaderView, QToolTip,
-                            QAbstractItemView)
+                            QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QFrame, QTableWidget
 from lifetime_i18n import duration, time_text
 from lifetime_shell import DisclosureButton

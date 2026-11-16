@@ -1,7 +1,6 @@
 """P3 live contract, native probes, memory bounds and disposable agent delivery."""
 import copy
 import datetime as dt
-import json
 from pathlib import Path
 import secrets
 import subprocess

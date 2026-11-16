@@ -3,12 +3,12 @@ import math
 import os
 import sys
 
-from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
-                            QPushButton, QTabBar, QVBoxLayout, QWidget)
+                            QPushButton, QVBoxLayout, QWidget)
 
-from lifetime_theme import THEMES, install, T
+from lifetime_theme import install, T
 from lifetime_reveal import Intro, phase
 
 from lifetime_theme import Tokens

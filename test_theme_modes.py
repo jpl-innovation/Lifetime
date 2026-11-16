@@ -1,5 +1,4 @@
 """Light / dark / auto themes: complete palettes, a saved preference, re-tinting, and no leftover dark-only colours."""
-import json
 import re
 import tempfile
 import unittest

@@ -1,5 +1,4 @@
 """Deterministic boot allocation and migration tests. Every write is temporary."""
-import copy
 import datetime as dt
 import json
 import math

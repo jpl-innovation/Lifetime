@@ -3,7 +3,7 @@ import datetime as dt
 import copy
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy
-from lifetime_i18n_qt import QWidget, QFrame, QLabel, QPushButton
+from lifetime_i18n_qt import QWidget, QFrame, QLabel
 from lifetime_i18n import tr, date_text, datetime_text, on_language_change, language
 from lifetime_charts import Plot, RangeSegments, range_bounds, weekly
 from lifetime_tasks import Tasks

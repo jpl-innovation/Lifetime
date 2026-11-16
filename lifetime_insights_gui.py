@@ -7,7 +7,7 @@ Without enough readings the panel uses the wattage the owner set, else a typical
 import datetime as dt
 import json
 
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QDoubleSpinBox, QGridLayout, QHBoxLayout, QLineEdit, QSizePolicy, QVBoxLayout
 
 import lifetime_insights as insights

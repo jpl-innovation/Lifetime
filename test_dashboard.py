@@ -10,7 +10,6 @@ from unittest.mock import patch
 if importlib.util.find_spec('PyQt6') is None:
     raise unittest.SkipTest('PyQt6 is required for dashboard checks')
 
-from PyQt6.QtWidgets import QApplication
 import lifetime_dashboard as dash
 import lifetime_gui as gui
 import lifetime_tracker as tracker

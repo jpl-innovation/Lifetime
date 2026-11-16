@@ -1,5 +1,4 @@
 """Offscreen Health states, consent revocation and translated native navigation."""
-import datetime as dt
 import itertools
 import os
 from pathlib import Path
@@ -8,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-from PyQt6.QtCore import Qt, QAbstractAnimation
+from PyQt6.QtCore import QAbstractAnimation
 from PyQt6.QtTest import QTest
 from qt_test_support import qt_app
 from lifetime_health_gui import HealthPage

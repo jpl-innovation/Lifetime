@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 from PyQt6.QtWidgets import QApplication
 import lifetime_reports as reports
-import lifetime_settings as settings
 import lifetime_tracker as tracker
 
 
