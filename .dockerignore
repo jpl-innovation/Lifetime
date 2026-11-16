@@ -1,3 +1,5 @@
 *
 !lifetime_*.py
 !requirements-server.txt
+!LICENSE
+!THIRD_PARTY_NOTICES.md

@@ -24,6 +24,8 @@ fi
 for name in LifetimeTracker LifetimeAgent Lifetime; do
     pkill -u "$(id -u)" -x "$name" 2>/dev/null || true
 done
+# A source install runs as "python3 .../lifetime_tracker.py": match this installation's scripts by their full path.
+pkill -u "$(id -u)" -f "$HOME/\.local/share/lifetime/lifetime_(tracker|agent|gui)\.py" 2>/dev/null || true
 if [[ -L "$HOME/.local/bin/lifetime" ]]; then
     rm -f "$HOME/.local/bin/lifetime"
 fi

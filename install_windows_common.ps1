@@ -45,7 +45,17 @@ $Written = @($InstallDir)      # exactly what this run created or replaced; noth
 if ($ExePackage) {
     $Names = @('Lifetime.exe', 'LifetimeTracker.exe', 'LifetimeImport.exe', 'LifetimeAgent.exe',
                'install_agent_windows.ps1', 'uninstall_agent_windows.ps1')
+    # Installing over an earlier version: Windows cannot replace a program while it runs, so close this
+    # installation's own programs first (never another copy elsewhere). The ledger is saved by atomic replacement,
+    # so nothing recorded is lost; the tracker is started again below when it starts at login.
+    $Closed = @(Get-Process -Name Lifetime, LifetimeTracker, LifetimeImport -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and [IO.Path]::GetDirectoryName($_.Path) -eq $InstallDir })
+    foreach ($Process in $Closed) {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        Wait-Process -Id $Process.Id -Timeout 10 -ErrorAction SilentlyContinue
+    }
 } else {
+    $Closed = @()
     $Names = @('lifetime_system.py', 'lifetime_system_gui.py', 'lifetime_tracker.py', 'lifetime_gui.py', 'lifetime_health.py', 'lifetime_health_gui.py', 'lifetime_shell.py', 'lifetime_signals.py', 'lifetime_dashboard.py',
                'lifetime_settings.py', 'lifetime_setup.py', 'lifetime_import.py', 'lifetime_import_windows.py',
                'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py',
@@ -105,6 +115,7 @@ try {
     }
     if ($Consent.completed -eq $true -and $Consent.autostart -eq $true) {
         Enable-ScheduledTask -TaskName 'Lifetime Tracker' | Out-Null
+        if (@($Closed | Where-Object { $_.ProcessName -eq 'LifetimeTracker' }).Count) { Start-ScheduledTask -TaskName 'Lifetime Tracker' }
     } else {
         Disable-ScheduledTask -TaskName 'Lifetime Tracker' | Out-Null
     }
@@ -153,4 +164,5 @@ if ($Admin) {
 } elseif ($ExePackage -and (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'LifetimeAgentSetup\LifetimeAgent.exe'))) {
     Write-Host 'The machine agent setup files in Program Files were not updated (no administrator approval). Run this installer again and approve it before connecting this computer to a server.'
 }
+if ($Closed.Count) { Write-Host 'Lifetime was running and was closed so its programs could be replaced. Open it again from the Start menu.' }
 Write-Host 'Installed for the original user. Open Lifetime from the Start menu to choose what to collect and whether to track at login.'

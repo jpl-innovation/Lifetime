@@ -89,6 +89,9 @@ function Install-StagedUpdate {
     if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { Stop-Install 2 'Staged updates apply to Packaged agent installations (LifetimeAgent.exe).' }
     if (-not (Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent -ErrorAction SilentlyContinue)) { Stop-Install 2 'No installed Lifetime agent to update.' }
     Stop-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent
+    # Stopping the task ends only the process it started; the one-file program does its work in a child of the same
+    # file, which would otherwise keep running (and keep the file busy) for ever.
+    Get-Process -Name LifetimeAgent -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $target } | Stop-Process -Force -ErrorAction SilentlyContinue
     $deadline = (Get-Date).AddSeconds(30)
     while (@(Get-Process -Name LifetimeAgent -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $target }).Count) {
         if ((Get-Date) -gt $deadline) { Start-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent; Stop-Install 1 'The running agent did not stop; nothing was changed.' }

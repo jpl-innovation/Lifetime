@@ -60,6 +60,19 @@ if [[ "$mode" != --docker ]]; then
     chmod +x "$appimage"
     APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --self-check
     APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --run-tool LifetimeAgent --help >/dev/null
+
+    echo '--- per-user installer (install, install again over a login entry of an older version, uninstall)'
+    home="$work/home"
+    mkdir -p "$home/.config/autostart"
+    HOME="$home" "$bundle/install_linux.sh" </dev/null
+    HOME="$home" "$home/.local/bin/lifetime" --self-check
+    grep -q "Exec=\"$home/.local/lib/lifetime/Lifetime\"" "$home/.local/share/applications/lifetime.desktop"
+    printf '[Desktop Entry]\nExec="/usr/bin/python3" "/old/lifetime_tracker.py" "--run"\n' > "$home/.config/autostart/lifetime-tracker.desktop"
+    HOME="$home" "$bundle/install_linux.sh" </dev/null >/dev/null
+    grep -q "Exec=\"$home/.local/lib/lifetime/LifetimeTracker\" \"--run\"" "$home/.config/autostart/lifetime-tracker.desktop"
+    HOME="$home" "$bundle/uninstall_linux.sh"
+    [[ ! -e "$home/.local/lib/lifetime" && ! -e "$home/.local/share/applications/lifetime.desktop" \
+        && ! -e "$home/.config/autostart/lifetime-tracker.desktop" ]]
 fi
 
 echo '--- server'

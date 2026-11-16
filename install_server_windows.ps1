@@ -191,11 +191,16 @@ if ($dashboardTarget) {
     $bytes[0x15] = $bytes[0x15] -bor 0x20
     [IO.File]::WriteAllBytes($shortcutPath, $bytes)
 }
-# One-code connection fallback is limited to the HTTPS port on the local subnet.
-if (-not (Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue)) {
+# One-code connection fallback is limited to the HTTPS port on the local subnet. A rule kept from an earlier
+# install follows the port chosen now, so a reinstall on another port neither stays closed nor leaves the old one open.
+if (Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue) {
+    Set-NetFirewallRule -Name 'LifetimeServer-Connect' -LocalPort $Port
+} else {
     New-NetFirewallRule -Name 'LifetimeServer-Connect' -DisplayName 'Lifetime Server local connection' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress LocalSubnet -Profile Domain, Private | Out-Null
 }
-if ($OpenFirewall -and -not (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue)) {
+if (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContinue) {
+    Set-NetFirewallRule -Name 'LifetimeServer-HTTPS' -LocalPort $Port
+} elseif ($OpenFirewall) {
     New-NetFirewallRule -Name 'LifetimeServer-HTTPS' -DisplayName 'Lifetime Server HTTPS' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress $FirewallRemoteAddress -Profile Domain, Private | Out-Null
 }
 if ($Start) {

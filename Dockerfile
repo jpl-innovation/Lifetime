@@ -19,6 +19,7 @@ WORKDIR /opt/lifetime-server
 COPY requirements-server.txt ./
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements-server.txt
 COPY lifetime_*.py ./
+COPY LICENSE THIRD_PARTY_NOTICES.md ./
 RUN install -d -o lifetime -g lifetime -m 0700 /var/lib/lifetime-server \
     && install -d -o lifetime -g lifetime -m 0755 /run/lifetime-server \
     && printf '#!/bin/sh\nexec python /opt/lifetime-server/lifetime_server.py admin --directory /var/lib/lifetime-server --admin-port 8444 "$@"\n' \

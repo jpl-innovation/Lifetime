@@ -126,6 +126,10 @@ if [[ -x "$source_dir/Lifetime" && -d "$source_dir/_internal" ]]; then
     rm -rf "$install_dir.previous"
     mkdir -p "$HOME/.local/bin"
     ln -sfn "$install_dir/Lifetime" "$HOME/.local/bin/lifetime"
+    # Upgrade from a source install: its program files sat in the data folder. Remove them (never the history), so
+    # nothing can start the old version beside this one.
+    rm -f "$HOME"/.local/share/lifetime/lifetime_*.py
+    rm -rf "$HOME/.local/share/lifetime/assets" "$HOME/.local/share/lifetime/__pycache__"
     tracker=("$install_dir/LifetimeTracker" --run)
     agent=("$install_dir/LifetimeAgent")
     window=("$install_dir/Lifetime")
@@ -136,6 +140,10 @@ else
     python_bin="$(command -v python3 || true)"
     if [[ -z "$python_bin" ]]; then
         printf 'Python 3 is required. Install it with your package manager (for example: sudo apt install python3), then run this installer again.\n'
+        exit 1
+    fi
+    if ! "$python_bin" -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+        printf 'Lifetime needs Python 3.11 or newer; %s is older. Use the Lifetime-Linux bundle instead: it brings its own Python.\n' "$python_bin"
         exit 1
     fi
     if ! "$python_bin" -c 'import PyQt6.QtWidgets' >/dev/null 2>&1; then
@@ -166,9 +174,21 @@ fi
 
 journal_access
 # The tracker's login start is prepared here but switched on only when you choose it in Lifetime.
+# Login entries written by an earlier version (by this installer or by Lifetime itself) must start this version's
+# programs: an upgrade from a source install to the bundle moves them.
+agent_dir="${XDG_STATE_HOME:-$HOME/.local/state}/lifetime-agent"
+agent_unit="$config_home/systemd/user/lifetime-company-agent.service"
+agent_entry="$config_home/autostart/lifetime-company-agent.desktop"
+tracker_entry="$config_home/autostart/lifetime-tracker.desktop"
+[[ ! -f "$tracker_entry" ]] || write_autostart "$tracker_entry" 'Lifetime tracker' "${tracker[@]}"
+[[ ! -f "$agent_entry" ]] || write_autostart "$agent_entry" 'Lifetime company agent' "${agent[@]}" --directory "$agent_dir" --run
+[[ ! -f "$agent_unit" ]] || write_unit "$agent_unit" 'Lifetime company reporting agent' \
+    $'UMask=0077\nNoNewPrivileges=true' "${agent[@]}" --directory "$agent_dir" --run
 if systemd_user; then
     write_unit "$config_home/systemd/user/lifetime-tracker.service" 'Lifetime awake-time tracker' '' "${tracker[@]}"
     systemctl --user daemon-reload
+    # Running services continue with the new programs (try-restart leaves a stopped service stopped).
+    systemctl --user try-restart lifetime-tracker.service lifetime-company-agent.service >/dev/null 2>&1 || true
 fi
 if [[ "$company_agent" == true ]]; then
     company_agent_service "${agent[@]}"
