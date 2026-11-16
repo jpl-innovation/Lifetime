@@ -226,6 +226,24 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(self.page.review_error.text(), 'Windows permission is needed to finish.')
         self.assertTrue(self.page.finish_button.isEnabled())
 
+    def test_finish_says_why_the_agent_setup_failed_from_its_exit_code(self):
+        """Every installer failure used to show the same "Could not finish connecting" message."""
+        import lifetime_connect as connect
+        from lifetime_i18n import VI
+        script = (Path(connect.__file__).with_name('install_agent_windows.ps1')).read_text(encoding='utf-8')
+        for code, text in connect.SETUP_EXIT.items():
+            self.assertIn(f'Stop-Install {code} ', script)          # only codes the installer really uses
+            self.assertIn(text, VI)
+        self.find()
+        for error, expected in (('SetupFailed:exit-3', connect.SETUP_EXIT[3]), ('SetupFailed:exit-5', connect.SETUP_EXIT[5]),
+                                ('SetupFailed:exit-77', 'Could not finish connecting (error 77). Check that the server is on and try again.'),
+                                ('RuntimeError', connect.FINISH_FAILED)):
+            self.page.finish()
+            self.page.tasks.resolve(error=error)
+            self.assertEqual((self.page.step, self.page.review_error.text()), (3, expected))
+        self.assertEqual(connect.SetupFailed(2).detail_code, 'exit-2')
+        self.assertEqual(connect.SetupFailed(-1).detail_code, 'exit-unknown')
+
     def test_restart_pending_unreachable_and_used_code(self):
         self.page._operation = 'status'
         self.page.completed(0, dict(enabled=True, phase='pending', status='unreachable', server='https://server:8443'))
@@ -387,6 +405,11 @@ class ConnectTests(unittest.TestCase):
                 run_agent('finish', dict(history=True), 'SECRET', self.root.name)
         self.assertEqual(sum(c[0] == 'powershell.exe' for c in calls), 1)
         self.assertFalse(self.bundle_path.exists())
+        with patch.object(connect.sys, 'platform', 'win32'), patch.object(connect.subprocess, 'CREATE_NO_WINDOW', 0, create=True), \
+                patch.object(connect.subprocess, 'run', side_effect=lambda command, **kwargs: fake_run(command) if command[0] != 'powershell.exe' else Mock(returncode=4)):
+            with self.assertRaises(connect.SetupFailed) as caught:
+                run_agent('finish', dict(history=True), 'SECRET', self.root.name)
+        self.assertEqual(caught.exception.detail_code, 'exit-4')
 
 
 class ServerStateTests(unittest.TestCase):

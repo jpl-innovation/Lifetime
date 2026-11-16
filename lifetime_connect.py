@@ -99,6 +99,37 @@ def locate_server(value):
     return find_server(code)
 
 
+FINISH_FAILED = 'Could not finish connecting. Check that the server is on and try again.'
+# The agent installer's exit codes (install_agent_windows.ps1, Stop-Install; the agent's own 2-4 mean the same).
+SETUP_EXIT = {
+    2: 'Windows could not set up the reporting agent with these details. Check the code and try again. If the folder '
+       'Program Files\\LifetimeAgent holds files that are not from Lifetime, move them away first.',
+    3: "Could not reach the server, or it is not the server this code belongs to (its security certificate does not "
+       "match). Check that the server is on and on the same network, and that the code is from that server.",
+    4: 'The server refused this code: it was already used, has expired or was cancelled. Create a new code on the server.',
+    5: 'Setting up the reporting agent needs administrator approval. Sign in with an administrator account and try again.',
+    6: 'A Lifetime agent is already installed on this computer and was not replaced. Ask your IT team to replace it, then try again.',
+}
+
+
+class SetupFailed(RuntimeError):
+    """The elevated agent setup ended with this exit code (``detail_code`` crosses the worker bridge)."""
+    def __init__(self, code):
+        super().__init__('Agent operation failed')
+        self.detail_code = 'exit-%d' % code if 0 < code < 2 ** 32 else 'exit-unknown'
+
+
+def setup_failure_text(error, t):
+    """The words for a failed Finish from the worker's error ("SetupFailed:exit-3"): the installer's reason when its
+    exit code is known, else the general message with the code."""
+    code = error.partition(':exit-')[2]
+    if error.startswith('SetupFailed:') and code.isdigit() and int(code) in SETUP_EXIT:
+        return t(SETUP_EXIT[int(code)])
+    if error.startswith('SetupFailed:') and code.isdigit():
+        return t('Could not finish connecting (error {code}). Check that the server is on and try again.', code=code)
+    return t(FINISH_FAILED)
+
+
 def _ps_quote(value):
     return "'" + str(value).replace("'", "''") + "'"
 
@@ -229,7 +260,7 @@ def run_agent(action, policy, bundle=None, directory=None, display_name=None):
             if result.returncode == 1223:
                 raise PermissionError(PERMISSION)
             if result.returncode:
-                raise RuntimeError('Agent operation failed')
+                raise SetupFailed(result.returncode)
         else:
             subprocess.run(command, check=True)
             if action == 'finish':
@@ -909,8 +940,7 @@ class ConnectPage(QWidget):
             if operation == 'disconnect':
                 self.change_policy()
             self.show_step(3)
-            message = PERMISSION if error == 'PermissionError' else 'Could not finish connecting. Check that the server is on and try again.'
-            self.review_error.setText(self.t(message))
+            self.review_error.setText(self.t(PERMISSION) if error == 'PermissionError' else setup_failure_text(error, self.t))
             self.review_error.show()
         elif self.step == 5:
             self._set_reachable(False)

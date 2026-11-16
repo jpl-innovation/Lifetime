@@ -1425,6 +1425,22 @@ CONNECT_VI = {
     'The server refused the report (error {code}).': 'Máy chủ từ chối báo cáo (lỗi {code}).',
     'Windows permission is needed to finish.': 'Cần quyền Windows để hoàn tất.',
     'Could not finish connecting. Check that the server is on and try again.': 'Không thể hoàn tất kết nối. Kiểm tra máy chủ đã bật rồi thử lại.',
+    'Could not finish connecting (error {code}). Check that the server is on and try again.':
+        'Không thể hoàn tất kết nối (lỗi {code}). Kiểm tra máy chủ đã bật rồi thử lại.',
+    'Windows could not set up the reporting agent with these details. Check the code and try again. If the folder '
+    'Program Files\\LifetimeAgent holds files that are not from Lifetime, move them away first.':
+        'Windows không thể cài đặt tác nhân báo cáo với các thông tin này. Hãy kiểm tra mã rồi thử lại. Nếu thư mục '
+        'Program Files\\LifetimeAgent chứa tệp không phải của Lifetime, hãy chuyển chúng đi trước.',
+    "Could not reach the server, or it is not the server this code belongs to (its security certificate does not "
+    "match). Check that the server is on and on the same network, and that the code is from that server.":
+        'Không thể kết nối tới máy chủ, hoặc đó không phải máy chủ của mã này (chứng chỉ bảo mật không khớp). '
+        'Hãy kiểm tra máy chủ đã bật, cùng mạng, và mã được tạo từ chính máy chủ đó.',
+    'The server refused this code: it was already used, has expired or was cancelled. Create a new code on the server.':
+        'Máy chủ từ chối mã này: mã đã được dùng, đã hết hạn hoặc đã bị hủy. Hãy tạo mã mới trên máy chủ.',
+    'Setting up the reporting agent needs administrator approval. Sign in with an administrator account and try again.':
+        'Cài đặt tác nhân báo cáo cần quyền quản trị viên. Hãy đăng nhập bằng tài khoản quản trị viên rồi thử lại.',
+    'A Lifetime agent is already installed on this computer and was not replaced. Ask your IT team to replace it, then try again.':
+        'Máy tính này đã cài tác nhân Lifetime và tác nhân đó chưa được thay thế. Hãy nhờ bộ phận IT thay thế rồi thử lại.',
     'This code cannot be used. Ask for a new code on the server.': 'Không thể dùng mã này. Hãy lấy mã mới trên máy chủ.',
     'Add a computer': 'Thêm máy tính',
     'On the computer, open Lifetime, choose Connect, and enter this code.': 'Trên máy tính, mở Lifetime, chọn Kết nối và nhập mã này.',
