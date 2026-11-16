@@ -662,10 +662,9 @@ class ServerWindow(QMainWindow):
         self.bind(self.search, 'Search devices', 'setPlaceholderText')
         self.group = QComboBox()
         self.group.addItem(self.t('All groups'), '')
-        self.group.setMaximumWidth(170)
+        self.group.setMaximumWidth(260)       # group names are typed by people and can be long; the list shows them whole
         self.group.setAccessibleName(self.t('Group'))
         self.status_filter = QComboBox()
-        self.status_filter.setMaximumWidth(170)
         for code in ('', 'pending', 'approved', 'denied', 'revoked', 'reporting', 'report-overdue', 'unavailable'):
             self.status_filter.addItem('', code)
         chips = ControlRow()
@@ -687,6 +686,10 @@ class ServerWindow(QMainWindow):
         self.device_order.setAccessibleName(self.t('Sort computers'))
         self.device_order.currentIndexChanged.connect(self._filters_changed)
         chips.addWidget(self.device_order)
+        for combo in (self.group, self.status_filter, self.device_order):
+            # Wide enough for its longest entry in the current language. The default keeps the width of the first
+            # show, so after switching to Vietnamese the status filter read "Tất cả trạng thá"; the row wraps instead.
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         layout.addLayout(chips)
         self.device_grid = QGridLayout()
         self.device_grid.setSpacing(16)

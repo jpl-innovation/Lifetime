@@ -799,6 +799,34 @@ class ServerGuiTests(unittest.TestCase):
         self.assertTrue(self.window.tabs.widget(1).widgetResizable())
         self.assertTrue(self.window.export_button.accessibleName())
 
+    def test_devices_toolbar_shows_every_filter_in_full_in_english_and_vietnamese(self):
+        """The status filter read "Tất cả trạng thá": it kept the width of its first, English, text and a 170 px cap."""
+        from PyQt6.QtWidgets import QStyle, QStyleOptionComboBox
+        self.load([device(1)])
+        self.window.tabs.setCurrentIndex(1)
+        page = self.window.tabs.widget(1).widget()
+        controls = (self.window.search, self.window.group, self.window.manage_groups_button, self.window.status_filter,
+                    self.window.device_order)
+        for language in ('en', 'vi'):
+            for width in (1024, 1600):
+                with self.subTest(language=language, width=width):
+                    self.window.resize(width, 800)
+                    self.app.processEvents()
+                    for combo in (self.window.group, self.window.status_filter, self.window.device_order):
+                        option = QStyleOptionComboBox()
+                        combo.initStyleOption(option)
+                        room = combo.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                                            QStyle.SubControl.SC_ComboBoxEditField, combo).width()
+                        longest = max(combo.fontMetrics().horizontalAdvance(combo.itemText(i)) for i in range(combo.count()))
+                        self.assertGreaterEqual(room, longest, combo.accessibleName() or combo.itemText(0))
+                    for control in controls:
+                        self.assertTrue(control.isVisible())
+                        self.assertLessEqual(control.mapTo(page, control.rect().bottomRight()).x(), page.width())
+                        self.assertGreaterEqual(control.width(), control.minimumSizeHint().width())
+            self.assertEqual(self.window.status_filter.itemText(0), dict(en='All statuses', vi='Tất cả trạng thái')[language])
+            self.window.language_button.click()
+            self.app.processEvents()
+
     def test_overview_failure_is_redacted_and_keeps_last_successful_data(self):
         self.load([device(1)])
         self.api.fail.add('overview')
