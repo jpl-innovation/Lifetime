@@ -144,8 +144,22 @@ class InvitationTests(unittest.TestCase):
                 with self.assertRaises(storage.AuthenticationError):
                     self.store.enroll(request(code), peer_ip=f'192.0.2.{index+2}')
             self.assertEqual(self.store._db.execute('SELECT failures FROM throttle').fetchone()[0], 10)
+            # Audit L4: ten wrong codes used to lock enrolment for every computer. Now the guesser waits ...
             with self.assertRaises(storage.ThrottledError):
-                self.store.enroll(request(code), peer_ip='192.0.2.200')
+                self.store.enroll(request(code), peer_ip='192.0.2.1')
+            # ... a computer elsewhere with a real code gets in ...
+            good = self.store.create_invitation(FINGERPRINT)
+            self.assertEqual(self.store.enroll(request(good['code']), peer_ip='192.0.2.200')['status'], 'pending')
+            # ... a caller with no known address keeps the small shared budget ...
+            with self.assertRaises(storage.ThrottledError):
+                self.store.enroll(request(code))
+            # ... and there is still a shared ceiling for guesses spread over many addresses.
+            with patch.object(storage, 'GUESS_CEILING', 12):
+                for index in range(2):
+                    with self.assertRaises(storage.AuthenticationError):
+                        self.store.enroll(request(code), peer_ip=f'192.0.2.{index+100}')
+                with self.assertRaises(storage.ThrottledError):
+                    self.store.enroll(request(self.store.create_invitation(FINGERPRINT)['code']), peer_ip='192.0.2.201')
         with patch.object(storage, '_now', return_value=now + dt.timedelta(seconds=61)):
             live = self.store.create_invitation(FINGERPRINT)
             self.assertEqual(self.store.enroll(request(live['code']), peer_ip='192.0.2.1')['status'], 'pending')

@@ -32,6 +32,7 @@ MAX_CODE_TTL = 86400
 MAX_CODE_USES = 100
 GUESS_LIMIT = 10
 GUESS_WINDOW = 60
+GUESS_CEILING = 200     # wrong invitation codes a minute from all addresses together, before everyone waits
 OVERDUE_SECONDS = 600
 LIVE_SILENCE_SECONDS = 30   # a computer that has been reporting live and goes quiet is shown offline this fast
 MAX_PAGE = 500
@@ -598,8 +599,9 @@ class Store:
     def enroll(self, request, peer_ip=None):
         """Consume one use for a new request; exact retries consume no uses.
 
-        The guessing budget is global (no client network identifiers), durable,
-        and shared between Store instances. Re-enrollment requires approval and
+        The guessing budget is durable and shared between Store instances: per address
+        (stored hashed) and per invitation for invitation codes, with a global ceiling;
+        global for legacy codes. Re-enrollment requires approval and
         preserves server metadata, usage and the immutable sequence namespace.
         """
         keys = {'version', 'request_id', 'device_id', 'code', 'poll_token', 'identity', 'policy'}
@@ -640,11 +642,14 @@ class Store:
             start = _stamp(now)
             if throttle and (now - _time(throttle['window_start'])).total_seconds() < GUESS_WINDOW:
                 failures, start = throttle['failures'], throttle['window_start']
-            if failures >= GUESS_LIMIT:
+            # Invitation codes from a known address are held back per address (the back-off below) and per
+            # invitation (5 wrong secrets), so ten wrong codes from one host no longer lock enrolment for everyone;
+            # only the much higher ceiling is shared. Legacy bundle codes keep the small global budget.
+            by_address = peer_ip is not None and code.upper().startswith('LTS')
+            if failures >= (GUESS_CEILING if by_address else GUESS_LIMIT):
                 failure = ThrottledError('Enrollment temporarily throttled')
             else:
-                # Legacy bundle codes retain their existing global budget.
-                ip_hash = _hash(peer_ip) if peer_ip is not None and code.upper().startswith('LTS') else None
+                ip_hash = _hash(peer_ip) if by_address else None
                 ip_row = db.execute('SELECT * FROM guess_ips WHERE ip_hash=?', (ip_hash,)).fetchone()
                 if ip_row and _time(ip_row['next_attempt']) > now:
                     failure = ThrottledError('Enrollment temporarily throttled')
