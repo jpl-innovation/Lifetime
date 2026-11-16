@@ -258,6 +258,17 @@ class ServerGuiTests(unittest.TestCase):
         self.addCleanup(self.cleanup_window)
         self.wait_idle()
 
+    def test_a_refused_request_shows_the_servers_reason_not_a_connection_error(self):
+        from lifetime_admin import REFUSALS
+        seen = []
+        for number, error in enumerate(('Refused:power-consent', 'Refused:unknown-code', None), 9001):
+            self.window._jobs[number] = (lambda result, ok: seen.append(ok), None)
+            self.window._completed(number, None, False, error)
+            if number == 9001:
+                self.assertEqual(self.window.status_label.text(), REFUSALS['power-consent'])
+        self.assertEqual(self.window.status_label.text(), "Can't reach the Lifetime server. Make sure it is running.")
+        self.assertEqual(seen, [False, False, False])
+
     def test_shared_hardware_panel_follows_resources(self):
         row = device(0)
         row['policy']['resources'] = True

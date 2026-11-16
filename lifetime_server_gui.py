@@ -1851,7 +1851,7 @@ class ServerWindow(QMainWindow):
             button.setEnabled(True)
         if error == 'NotAllowed':        # the server refused this for the signed-in role (HTTP 403)
             self.status_label.setText(self.t('Your role does not allow this.'))
-        elif error.startswith('Refused:'):      # the server said why (a fixed code, lifetime_admin.REFUSALS)
+        elif error and error[8:] in REFUSALS and error.startswith('Refused:'):      # the server said why (a fixed code)
             self.status_label.setText(self.t(REFUSALS[error[8:]]))
         elif error == 'PermissionError':
             self._status_failure = True
