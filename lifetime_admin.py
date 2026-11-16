@@ -28,7 +28,23 @@ class NotAllowed(ValueError):
     """The server refused this operation for the caller's role (HTTP 403)."""
 
 
-def _failed(status):
+class Refused(ValueError):
+    """The server refused this request for a known reason; ``detail_code`` is the key in REFUSALS."""
+
+
+# Fixed reason codes the server may name with a refusal (lifetime_server_store), in plain words (translated in the GUI).
+REFUSALS = {
+    'power-consent': 'This computer does not allow remote sleep, restart, shut down or turn on. Turn on power control on that computer first.',
+    'not-online': 'This computer needs a recent sync first.',
+    'command-pending': 'A command is already pending for this computer.',
+}
+
+
+def _failed(status, reason=None):
+    if status != 403 and isinstance(reason, str) and reason in REFUSALS:
+        error = Refused('Administrative request failed (HTTP %s): %s' % (status, REFUSALS[reason]))
+        error.detail_code = reason
+        return error
     return (NotAllowed if status == 403 else ValueError)('Administrative request failed (HTTP %s)' % status)
 
 
@@ -61,7 +77,9 @@ class AdminClient:
             else:
                 reply = decode(raw)
                 if not isinstance(reply, dict) or reply.get('status') != 200 or 'result' not in reply:
-                    raise _failed(reply.get('status') if isinstance(reply, dict) and type(reply.get('status')) is int else 500)
+                    if not isinstance(reply, dict):
+                        raise _failed(500)
+                    raise _failed(reply.get('status') if type(reply.get('status')) is int else 500, reply.get('reason'))
                 return reply['result']
         token = (self.directory / 'admin-token').read_text(encoding='ascii').strip()
         if not 32 <= len(token) <= 256 or any(ord(c) < 33 or ord(c) > 126 for c in token):
@@ -73,7 +91,13 @@ class AdminClient:
                 'Connection': 'close'})
             response = connection.getresponse()
             if response.status != 200:
-                raise _failed(response.status)
+                reason = None
+                if response.status in (400, 409):       # the only refusals that name a reason
+                    try:
+                        reason = decode(response.read(4096)).get('reason')
+                    except Exception:       # no readable body: the status alone
+                        pass
+                raise _failed(response.status, reason)
             raw = response.read(MAX_BYTES + 1)
             return decode(raw)
         finally:

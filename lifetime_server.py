@@ -353,6 +353,12 @@ def _status(error):
     return 500
 
 
+def _refusal(error):
+    """The fixed refusal code a store error carries (lifetime_admin.REFUSALS), else None: never the error's text."""
+    code = getattr(error, 'refusal', None) if isinstance(error, StoreError) else None
+    return code if isinstance(code, str) and re.fullmatch(r'[a-z-]{1,32}', code) else None
+
+
 def _fields(value, required, optional=()):
     if (not isinstance(value, dict) or set(value) - set(required) - set(optional)
             or set(required) - set(value)):
@@ -387,6 +393,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def send_error(self, code, message=None, explain=None):
         self._reply(code, {'error': 'Request failed'})
+
+    def _fail(self, code, error):
+        """An admin refusal names its fixed reason code, so the dashboard can say why; computers get no reason."""
+        reason = _refusal(error) if self.server.admin else None
+        self._reply(code, dict({'error': 'Request failed'}, **({'reason': reason} if reason else {})))
 
     def _reply(self, status, value):
         # The stdlib parser falls back to HTTP/0.9 on malformed request lines;
@@ -508,12 +519,12 @@ class _Handler(BaseHTTPRequestHandler):
         except AuthenticationError:
             self._refused('credential', credential, value)
             self.send_error(403)
-        except ConflictError:
+        except ConflictError as error:
             self._refused('conflict', credential, value)
-            self.send_error(409)
-        except (ProtocolError, StoreError, TypeError, ValueError, RecursionError):
+            self._fail(409, error)
+        except (ProtocolError, StoreError, TypeError, ValueError, RecursionError) as error:
             self._refused('invalid', credential, value)
-            self.send_error(400)
+            self._fail(400, error)
         except (TimeoutError, ConnectionError):
             self.send_error(408)
         except Exception:
@@ -848,7 +859,8 @@ class ServerRuntime:
                 raise ProtocolError('Invalid admin request')
             reply = canonical(dict(status=200, result=self.admin_call(request['operation'], request['arguments'], identity)))
         except Exception as error:
-            reply = canonical(dict(status=_status(error)))
+            reason = _refusal(error)
+            reply = canonical(dict(status=_status(error), **({'reason': reason} if reason else {})))
         if len(reply) > MAX_BYTES:
             reply = canonical(dict(status=413))
         return reply
@@ -1187,14 +1199,14 @@ def _admin(args):
     """One administration request to the running server through lifetime_admin (the identity-bound pipe or socket
     first, then the token), so roles, validation and the audit trail apply exactly as for the dashboard."""
     import json
-    from lifetime_admin import AdminClient, NotAllowed
+    from lifetime_admin import AdminClient, NotAllowed, Refused
     try:
         arguments = json.loads(args.arguments or '{}')
         if not isinstance(arguments, dict) or not args.operation:
             raise ValueError('Give --operation and a JSON object in --arguments')
         result = AdminClient(args.directory, args.admin_port).call(args.operation, **arguments)
     except ValueError as error:     # raised by this program with fixed wording (bad arguments, HTTP status)
-        own = type(error) in (ValueError, NotAllowed)       # not, say, a JSON error quoting what was typed
+        own = type(error) in (ValueError, NotAllowed, Refused)      # not, say, a JSON error quoting what was typed
         print(f'Lifetime Server admin: {error if own else type(error).__name__}', file=sys.stderr)
         return 1
     except OSError as error:        # the kind only: operating-system messages carry paths and addresses

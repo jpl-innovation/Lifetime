@@ -49,7 +49,11 @@ SERVER_PROBLEMS = ('rejected', 'conflict')      # what the server itself saw go 
 
 
 class StoreError(ValueError):
-    """Invalid store operation or backup."""
+    """Invalid store operation or backup. ``refusal`` is an optional fixed code (lifetime_admin.REFUSALS) the admin
+    client can say in plain words; the message itself never leaves the server."""
+    def __init__(self, message='', refusal=None):
+        super().__init__(message)
+        self.refusal = refusal
 
 
 class ConflictError(StoreError):
@@ -1770,11 +1774,11 @@ class Store:
             self._expire_commands(db)
             row = self._device_row(db, device_id)
             if row['status'] != 'approved' or not self._online(db, row):
-                raise StoreError('Device must be approved and online')
+                raise StoreError('Device must be approved and online', 'not-online')
             if action != 'refresh' and not json.loads(row['policy']).get('control'):
-                raise StoreError('Remote power consent is required')
+                raise StoreError('Remote power consent is required', 'power-consent')
             if db.execute("SELECT 1 FROM commands WHERE device_id=? AND status IN ('pending','delivered')", (device_id,)).fetchone():
-                raise ConflictError('Device already has a pending command')
+                raise ConflictError('Device already has a pending command', 'command-pending')
             command_id, now = str(uuid.uuid4()), _stamp(_now())
             db.execute("INSERT INTO commands VALUES (?,?,?,'pending',?,?,'')", (command_id, device_id, action, now, now))
             self._event(db, device_id, 'command-pending')
@@ -1830,7 +1834,9 @@ class Store:
         from lifetime_wol import local_broadcasts, send_magic_packet
         with self._transaction() as db:
             row = self._device_row(db, device_id)
-            if row['status'] != 'approved' or not json.loads(row['policy']).get('control') or self._online(db, row):
+            if row['status'] == 'approved' and not json.loads(row['policy']).get('control'):
+                raise StoreError('Remote power consent is required', 'power-consent')
+            if row['status'] != 'approved' or self._online(db, row):
                 raise StoreError('Wake requires an approved offline device with remote power consent')
             readings = json.loads(row['readings']) if row['readings'] else {}
             macs = readings.get('specs', {}).get('mac_addresses', [])

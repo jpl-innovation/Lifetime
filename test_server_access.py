@@ -337,6 +337,26 @@ class AccessTests(unittest.TestCase):
         self.assertEqual(self.call(people['admin'], 'send_command', device_id=[device, refused], action='sleep')[0], 400)
         self.assertEqual(self.call(people['admin'], 'send_command', device_ids=[device], action='sleep')[0], 400)
 
+    def test_a_refused_power_request_names_its_reason_on_both_channels(self):
+        """A remote sleep refused for the owner's consent used to come back as a bare "HTTP 400"."""
+        from lifetime_admin import REFUSALS, Refused
+        device, refused = self.online(), self.online(control=False)
+        operator = self.people()['operator']
+        reply = decode(self.runtime._pipe_request(operator, canonical(dict(
+            operation='send_command', arguments=dict(device_id=refused, action='sleep')))))
+        self.assertEqual(reply, dict(status=400, reason='power-consent'))
+        self.assertIn('Turn on power control on that computer first.', REFUSALS[reply['reason']])
+        self.assertEqual(self.admin_raw('/v1/send_command', {'device_id': device, 'action': 'refresh'})[0], 200)
+        status, body, _ = self.admin_raw('/v1/send_command', {'device_id': device, 'action': 'refresh'})
+        self.assertEqual((status, decode(body)), (409, {'error': 'Request failed', 'reason': 'command-pending'}))
+        with self.assertRaises(Refused) as caught:      # whichever channel the client used
+            self.admin.call('send_command', device_id=device, action='refresh')
+        self.assertEqual(caught.exception.detail_code, 'command-pending')
+        self.assertIn(REFUSALS['command-pending'], str(caught.exception))
+        # Other refusals still carry no reason, and a computer's own requests never get one.
+        self.assertEqual(self.call(operator, 'send_command', device_id=device, action='nap'), (400, None))
+        self.assertNotIn(b'reason', self.admin_raw('/v1/devices', {'x': 1})[1])
+
     def test_power_rate_limits_per_computer_and_per_account(self):
         operator = self.people()['operator']
         with patch.object(self.runtime._store, 'send_command', return_value={'command_id': str(uuid.uuid4())}):

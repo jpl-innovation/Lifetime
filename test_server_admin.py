@@ -66,6 +66,40 @@ class AdminClientTests(unittest.TestCase):
             self.assertNotIn('secret', str(caught.exception))
             response.read.assert_not_called()
 
+    def test_a_refusal_reason_becomes_plain_words_and_only_known_codes_count(self):
+        import lifetime_i18n
+        from lifetime_admin import REFUSALS, Refused
+        with tempfile.TemporaryDirectory() as root, patch('lifetime_admin.http.client.HTTPConnection') as factory, \
+                patch('sys.platform', 'other'):       # the token channel only
+            (Path(root) / 'admin-token').write_text('a' * 43, encoding='ascii')
+            response = factory.return_value.getresponse.return_value
+            response.status = 400
+            response.read.return_value = b'{"error":"Request failed","reason":"power-consent"}'
+            with self.assertRaises(Refused) as caught:
+                AdminClient(root, 8450).call('send_command', device_id='x', action='sleep')
+            self.assertEqual(caught.exception.detail_code, 'power-consent')
+            self.assertIn('Turn on power control on that computer first.', str(caught.exception))
+            for body in (b'{"reason":"<script>"}', b'{"reason":["power-consent"]}', b'not json', b'[1]'):
+                response.read.return_value = body
+                with self.assertRaises(ValueError) as caught:
+                    AdminClient(root, 8450).call('send_command', device_id='x', action='sleep')
+                self.assertIs(type(caught.exception), ValueError)
+                self.assertEqual(str(caught.exception), 'Administrative request failed (HTTP 400)')
+        for text in REFUSALS.values():          # every reason has its Vietnamese words
+            self.assertIn(text, lifetime_i18n.VI)
+
+    def test_the_worker_bridge_passes_a_fixed_code_but_never_the_message(self):
+        from lifetime_tasks import _Task
+        from lifetime_admin import _failed
+        errors = []
+        for failure in (_failed(400, 'power-consent'), ValueError('secret text'), type('E', (Exception,), {'detail_code': 'Bad Code!'})()):
+            def boom(failure=failure):
+                raise failure
+            task = _Task(1, boom)
+            task.signals.finished.connect(lambda number, result, error: errors.append(error))
+            task.run()
+        self.assertEqual(errors, ['Refused:power-consent', 'ValueError', 'E'])
+
 
 if __name__ == '__main__':
     unittest.main()

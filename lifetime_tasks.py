@@ -1,4 +1,6 @@
 """Small Qt worker bridge: blocking I/O stays outside the interface thread."""
+import re
+
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, Qt, pyqtSignal, pyqtSlot
 
@@ -18,8 +20,12 @@ class _Task(QRunnable):
         try:
             result, error = self.function(), ''
         except Exception as failure:
-            # Never propagate credential-bearing network exception text into UI/logs.
+            # Never propagate credential-bearing network exception text into UI/logs. A fixed code the raiser chose
+            # (``detail_code``, such as a refusal reason or an installer exit code) may follow: "Refused:power-consent".
             result, error = None, type(failure).__name__
+            code = getattr(failure, 'detail_code', None)
+            if isinstance(code, str) and re.fullmatch(r'[a-z0-9-]{1,32}', code):
+                error += ':' + code
         try:
             self.signals.finished.emit(self.number, result, error)
         except RuntimeError:

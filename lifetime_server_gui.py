@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEd
                             QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget)
 from lifetime_i18n_qt import PlainLabel as QLabel
 
-from lifetime_admin import AdminClient
+from lifetime_admin import AdminClient, REFUSALS
 from lifetime_server_access_ui import AccessUI
 import lifetime_i18n as catalog
 from lifetime_protocol import CLIENT_VERSION, IDENTITY_FIELDS, validate_identity
@@ -1851,6 +1851,8 @@ class ServerWindow(QMainWindow):
             button.setEnabled(True)
         if error == 'NotAllowed':        # the server refused this for the signed-in role (HTTP 403)
             self.status_label.setText(self.t('Your role does not allow this.'))
+        elif error.startswith('Refused:'):      # the server said why (a fixed code, lifetime_admin.REFUSALS)
+            self.status_label.setText(self.t(REFUSALS[error[8:]]))
         elif error == 'PermissionError':
             self._status_failure = True
             self.status_label.setText(self.t('This Windows account has no Lifetime Server role. Ask an administrator for one, or open the dashboard as administrator.'))

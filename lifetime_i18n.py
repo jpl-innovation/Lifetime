@@ -1322,6 +1322,8 @@ SERVER_P2_VI = {
     'Select a computer first.': 'Hãy chọn một máy tính trước.',
     'A request is in progress.': 'Đang xử lý yêu cầu.',
     'The owner has not allowed remote power control.': 'Chủ máy chưa cho phép điều khiển nguồn từ xa.',
+    'This computer does not allow remote sleep, restart, shut down or turn on. Turn on power control on that computer first.':
+        'Máy tính này không cho phép ngủ, khởi động lại, tắt hoặc bật máy từ xa. Hãy bật điều khiển nguồn trên máy đó trước.',
     'This computer must be approved first.': 'Máy tính này cần được phê duyệt trước.',
     'A command is already pending for this computer.': 'Máy tính này đã có lệnh đang chờ.',
     'Turn on is available when the computer is offline.': 'Có thể bật máy khi máy tính ngoại tuyến.',
