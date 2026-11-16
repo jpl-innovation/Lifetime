@@ -28,7 +28,7 @@ if [[ "$mode" != --docker ]]; then
         *" debian "*|*" ubuntu "*)
             if [[ "$ID" == debian && "${VERSION_ID:-}" =~ ^(10|11)$ ]]; then    # buster and bullseye moved to the archive
                 sed -i -e 's|deb.debian.org|archive.debian.org|g' -e 's|security.debian.org|archive.debian.org|g' \
-                    -e '/-updates /d' -e '/-security /d' /etc/apt/sources.list
+                    -e '/-updates /d' -e '/bullseye-security/d' /etc/apt/sources.list
             fi
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libgl1 libegl1 libfontconfig1 libxkbcommon0 \
@@ -125,7 +125,7 @@ if ! [[ "$records" =~ ^[1-9] ]]; then
 fi
 echo "client synced: $records record(s)"
 if [[ "$mode" == --installer ]]; then
-    "$package/restart_server_linux.sh"
+    "$package/restart_server_linux.sh" || { tail -n 50 /var/log/lifetime-server.log 2>/dev/null || true; exit 1; }
     for _ in $(seq 60); do
         admin --operation server_info --field fingerprint >/dev/null 2>&1 && break
         sleep 1

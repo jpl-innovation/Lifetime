@@ -155,7 +155,10 @@ class _HTTPError(Exception):
 
 
 class _Server(ThreadingHTTPServer):
-    allow_reuse_address = False
+    # Windows: SO_REUSEADDR would let another program bind the same port, so never. Linux/POSIX: it only lets a
+    # restarted server bind while the previous run's connections sit in TIME_WAIT (otherwise a restart fails for
+    # about a minute with "address in use"); an active listener still cannot be taken over.
+    allow_reuse_address = sys.platform != 'win32'
     daemon_threads = False
     request_queue_size = MAX_CONNECTIONS
 

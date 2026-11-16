@@ -265,6 +265,29 @@ class RuntimeSocketTests(unittest.TestCase):
         self.assertFalse(os.path.exists(unix.socket_path(self.root, port)))
 
 
+class RestartBindTests(unittest.TestCase):
+    def test_a_restart_can_bind_through_time_wait_but_windows_never_shares_the_port(self):
+        self.assertEqual(server._Server.allow_reuse_address, sys.platform != 'win32')
+
+    @unittest.skipUnless(LINUX, 'Linux TIME_WAIT semantics')
+    def test_rebinding_after_server_side_close(self):
+        import socket
+        def listener(port=0):
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, int(server._Server.allow_reuse_address))
+            s.bind(('127.0.0.1', port))
+            s.listen()
+            return s
+        first = listener()
+        port = first.getsockname()[1]
+        client = socket.create_connection(('127.0.0.1', port))
+        accepted, _ = first.accept()
+        accepted.close()                    # the server closes first: its side of the port enters TIME_WAIT
+        client.close()
+        first.close()
+        listener(port).close()              # a restarted server binds at once
+
+
 @unittest.skipIf(sys.platform == 'win32', 'POSIX file modes')
 class OldGlibcChmodTests(unittest.TestCase):
     def test_private_modes_without_fchmodat_nofollow(self):
