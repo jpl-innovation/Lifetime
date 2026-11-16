@@ -1520,6 +1520,7 @@ if __name__ == '__main__':
             pass
     configure_high_dpi()
     app = QApplication(sys.argv)
+    app.setDesktopFileName('lifetime')  # Wayland app id: matches lifetime.desktop for the dock/taskbar icon
     here = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
     for candidate in (here / 'assets' / 'lifetime.png', here / 'lifetime.png'):
         if candidate.exists():
