@@ -101,6 +101,22 @@ class SyncTests(SyncFixture):
         self.assertEqual(self.store._db.execute('SELECT count(*) FROM requests').fetchone()[0], 1)
         self.assertEqual(self.store._db.execute('SELECT remaining FROM codes').fetchone()[0], 0)
 
+    def test_a_request_nobody_approves_is_checked_less_and_less_often(self):
+        from lifetime_client import pending_poll
+        self.assertEqual([pending_poll(waited) for waited in (0, 119, 120, 3599, 3600, 86400)], [2, 2, 15, 15, 60, 60])
+        self.client.start_enrollment(self.bundle, {}, dict(history=False, resources=False))
+        for waited, expected in ((0, 2), (200, 15), (4000, 60)):
+            now = self.machine._load()['pending_since'] + waited
+            with patch('lifetime_client.time.time', return_value=now):
+                self.assertEqual(self.client.step(force=True)['status'], 'pending')
+            self.assertEqual(self.machine._load()['next_attempt'], now + expected)
+        # Connecting again with a new request starts at the quick pace again.
+        again = tls.encode_bundle('https://localhost:8443', self.store.create_code()['code'], self.pem)
+        self.client.start_enrollment(again, {'display_name': 'Other'}, dict(history=False, resources=False))
+        state = self.machine._load()
+        self.assertEqual(state['status'], 'pending')
+        self.assertAlmostEqual(state['next_attempt'] - state['pending_since'], 2, delta=0.5)
+
     def test_claim_lost_response_retried_and_credential_persisted_before_sync(self):
         self.client.start_enrollment(self.bundle, {}, dict(history=False, resources=False))
         request = self.machine._load()['enrollment']

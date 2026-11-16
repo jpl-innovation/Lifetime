@@ -61,6 +61,7 @@ RULES = {
     'check_down': dict(enabled=True, threshold=3, range=(1, 100), minutes=0, minutes_range=(0, 1440)),
 }
 VERSION = re.compile(r'[0-9]{1,6}(\.[0-9]{1,6}){0,3}')
+READING_RULES = tuple(name for name, rule in RULES.items() if 'metric' in rule)     # their incidents carry a reading
 
 MIGRATIONS = [
     (   # 1: the first monitoring schema
@@ -420,6 +421,11 @@ class Monitor:
                     db.execute('INSERT OR REPLACE INTO trends VALUES (?,?,?,?)', (
                         device['device_id'], now.astimezone().date().isoformat(),
                         metrics.get('battery_health_percent'), metrics.get('disk_free_percent')))
+                # ...and so does the reading an earlier alert recorded (the alert itself stays in the history).
+                for shared, names in (('resources', READING_RULES), ('health', ('crashes',))):
+                    if not device.get(shared):
+                        db.execute(f'UPDATE incidents SET value=NULL WHERE device_id=? AND value IS NOT NULL '   # nosec B608
+                                   f'AND rule IN ({",".join("?" * len(names))})', (device['device_id'], *names))
             self._tick_checks(db, rules, status, now)
             for row in db.execute('SELECT id,device_id FROM presence WHERE end_at IS NULL').fetchall():
                 if row['device_id'] not in status:      # no longer approved or removed: its history simply ends

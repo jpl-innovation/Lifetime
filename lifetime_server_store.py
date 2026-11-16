@@ -1074,7 +1074,8 @@ class Store:
         """The computer's own Disconnect: same effect as an administrator revoking it, proven by its credential."""
         device_id = _identifier(device_id)
         credential_hash = _hash(_secret(credential))
-        row = self._db.execute('SELECT status,credential_hash FROM devices WHERE device_id=?', (device_id,)).fetchone()
+        with self._lock:        # never read the shared connection in the middle of another thread's transaction
+            row = self._db.execute('SELECT status,credential_hash FROM devices WHERE device_id=?', (device_id,)).fetchone()
         if (not row or row['status'] != 'approved' or not row['credential_hash']
                 or not hmac.compare_digest(row['credential_hash'], credential_hash)):
             raise AuthenticationError('Invalid device credential')

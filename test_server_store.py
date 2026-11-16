@@ -510,6 +510,62 @@ class StoreTests(unittest.TestCase):
         self.store.ingest(device, credential, message(device, [], policy=allowed, version=3, readings=readings))
         self.assertEqual(self.store.get_device(device)['readings'], readings)
 
+    def test_a_switch_turned_off_removes_that_data_from_every_path_and_from_the_next_backup(self):
+        """History, readings and health each: stored, listed, in the fleet, insight and alert inputs and in a backup
+        while shared; gone from all of them once the computer reports the switch off."""
+        allowed = dict(history=True, resources=True, health=True)
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        today = NOW.astimezone().date().isoformat()
+        shared = dict(
+            history={'daily': {today: 4242}},
+            readings={'observed_at': STAMP, 'specs': {'cpu_name': 'MARKER-CPU', 'ram_bytes': 8 * 2**30,
+                                                       'mac_addresses': ['02:00:00:00:00:99']},
+                      'performance': {'cpu_percent': 37, 'ram_used_bytes': 2**30, 'charging': False, 'power_watts': 11}},
+            health=dict(version=1, observed_at=STAMP, shutdowns_30d=7, crashes_30d=2, battery_health=None,
+                        cycle_count=None, last_crash=None))
+
+        def everywhere():
+            raw = self.store._db.execute('SELECT history,readings,health FROM devices').fetchone()
+            detail, listed = self.store.get_device(device), self.store.list_devices()[0]
+            fleet = self.store.fleet(day=today)['rows'][0]
+            insight, alert = self.store.insight_inputs()[0], self.store.monitor_snapshot()[0]
+            backup = self.root / 'consent-backup.sqlite'
+            self.store.backup(backup)
+            reader = sqlite3.connect(backup)
+            try:
+                saved = reader.execute('SELECT history,readings,health FROM devices').fetchone()
+                samples = reader.execute('SELECT COUNT(*) FROM performance_samples').fetchone()[0]
+            finally:
+                reader.close()
+            return dict(
+                history=[raw[0], detail['history'], detail['today'], listed['today'], listed['history_available'],
+                         fleet['today'], insight['history'], saved[0]],
+                readings=[raw[1], detail['readings'], detail['specs'], detail['performance'], detail['performance_history'],
+                          detail['summary']['cpu_name'], listed['summary']['cpu_name'], listed['readings_available'],
+                          insight['readings'], insight['discharge'], insight['kind'], alert['metrics'], saved[1], samples,
+                          self.store._db.execute('SELECT COUNT(*) FROM performance_samples').fetchone()[0]],
+                health=[raw[2], detail['health'], listed['health_available'], fleet['health'], insight['health'],
+                        alert['crashes_30d'], saved[2]])
+
+        self.store.ingest(device, credential, message(device, policy=allowed, **shared))
+        before = everywhere()
+        for category, values in before.items():
+            self.assertTrue(all(value not in (None, [], False, 0) for value in values), (category, values))
+        version = 1
+        for switch, category in (('health', 'health'), ('history', 'history'), ('resources', 'readings')):
+            version += 1
+            allowed = dict(allowed, **{switch: False})
+            self.store.ingest(device, credential, message(device, [], policy=allowed, version=version))
+            after = everywhere()
+            self.assertTrue(all(value in (None, [], False, 0) for value in after[category]), (category, after[category]))
+            for other in ('history', 'readings', 'health'):
+                if allowed[dict(readings='resources').get(other, other)]:
+                    self.assertEqual(after[other][:-1] if other != 'readings' else after[other][:12],
+                                     before[other][:-1] if other != 'readings' else before[other][:12], other)
+        with self.assertRaises(StoreError):         # Wake-on-LAN needed the MAC addresses that are gone too
+            self.store.wake(device)
+
     def test_identity_owned_by_server_and_validated(self):
         request, credential = self.pair()
         device = request['device_id']

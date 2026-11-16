@@ -290,10 +290,17 @@ class RuleTests(MonitorCase):
         self.run_for(35, step=5)
         self.assertEqual(sorted(rule for rule, state in self.states() if state == 'open'),
                          ['battery_worn', 'cpu_high', 'crashes', 'disk_low', 'memory_high', 'temperature_high'])
+        self.assertEqual({row['value'] for row in self.monitor.incidents()}, {100.0, 0.0, 1.0, 120.0, 50.0})
         self.fleet.devices[ID].update(resources=False)        # consent withdrawn: watched no longer, quietly closed
         self.monitor.tick()
         self.assertEqual(sorted(row['rule'] for row in self.monitor.incidents('active')), ['crashes'])
         self.assertEqual({row['resolution'] for row in self.monitor.incidents('resolved')}, {'not-monitored'})
+        # The alerts stay in the history, but not the readings they recorded; crashes belong to Health, still shared.
+        self.assertEqual({row['rule']: row['value'] for row in self.monitor.incidents() if row['value'] is not None},
+                         {'crashes': 50.0})
+        self.fleet.devices[ID].update(health=False)
+        self.monitor.tick()
+        self.assertEqual({row['value'] for row in self.monitor.incidents()}, {None})
 
     def test_no_sensor_or_no_battery_is_not_a_problem_and_not_missing(self):
         self.fleet.add()

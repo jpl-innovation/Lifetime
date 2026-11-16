@@ -19,6 +19,13 @@ from lifetime_agent import validate_policy
 
 MAX_BACKOFF = 300
 PENDING_POLL = 2    # seconds between approval checks, so a new computer is not left waiting for the 30 s report interval
+# ...for the first two minutes. A request nobody approves keeps asking, so it then slows down: a few hundred
+# computers left pending overnight would otherwise make hundreds of TLS handshakes a second for nothing.
+PENDING_SLOW = ((120, 15), (3600, 60))      # (seconds waited, seconds between checks from then on)
+
+
+def pending_poll(waited):
+    return max([PENDING_POLL] + [seconds for after, seconds in PENDING_SLOW if waited >= after])
 MAX_INTERVAL = 3600
 REDISCOVER_EVERY = 600      # while the stored address fails, ask local discovery at most this often
 TRUST = ('address', 'certificate_pem', 'fingerprint', 'spki')
@@ -194,6 +201,7 @@ class SyncClient:
                     state.update(reported=False, bundle=trust, credential=None, enabled=True,
                                  phase='enrolling', status='enrolling', enrollment_sent=False,
                                  failures=0, next_attempt=0, capabilities=[], trimmed=False, legacy_server_until=0,
+                                 pending_since=None,
                                  enrollment=dict(version=1, request_id=str(uuid.uuid4()),
                                                  device_id=state['device_id'], code=trust['code'],
                                                  poll_token=secrets.token_urlsafe(32),
@@ -378,7 +386,9 @@ class SyncClient:
                             current.update(credential=response['credential'], phase='approved',
                                            status='approved', next_attempt=0)
                         elif status in ('pending', 'approved'):
-                            current.update(phase='pending', status='pending', next_attempt=now+PENDING_POLL)
+                            since = current.get('pending_since') or now
+                            current.update(phase='pending', status='pending', pending_since=since,
+                                           next_attempt=now+pending_poll(now-since))
                         else:
                             current.update(phase=status, status=status, enabled=False, credential=None)
                             self.agent._set_policy(current, dict(history=False, resources=False))
