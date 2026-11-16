@@ -30,7 +30,7 @@ Development platform: Windows 11 x64, Python 3.12, PyQt6.
   executables. Runtime and agent `--help` smoke checks passed. No installer,
   service, startup task or firewall rule was run during development.
 - All PowerShell files passed the parser; whitespace checks passed. CI defines
-  Windows/Linux Python 3.10–3.13 tests and a separate server artifact build.
+  Windows/Linux Python 3.11 and 3.12 tests and a separate server artifact build.
 - The packaged report smoke harness passed with real consent gates, EN/VI,
   embedded-font PDF/CSV and unchanged synthetic settings/ledger. Git Bash
   `bash -n install_linux.sh` passed; Bash was not on the default PATH.

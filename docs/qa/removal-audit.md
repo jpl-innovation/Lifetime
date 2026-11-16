@@ -41,7 +41,7 @@ Status: **applied** (done here), **proposed** (needs your approval), **keep** (c
 | 13 | delete | `parse_netsh` | `lifetime_signals.py:93` "Legacy fixture parser only; live Windows queries use the WLAN API". Readers: `test_signals.py:12-44` | Two tests go with it | ~60 | proposed (M6) |
 | 14 | yagni | `TelemetryTransport` | `lifetime_ws.py:47`: an interface with one implementation (`lifetime_ws_client.py:25`), kept for a UDP channel that does not exist | `docs/live-channel.md:53` needs one sentence removed | 8 | proposed (M7) |
 | 15 | delete | About 80 more catalogue keys with no literal reader | Short keys such as `'Company server'`, `'Pair computer'`, `'Search'`, `'Retention'`. Not applied because short keys can arrive from Qt (`lifetime_i18n_qt.NativeTranslator` translates `&No`, `&Copy`, `Select All`) or from OS state text through `ui_text` (`'Full'`, `'Not charging'`) | Needs a per-key decision | ~80 | proposed (M8) |
-| 16 | delete | Stale records | `docs/SERVER_S1_VERIFICATION.md` (128 lines, a dated verification log), `TECHNICIAN_VERIFICATION.md:33` still says "Python 3.10-3.13" and ships in the Windows package, `.gitignore:11` ignores `docs/IMPLEMENTATION_STATUS.md` which no longer exists | Docs only | ~130 | proposed (M9) |
+| 16 | delete | Stale records | `docs/SERVER_S1_VERIFICATION.md` (128 lines, a dated verification log), `TECHNICIAN_VERIFICATION.md:33` still says "Python 3.10-3.13" and ships in the Windows package, `.gitignore:11` ignores `docs/IMPLEMENTATION_STATUS.md` which no longer exists | Docs only | ~130 | applied (M9) |
 | 17 | keep | Windows pipe and Unix socket admin channels | `lifetime_pipe.py`, `lifetime_unix_admin.py` share only the framing idea; the peer-identity code is platform API on each side and is security code | - | - | keep |
 | 18 | keep | Three report modules | `lifetime_reports.py` builds and writes a report, `lifetime_server_reports.py` adds server rows to it, `lifetime_server_export.py` is the dialog. Layers, not copies; the identical-body scan found no shared function | - | - | keep |
 | 19 | keep | Module lists repeated in `install_windows_common.ps1:39` and `install_linux.sh:153` | Two shells cannot share a list without a manifest file and a parser in each; `test_installed_modules.py` already fails when either list misses a module | - | - | keep |
@@ -160,7 +160,7 @@ Step 6 (`230fb50`), typical hunks:
 | 4 | low | Dead classes, methods, constants | 104 lines | `test_dashboard`, `test_redesign`, `test_gui_startup`, `test_history_gui`, `test_theme`, `test_monitor`, `test_server_gui`, `test_server_fleet`, `test_switches`, `test_widgets_dashboard`, `test_installed_modules` | done |
 | 5 | low | Unused imports | 39 names, 11 lines net | 29 modules, see the hand-back report | done |
 | 6 | low | Dead and overridden catalogue entries | 72 entries, 93 lines | 19 modules, see the hand-back report | done |
-| M9 | low-medium | Stale docs and one `.gitignore` line | ~130 lines | none needed | proposed |
+| M9 | low-medium | Stale docs and one `.gitignore` line | ~130 lines | none needed | applied |
 | M3 | medium | Five more render scripts | 5 files, 375 lines | `test_installed_modules`, `test_server_fleet` | proposed |
 | M1 | medium | `BarChart`, `history_summary` | ~110 lines + 2 test fragments | `test_history`, `test_history_gui`, `test_dashboard` | proposed |
 | M6 | medium | `parse_netsh` | ~60 lines with its tests | `test_signals`, `test_compatibility` | proposed |

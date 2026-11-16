@@ -10,7 +10,6 @@ package/
 .qa/
 .venv-server/
 server-package-*/
-/docs/IMPLEMENTATION_STATUS.md
 /Lifetime-*-local.zip
 *.log
 .test-data/

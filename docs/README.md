@@ -8,7 +8,6 @@
 | [connecting.md](connecting.md) | The one-code connecting flow |
 | [server-specs-control.md](server-specs-control.md) | Computer specs, performance and remote power control |
 | [server-live-validation.md](server-live-validation.md) | How live data was validated |
-| [SERVER_S1_VERIFICATION.md](SERVER_S1_VERIFICATION.md) | Server verification record |
 | [design/server.md](design/server.md) | Lifetime Server design decisions |
 
 The root [SECURITY.md](../SECURITY.md) describes the trust model and attack limits.
