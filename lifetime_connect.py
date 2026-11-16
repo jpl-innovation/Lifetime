@@ -199,8 +199,10 @@ def run_agent(action, policy, bundle=None, directory=None, display_name=None):
             if action == 'finish' and installer.name in names:
                 # -ExecutionPolicy Bypass: Windows clients refuse every script file by default ("running scripts is
                 # disabled on this system"), and the approving administrator's own policy is the one that applies.
+                # -Reinstall: connecting again after a Disconnect (or over an older version's agent) replaces the
+                # installed agent; without it the installer stops at "already installed" and Finish fails.
                 command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-                           '-File', str(installer), '-Mode', 'Packaged',
+                           '-File', str(installer), '-Mode', 'Packaged', '-Reinstall',
                            '-EnableReporting', '-BundleFile', str(path), '-Start', '-DisplayName', display_name or socket.gethostname()]
                 for key, flag in dict(history='TrackHistory', resources='ResourceReadings', health='HealthReadings', control='PowerControl',
                                       updates='AllowUpdates').items():
@@ -445,7 +447,8 @@ class ConnectPage(QWidget):
         self.health_allowed = bool(settings.get('completed') and settings.get('health'))
         self.health = self.choice(f, 'Health and crashes', 'Health summaries and crash counts.', self.health_allowed)
         self.health.setEnabled(self.health_allowed)
-        self.control = self.choice(f, 'Let the server sleep or restart this computer', 'You get a one minute warning first.', False)
+        self.control = self.choice(f, 'Let the server sleep or restart this computer',
+                                   'Restart and shut down give a one minute warning first. Sleep is immediate.', False)
         self.updates = self.choice(f, UPDATES, UPDATES_DETAIL, False)
         self.review_error = self.note(f, '')
         self.review_error.hide()

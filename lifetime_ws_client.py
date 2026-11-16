@@ -165,6 +165,6 @@ class LiveLink:
         elif run:
             from lifetime_agent import execute_power
             try:
-                execute_power(run)  # sleep, restart and shutdown carry the existing one minute warning
+                execute_power(run)  # restart and shutdown give the one minute warning; sleep is immediate
             except (OSError, subprocess.SubprocessError, ValueError):
                 self._ack(connection, command_id, 'failed', 'Power action failed')

@@ -2,7 +2,11 @@
 # Runs without prompts, so it also suits GPO startup scripts, Intune and other scripted deployment:
 #   exit 0 installed, 1 unexpected failure, 2 invalid parameters, 3 server unreachable or not the server this
 #   code belongs to, 4 code refused by the server (used, expired or revoked), 5 not run as administrator or
-#   not Windows, 6 an agent is already installed (nothing changed).
+#   not Windows, 6 an agent is already installed (nothing changed; -Reinstall replaces it instead).
+# -Reinstall replaces an installed agent in place: the running agent is stopped, the program files are replaced and
+# the startup task is registered again. Identity, history, the outbox and the connection stay unless enrollment
+# parameters are given too (then the computer asks its server again, with the same identity). This is how an older
+# agent is upgraded and how the Connect page connects again after a Disconnect.
 # A log (no codes or other secrets) is appended to install.log in the data directory.
 [CmdletBinding()]
 param(
@@ -23,7 +27,8 @@ param(
     [string]$DisplayName = $env:COMPUTERNAME,
     [string]$ImportLedger,
     [switch]$Start,
-    [switch]$StagedUpdate
+    [switch]$StagedUpdate,
+    [switch]$Reinstall
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -141,7 +146,8 @@ try {
     $method = if ($ConnectionLine) { 'connection line' } elseif ($PairingCode) { "pairing code for $Server" } elseif ($BundleFile) { 'bundle file' } else { 'none (not reporting)' }
     Write-Log "Lifetime agent install: mode $Mode; reporting: $method; history $([bool]$TrackHistory), readings $([bool]$ResourceReadings), health $([bool]$HealthReadings), power control $([bool]$PowerControl), updates $([bool]$AllowUpdates)."
 
-    if (Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent -ErrorAction SilentlyContinue) { Stop-Install 6 'A Lifetime agent is already installed; nothing was changed. Uninstall it first to change its settings (data is preserved).' }
+    $installed = [bool](Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent -ErrorAction SilentlyContinue)
+    if ($installed -and -not $Reinstall) { Stop-Install 6 'A Lifetime agent is already installed; nothing was changed. Use -Reinstall to replace it, or uninstall it first (data is preserved either way).' }
     foreach ($path in @($InstallDirectory, $DataDirectory)) {
         $absolute = [IO.Path]::GetFullPath($path).TrimEnd('\')
         foreach ($reserved in @($env:ProgramFiles, $env:ProgramData, $env:SystemRoot, (Join-Path $env:ProgramData 'Lifetime'), (Join-Path $env:SystemDrive 'Users'))) {
@@ -186,6 +192,12 @@ try {
     $code = Invoke-Agent $checker (@($checkerPrefix) + @('--check') + $enrollArguments) $secret
     if ($code -ne 0) { Stop-ForAgent $code 'The parameter check' }
 
+    if ($installed) {
+        # -Reinstall, and every check above has passed: stop the running agent (and the child process that does its
+        # work) and remove the old registration with the uninstaller from this package. Data is not touched.
+        Write-Log 'Replacing the installed agent (-Reinstall); machine identity, history and outbox are kept.'
+        & (Join-Path $PSScriptRoot 'uninstall_agent_windows.ps1') -Confirm:$false
+    }
     $InstallDirectory = Protect-Directory $InstallDirectory
     $DataDirectory = Protect-Directory $DataDirectory
     $script:LogDirectory = $DataDirectory

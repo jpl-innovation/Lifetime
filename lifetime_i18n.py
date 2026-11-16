@@ -1396,7 +1396,8 @@ CONNECT_VI = {
     'Health and crashes': 'Tình trạng máy và sự cố',
     'Health summaries and crash counts.': 'Tóm tắt tình trạng máy và số lần gặp sự cố.',
     'Let the server sleep or restart this computer': 'Cho phép máy chủ đưa máy này vào chế độ ngủ hoặc khởi động lại',
-    'You get a one minute warning first.': 'Bạn sẽ được báo trước một phút.',
+    'Restart and shut down give a one minute warning first. Sleep is immediate.':
+        'Khởi động lại và tắt máy có báo trước một phút. Chế độ ngủ diễn ra ngay.',
     'Finish': 'Hoàn tất',
     'Cancel': 'Hủy',
     'Cancel connection': 'Hủy kết nối',

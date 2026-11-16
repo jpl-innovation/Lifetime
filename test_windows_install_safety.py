@@ -72,6 +72,8 @@ class ConnectElevationTests(unittest.TestCase):
             self.assertNotIn('EncodedCommand', script)
             if action == 'finish':      # Windows clients refuse script files by default: the installer must still run
                 self.assertRegex(script, r'-ExecutionPolicy Bypass -File "?[^"]*install_agent_windows\.ps1')
+                # Connecting again after a Disconnect finds the agent already installed: it is replaced, not refused.
+                self.assertIn('-Mode Packaged -Reinstall -EnableReporting', script)
 
     def test_without_them_the_elevated_step_copies_to_program_files_and_checks_each_hash_before_running(self):
         script = self.elevated()
@@ -144,6 +146,27 @@ class InstallerScriptTests(unittest.TestCase):
             self.assertIn('Assert-NotLinked', self.text[max(0, copy.start() - 260):copy.start()])
         self.assertIn("$AgentSetup = Join-Path $env:ProgramFiles 'LifetimeAgentSetup'", self.text)
         self.assertIn(connect.STAGE_ACL.split("'")[1], self.text)      # the same access list as the Connect page's step
+
+    def test_installing_over_a_running_version_closes_only_this_installation_and_starts_the_tracker_again(self):
+        """Windows cannot replace a running program: an upgrade over a running tracker used to stop with an error."""
+        closing = self.text.index('$Closed = @(Get-Process -Name Lifetime, LifetimeTracker, LifetimeImport')
+        self.assertIn('[IO.Path]::GetDirectoryName($_.Path) -eq $InstallDir', self.text[closing:closing + 300])   # never another copy
+        self.assertLess(closing, self.text.index('Copy-Item'))
+        self.assertIn("{ Start-ScheduledTask -TaskName 'Lifetime Tracker' }", self.text)
+
+    def test_the_agent_can_be_replaced_in_place_and_nothing_keeps_running_after_its_uninstall(self):
+        install = (PROJECT / 'install_agent_windows.ps1').read_text(encoding='utf-8')
+        uninstall = (PROJECT / 'uninstall_agent_windows.ps1').read_text(encoding='utf-8')
+        # Without -Reinstall an installed agent is left alone (exit 6), so a start-up script can run at every boot.
+        self.assertIn('if ($installed -and -not $Reinstall) { Stop-Install 6', install)
+        replaced = install.index("& (Join-Path $PSScriptRoot 'uninstall_agent_windows.ps1')")
+        self.assertLess(install.index("'--check') + $enrollArguments"), replaced)      # every check first
+        self.assertLess(replaced, install.index("Filter 'lifetime_*.py' -File | ForEach-Object { Copy-Item"))
+        # Stopping the task ends only its first process: the child that does the work is ended too, by its own path.
+        for script in (uninstall, install[install.index('function Install-StagedUpdate'):install.index('function Stop-ForAgent')]):
+            self.assertLess(script.index('Stop-ScheduledTask'), script.index('Stop-Process'))
+        self.assertIn('$_.ExecutablePath -eq $executable', uninstall)
+        self.assertLess(uninstall.index('Stop-Process'), uninstall.index('Unregister-ScheduledTask'))
 
     @WINDOWS
     def test_the_link_check_refuses_a_junction_and_a_file_link_and_accepts_real_and_missing_paths(self):
