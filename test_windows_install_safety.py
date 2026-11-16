@@ -159,6 +159,9 @@ class InstallerScriptTests(unittest.TestCase):
         uninstall = (PROJECT / 'uninstall_agent_windows.ps1').read_text(encoding='utf-8')
         # Without -Reinstall an installed agent is left alone (exit 6), so a start-up script can run at every boot.
         self.assertIn('if ($installed -and -not $Reinstall) { Stop-Install 6', install)
+        # A packaged install has LifetimeAgent.exe but no lifetime_agent.py: it must still count as an installation,
+        # or connecting again after a Disconnect stops with "not a Lifetime Agent installation".
+        self.assertIn("(Join-Path $InstallDirectory 'LifetimeAgent.exe') -PathType Leaf", install)
         replaced = install.index("& (Join-Path $PSScriptRoot 'uninstall_agent_windows.ps1')")
         self.assertLess(install.index("'--check') + $enrollArguments"), replaced)      # every check first
         self.assertLess(replaced, install.index("Filter 'lifetime_*.py' -File | ForEach-Object { Copy-Item"))
