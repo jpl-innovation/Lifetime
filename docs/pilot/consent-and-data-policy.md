@@ -31,7 +31,7 @@ network.
 | History by day | [Yes/No] | Daily awake totals, the hour-of-day profile, recent sessions (start and length), boot count. |
 | Specs and live readings | [Yes/No] | Processor, memory, disk, battery, network type and live usage percentages; hardware details; network card addresses (MAC, only for Wake-on-LAN). |
 | Health | [Yes/No] | Counts of unexpected shutdowns and crashes, battery wear, sleep patterns. |
-| Remote sleep/restart | [Yes/No] | IT may sleep, restart or shut down this computer; a one-minute warning is shown first. |
+| Remote sleep/restart | [Yes/No] | IT may sleep, restart or shut down this computer. A one-minute warning is shown before a restart or shut down; sleep happens at once (nothing open is closed). |
 | Updates | [Yes/No] | The computer may download a Lifetime update that IT approved and keep it ready; IT installs it. |
 
 **Never collected:** names of users, passwords, files or file names, websites, which programs or windows are open,
@@ -74,7 +74,7 @@ chủ], trong mạng nội bộ.
 | Lịch sử theo ngày | [Có/Không] | Tổng thời gian hoạt động mỗi ngày, phân bố theo giờ, các phiên gần đây (thời điểm bắt đầu và độ dài), số lần khởi động. |
 | Cấu hình và số đo trực tiếp | [Có/Không] | Bộ xử lý, bộ nhớ, ổ đĩa, pin, loại mạng và phần trăm sử dụng trực tiếp; chi tiết phần cứng; địa chỉ card mạng (MAC, chỉ để bật máy từ xa qua Wake-on-LAN). |
 | Sức khỏe | [Có/Không] | Số lần tắt máy bất thường và sự cố, độ chai pin, thói quen ngủ của máy. |
-| Ngủ/khởi động lại từ xa | [Có/Không] | Bộ phận IT có thể cho máy ngủ, khởi động lại hoặc tắt máy; máy hiện cảnh báo trước một phút. |
+| Ngủ/khởi động lại từ xa | [Có/Không] | Bộ phận IT có thể cho máy ngủ, khởi động lại hoặc tắt máy. Máy hiện cảnh báo trước một phút khi khởi động lại hoặc tắt máy; chế độ ngủ diễn ra ngay (không đóng chương trình nào đang mở). |
 | Cập nhật | [Có/Không] | Máy có thể tải về bản cập nhật Lifetime đã được IT phê duyệt và giữ sẵn; IT sẽ cài đặt. |
 
 **Không bao giờ thu thập:** tên người dùng, mật khẩu, tệp hoặc tên tệp, trang web, chương trình hay cửa sổ đang mở,

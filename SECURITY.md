@@ -158,9 +158,11 @@ record, compression-depth and result limits. Browsing takes up to three seconds;
 responses are limited to five per second. Discovery failures never downgrade
 TLS; use a manual address or connection line across routed subnets or VPNs.
 
-The public HTTPS API still accepts only enrollment, claim and sync. New fleet,
-invitation, organisation and approval queries use the separate authenticated
-loopback-only admin API. Existing request sizes, deadlines, connection limits,
+The public HTTPS API accepts only what a computer needs: enrollment (`/v1/enroll`),
+claim (`/v1/claim`), sync (`/v1/sync`) and, with the computer's own credential, live
+readings (`/v1/live` and the `/v1/ws` socket), its own Disconnect (`/v1/leave`) and
+agent update requests (`/v1/update`). Fleet, invitation, organisation and approval
+queries use the separate authenticated loopback-only admin API. Existing request sizes, deadlines, connection limits,
 private-file ACLs, offline queue durability and redacted errors are retained.
 There are no request/access logs. The **Server log** keeps at most 500 entries
 (repeats within a minute are counted): starts and stops, certificate renewals and
@@ -187,7 +189,9 @@ web page cannot open the socket. An unauthenticated upgrade still counts against
 only an authenticated socket moves to the separate long-lived pool (at most 1024).
 
 Commands are chosen from a fixed list (sleep, restart, shutdown, refresh), stay behind the owner's remote power consent,
-carry the existing one minute on-screen warning, and are deduplicated by id on the computer. The server window uses a
+and are deduplicated by id on the computer. Restart and shut down show a one minute on-screen warning first; sleep
+happens at once, without a warning (nothing open is closed). On Linux the warning comes from `shutdown +1`; without
+systemd, where only `loginctl` or logind over D-Bus can be used, restart and shut down are immediate too. The server window uses a
 separate stream on 127.0.0.1 only, with the admin bearer token. The admin API also rejects any `Host` header that is not
 a loopback name, which blocks DNS rebinding. The live channel itself does not change who may read what the server stores;
 what a computer may share is described in the next section.

@@ -31,7 +31,8 @@ Every frame is JSON: `{"type": "hello|telemetry|command|ack|status", "id": "..."
 
 Commands stay in the database. A command is marked delivered when pushed, and done or failed when acknowledged.
 The computer remembers the last command id it handled, so a re-delivery after a reconnect is acknowledged and never
-run twice. Power commands keep the existing one minute warning and the `control` consent.
+run twice. Power commands keep the `control` consent; restart and shut down keep their one minute warning (sleep
+is immediate, as it always was).
 
 ## Reliability
 

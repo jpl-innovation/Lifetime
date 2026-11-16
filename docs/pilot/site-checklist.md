@@ -64,7 +64,7 @@ check it against what the site knows.
   agreement). For security problems use GitHub's private vulnerability reporting as described in
   [SECURITY.md](../../SECURITY.md#reporting-a-vulnerability), never a public issue.
 - **Include**: site, date and time, what you did, what you expected, what happened, the server version
-  (Administration > This server), screenshots, and the relevant entries from Administration > Server log and the
+  (the **This Server** page), screenshots, and the relevant entries from Administration > Server log and the
   computer's Connect page message. Agent install problems: `%ProgramData%\Lifetime\Agent\install.log`.
 - **Never include**: the admin-token file, connection codes, backup archives (they contain the server key),
   `alert-secrets.bin`, or personal data beyond what is needed (blur names on screenshots).

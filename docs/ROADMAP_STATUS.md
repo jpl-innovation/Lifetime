@@ -1,7 +1,8 @@
 # Roadmap status (Stages 0-5)
 
 Status of every item of the merged master plan (15 Nov 2026) on `latest-main`. Baseline before the stages: `46bf982`.
-Nothing here has been released; nothing has been pushed.
+Nothing here has been released as a version yet (the last release is 1.1.0); the branch is on the public
+repository. The final verification before 1.2.0 is in [qa/final-verification.md](qa/final-verification.md).
 
 **Status words**
 
@@ -119,9 +120,9 @@ done and tested here, and the gate still needs a real-world run.
 
 | # | Plan item | Status |
 |---|---|---|
-| A | One desktop build: PyInstaller bundle built on glibc 2.28 (Rocky Linux 8), AppImage and tar.gz, Qt xcb and Wayland plugins, `--self-check`, per-user install/uninstall, XDG autostart without systemd, "Not available" without journal/tools, remote power via systemctl/loginctl/D-Bus without prompts | implemented; unit tests on Windows with patching; **CI** builds and container smoke tests (11 distributions) need a push; **needs real machines**: real X11/Wayland desktops, autostart, tray, remote power. aarch64 desktop not built (PyQt6 aarch64 wheels need a newer glibc). |
+| A | One desktop build: PyInstaller bundle built on glibc 2.28 (Rocky Linux 8), AppImage and tar.gz, Qt xcb and Wayland plugins, `--self-check`, per-user install/uninstall, XDG autostart without systemd, "Not available" without journal/tools, remote power via systemctl/loginctl/D-Bus without prompts | implemented; unit tests on Windows with patching; **CI** has built the bundles and run the container smoke tests (see row C for what passed); **needs real machines**: real X11/Wayland desktops, autostart, tray, remote power. aarch64 desktop not built (PyQt6 aarch64 wheels need a newer glibc). |
 | B | Linux server: headless bundle (x86_64, aarch64), `install_server_linux.sh` (systemd, OpenRC, SysV), restart/uninstall, firewall hint, Dockerfile, Unix socket with `SO_PEERCRED` and role mapping, 0600 secrets file, `admin` command line, dashboard on a Linux desktop, SSH socket forwarding | implemented; role mapping and socket tested with patching here, the real socket only in Linux CI; **needs real machines**: systemd unit, OpenRC, firewalls, reboot, SSH forwarding. |
-| C | CI: Rocky 8 build, smoke tests in Debian 10/11/12, Ubuntu 20.04/22.04/24.04, Fedora, Rocky 8/9, openSUSE Leap 15, Arch; installer run without systemd (Debian 12, Rocky 9); container image; release files and SHA256SUMS | implemented; **not yet run** (needs the owner's approval to push). |
+| C | CI: Rocky 8 build, smoke tests in Debian 10/11/12, Ubuntu 20.04/22.04/24.04, Fedora, Rocky 8/9, openSUSE Leap 15, Arch; installer run without systemd (Debian 12, Rocky 9); container image; release files and SHA256SUMS | implemented and run on GitHub. In the last run that reached these jobs (commit `97f7e03`, 15 Nov 2026) both builds, both Windows packages, the container image and ten of the eleven distributions passed; Debian 10 (its package archive had moved) and the two installer runs (the server did not bind again right after a restart) failed. Both were changed in `191cb9e`, **not yet confirmed**: no run since has got past the test jobs (two tests failed on CI only; fixed, see [qa/final-verification.md](qa/final-verification.md)). The release job has never run for this version. |
 
 **Owner decisions (Linux stage)**
 

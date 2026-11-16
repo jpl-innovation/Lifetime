@@ -162,7 +162,7 @@ On the developer's laptop, the awake time reported by Lifetime matched the Windo
 
 ## Files and data
 
-Data lives in `%APPDATA%\Lifetime\` (Windows) or `~/.local/share/lifetime/` (Linux): `ledger.json` (the record), `settings.json`, `status.json`. Back up `ledger.json` to keep your history. Uninstall: on Windows remove the *Lifetime Tracker* scheduled task, the shortcut and the install folder; on Linux run `uninstall_linux.sh` (or delete the AppImage and `~/.config/autostart/lifetime-*.desktop`).
+Data lives in `%APPDATA%\Lifetime\` (Windows) or `~/.local/share/lifetime/` (Linux): `ledger.json` (the record), `settings.json`, `status.json`. Back up `ledger.json` to keep your history. Uninstall: on Windows close Lifetime, then remove the *Lifetime Tracker* scheduled task, the Start menu shortcut, the install folder `%LOCALAPPDATA%\Lifetime` and, if you approved the installer, `%ProgramFiles%\LifetimeAgentSetup`; on a computer that was connected to a server, first run `uninstall_agent_windows.ps1` from `%ProgramFiles%\LifetimeAgent` in an elevated PowerShell (it stops and unregisters the machine agent and keeps its data in `%ProgramData%\Lifetime\Agent`). On Linux run `uninstall_linux.sh` (or delete the AppImage and `~/.config/autostart/lifetime-*.desktop`).
 
 ## Build from source
 
@@ -247,9 +247,13 @@ destroy the previous valid file. Choose another writable location if a save fail
 
 ## Upgrading and verification
 
-Rerun the normal installer to copy the new modules; keep the existing data directory,
-`ledger.json` and `settings.json`. Existing consent, settings extensions and history are
-retained. Malformed ledger fields fail visibly instead of resetting totals. Malformed
+Rerun the normal installer over the installed version; keep the existing data directory,
+`ledger.json` and `settings.json`. On Windows the installer closes a running Lifetime and
+tracker, replaces them and starts the tracker again if it starts at login. A machine agent
+installed by Connect is replaced with `install_agent_windows.ps1 -Mode Packaged -Reinstall
+-Start` (elevated; the connection is kept) or by Disconnect and Connect; see the release
+notes. Data written by 1.1.0 is covered by `test_upgrade_from_1_1_0.py`. Existing consent,
+settings extensions and history are retained. Malformed ledger fields fail visibly instead of resetting totals. Malformed
 settings still fail closed; identity updates refuse to overwrite damaged settings.
 Back up the file before manual repair/restoration. Imports remain idempotent and use
 the existing shared ledger lock and pre-import backup.
@@ -291,7 +295,8 @@ Lifetime's existing desktop remains usable on its own, with the same local ledge
 English/Vietnamese interface, Verify, System and Insights screens, and first-run
 consent choices. The optional **Connect** page reads local status when opened.
 Reporting starts only after you review sharing and click Finish. No employee account
-is required. Remote sleep and restart require separate consent and a one minute warning.
+is required. Remote sleep, restart and shut down require separate consent; restart and shut down
+give a one minute warning first, sleep happens at once.
 
 The server edition adds a native dashboard, a separate HTTPS reporting runtime and
 a protected, loopback-only administration API. Company reporting uses a separate
@@ -459,11 +464,12 @@ upgrade and rollback. A database restore invalidates credentials and pairing tok
 so devices must be re-enrolled. Back up TLS/configuration files separately and keep
 all backups restricted.
 
-Development verification uses Windows 11, Python 3.12 and headless Qt. Local simulated
-clients exercise real HTTPS, enrollment and SQLite transactions. Actual Windows
-Server, SCM installation, startup tasks across real reboots, production ACLs and
-firewall behavior remain unverified until the documented deployment checks run.
-No Windows Server version is claimed as tested.
+Development verification uses Windows 11, Python 3.11 and 3.12 and headless Qt. Local simulated
+clients exercise real HTTPS, enrollment and SQLite transactions. The server installer,
+service mode and uninstaller were tried once on one Windows Server 2025 virtual machine;
+startup across real reboots, production ACLs, firewall behavior, domain accounts and
+Windows Server 2022 remain unverified until the documented deployment checks run.
+No Windows Server version is claimed as supported.
 
 ## Project layout
 

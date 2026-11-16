@@ -15,18 +15,19 @@ arriving; **S3** cosmetic, question, wish. S1: tell the site contact and the own
 | The computer or server says | Usual cause | Fix |
 |---|---|---|
 | No answer (timeout) / not reachable | Computer off or asleep, cable or Wi-Fi, firewall, VPN down | Check it is on and on the network; `Test-NetConnection <server> -Port 8443` from the computer. |
-| Connection refused | Server not running, or wrong port | Start the server (`restart_server_windows.ps1`); check the port in Administration > This server. |
+| Connection refused | Server not running, or wrong port | Start the server (`restart_server_windows.ps1`); check the port on the **This Server** page. |
 | Name not found | DNS name of the server not resolvable | Fix DNS or use the address the certificate lists; the computer also looks for the server on the local network. |
-| The server's certificate is out of date / clock wrong | The computer's clock is wrong, or the server certificate expired | Fix the computer's date and time; on the server check the certificate expiry under This server (it renews itself 30 days before expiry). |
-| Address not in the server's certificate | The computer uses an address the certificate does not list | Administration > server names: add the name or IP; the certificate renews from the same key, no re-pairing. |
+| The server's certificate is out of date / clock wrong | The computer's clock is wrong, or the server certificate expired | Fix the computer's date and time; on the server check the certificate expiry on the **This Server** page (it renews itself 30 days before expiry). |
+| Address not in the server's certificate | The computer uses an address the certificate does not list | Administration > Other server names and IPs: add the name or IP; the certificate renews from the same key, no re-pairing. |
 | The server's security certificate has changed | A different server, or the server's key was replaced | Stop. If the key was really lost (new server without a restored backup), pair the computer again. Otherwise someone else answers at that address: investigate. |
 | Removed by the server / revoked | The computer was removed or revoked on the server | Pair it again with a new code if it should report. |
 | Rejected (invalid) or conflict on the server | A report the server refused (version mix, damaged data) | Note the time, check Administration > Server log, update the computer to the server's version; report it with the log entry. |
 
-2. Still not reporting: restart the agent (restart the computer, or on Windows end the *Lifetime\Agent* scheduled task
-   and start it again from Task Scheduler as an administrator).
+2. Still not reporting: restart the agent (restart the computer; ending the *Lifetime\Agent* scheduled task in Task
+   Scheduler stops only its first process, so prefer a restart, or reinstall as in step 3).
 3. Agent installation problems: read `%ProgramData%\Lifetime\Agent\install.log` and the exit code (2 invalid input,
-   3 server unreachable or not this server, 4 code used or expired, 5 not administrator, 6 already installed).
+   3 server unreachable or not this server, 4 code used or expired, 5 not administrator, 6 already installed: add
+   `-Reinstall` to replace it and keep its data).
 
 ## Many computers stopped at once
 
