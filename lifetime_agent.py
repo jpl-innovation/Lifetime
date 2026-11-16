@@ -391,7 +391,8 @@ class MachineAgent:
                         dropped=state['dropped'], policy=dict(state['policy']),
                         server_name=state.get('server_name'), phase=state['phase'],
                         error=state.get('last_error'), error_at=state.get('last_error_at'),
-                        trimmed=bool(state.get('trimmed')), updates=bool(state.get('updates')))
+                        trimmed=bool(state.get('trimmed')), updates=bool(state.get('updates')),
+                        **(getattr(self, 'reach', None) or {}))      # lifetime_client.ServerWatch: is the server up now
 
     def write_status(self):
         with self._lock:
@@ -783,6 +784,17 @@ class MachineAgent:
                     wake.wait(1)
             sync_thread = threading.Thread(target=synchronize, name='lifetime-sync', daemon=True)
             sync_thread.start()
+
+            def watch_server():
+                from lifetime_client import PROBE_EVERY, ServerWatch
+                watch = ServerWatch(self, wake, live=lambda: bool(reporter.link and reporter.link.connected))
+                delay = 1
+                while not stop.wait(delay):
+                    try:
+                        delay = watch.check()
+                    except Exception:
+                        delay = PROBE_EVERY
+            threading.Thread(target=watch_server, name='lifetime-server-watch', daemon=True).start()
 
             def check_updates():
                 from lifetime_updates import CHECK_EVERY, Updater

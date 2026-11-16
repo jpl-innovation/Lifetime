@@ -129,7 +129,7 @@ Without systemd there is no journal, so **Verify** and **Add earlier usage** say
   kWh and money today, this week and this month from the awake time, with a note when the computer was on after
   office hours. Power is *measured* only from this computer's own on-battery readings (Battery permission);
   otherwise it is a typical or owner-set wattage and says *estimated*.
-- **Connect** – connect to a Lifetime Server with one code and manage sharing.
+- **Connect** – connect to a Lifetime Server with one code and manage sharing. While connected, a **Server: Online / Offline** chip (also under the status in the sidebar) shows whether the server answers now, when it last did and why not; awake time keeps counting and is sent when the server is back.
 - **Settings** – a page inside the app (not a pop-up window): language, appearance, what to track, adding earlier usage, start at login and deleting history. Every option is a sliding switch, green when on.
 - **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts.
 

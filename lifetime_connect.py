@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 import time
-from PyQt6.QtCore import Qt, QTimer, QPointF, QPropertyAnimation, QRectF, QParallelAnimationGroup, QVariantAnimation
+from PyQt6.QtCore import Qt, QTimer, QPointF, QPropertyAnimation, QRectF, QParallelAnimationGroup, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QLineEdit, QPushButton,
                             QCheckBox, QVBoxLayout, QHBoxLayout, QMessageBox,
@@ -27,6 +27,57 @@ PERMISSION = 'Windows permission is needed to finish.'
 TRIMMED = 'The server runs an older version of Lifetime, so some details are not shared until it is updated.'
 UPDATES = 'Get Lifetime updates approved by the server'
 UPDATES_DETAIL = 'Downloaded and checked, then installed by your IT team. Off unless you turn it on.'
+KEEPS_COUNTING = 'Awake time keeps counting on this computer and is sent when the server is back.'
+STALE_STATUS = 150      # the agent rewrites its status at least every 60 s; older means it is not running
+UNREACHABLE = ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable')
+
+
+def _reached_text(seconds):
+    """When the server last answered, short: the time today, else the date and time."""
+    try:
+        moment = dt.datetime.fromtimestamp(float(seconds)).astimezone()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ''
+    return moment.strftime('%H:%M') if moment.date() == dt.date.today() else str(datetime_text(moment))
+
+
+def reason_text(kind, t):
+    """Why the server cannot be reached, in plain words, from the stored category (never a raw error)."""
+    if isinstance(kind, str) and kind.startswith('http-') and kind[5:].isdigit():
+        return t('The server refused the report (error {code}).', code=kind[5:])
+    return t(ConnectPage.REASONS[kind]) if kind in ConnectPage.REASONS else ''
+
+
+def server_state(status, t, now=None):
+    """The Server chip as (kind, short words, full words, explanation), only from the agent's status file.
+
+    A current agent checks the server itself every 15-25 s (lifetime_client.ServerWatch); an older agent is judged
+    by its last sync. No network request is made here."""
+    status = status or {}
+    if not status.get('enabled') or status.get('phase') not in ('pending', 'approved'):
+        return 'neutral', t('Not connected'), t('Not connected'), ''
+    checking = ('info', t('Server: Checking…'), t('Server: Checking…'),
+                t('Waiting for the Lifetime agent on this computer.'))
+    now = time.time() if now is None else now
+    checked = status.get('checked_at')
+    if isinstance(checked, (int, float)) and not isinstance(checked, bool):
+        if not -STALE_STATUS <= now - checked <= STALE_STATUS:
+            return checking
+        reachable, problem, seen = status.get('server_reachable') is True, status.get('server_problem'), status.get('server_seen_at')
+    else:
+        state = status.get('status')
+        if state not in ('connected', 'pending', 'approved') + UNREACHABLE:
+            return checking
+        reachable, problem = state not in UNREACHABLE, status.get('error')
+        try:
+            seen = dt.datetime.fromisoformat(str(status.get('last_sync')).replace('Z', '+00:00')).timestamp()
+        except ValueError:
+            seen = None
+    if reachable:
+        return 'good', t('Server: Online'), t('Server: Online'), ''
+    when = _reached_text(seen) if seen else ''
+    full = t('Server: Offline · last reached {time}', time=when) if when else t('Server: Offline')
+    return 'danger', t('Server: Offline'), full, '\n'.join(part for part in (reason_text(problem, t), t(KEEPS_COUNTING)) if part)
 
 
 def locate_server(value):
@@ -239,6 +290,7 @@ class PacketFlight(QWidget):
 
 
 class ConnectPage(QWidget):
+    serverState = pyqtSignal(str, str, str, str)     # kind, short words, full words, explanation: only on a change
     def restyle_glass(self):
         self.setStyleSheet('QWidget#connectPage {background: ' + solid(tokens()['bg']) + ';}')
 
@@ -355,6 +407,10 @@ class ConnectPage(QWidget):
         self._report_started = None
         f = self.forms[4]
         self.connected_title = self.pulse(f, 'Connected', True)
+        from lifetime_widgets_dashboard import StatusChip
+        self.server_chip = StatusChip()
+        f.addWidget(self.server_chip, 0, Qt.AlignmentFlag.AlignLeft)
+        self._server_state = None
         # The connection as a card: the server's name, then its address, the last report and what is shared.
         from lifetime_widgets_dashboard import InfoCard
         self.summary = InfoCard('network', '')
@@ -679,6 +735,7 @@ class ConnectPage(QWidget):
             elif self.step in (4, 5) or operation != 'status':
                 self.show_step(1)
             self.editing = False
+        self.show_server_state()        # every page step; the sidebar chip follows through serverState
 
     def _report_timed_out(self):
         if self._report_started is None:
@@ -702,7 +759,7 @@ class ConnectPage(QWidget):
             value.setText(values[key])
         self.summary_trimmed.setText(self.t(TRIMMED) if self.status.get('trimmed') else '')
         self.summary_trimmed.setVisible(bool(self.status.get('trimmed')))
-        self._set_reachable(self.status.get('status') not in ('offline', 'unavailable', 'error', 'retrying', 'backoff', 'unreachable'))
+        self._set_reachable(self.status.get('status') not in UNREACHABLE)
 
     def _code_rejected(self, state):
         """Back to code entry, saying why. The old code is of no use, so it is cleared once (never while a new one is typed)."""
@@ -740,14 +797,22 @@ class ConnectPage(QWidget):
 
     def _reason(self):
         """Why the last attempt failed, in plain words; only a category is ever stored, never the raw error."""
-        kind = self.status.get('error')
-        if isinstance(kind, str) and kind.startswith('http-') and kind[5:].isdigit():
-            return self.t('The server refused the report (error {code}).', code=kind[5:])
-        return self.t(self.REASONS[kind]) if kind in self.REASONS else ''
+        return reason_text(self.status.get('error'), self.t)
+
+    def show_server_state(self, now=None):
+        """The Server chip from the last status read (a file read in the background); it repaints only on a change."""
+        state = server_state(self.status, self.t, now)
+        if state != self._server_state:
+            self._server_state = state
+            self.server_chip.set_state(state[0], state[2], state[3])
+            self.serverState.emit(*state)
+        return state
 
     def _set_reachable(self, reachable):
         """The title and dot must agree with the line below them: never 'Connected' beside 'Can't reach the server'."""
-        reason = '' if reachable else self._reason()
+        state = self.show_server_state()
+        reachable = reachable and state[0] != 'danger'
+        reason = '' if reachable else (state[3] or self._reason())
         self.unreachable.setText(self.t("Can't reach the server right now. Lifetime will keep trying.") + ('\n' + reason if reason else ''))
         self.unreachable.setVisible(not reachable)
         self.connected_title.setText(self.t('Connected' if reachable else 'Not connected right now'))

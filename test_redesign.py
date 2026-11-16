@@ -46,6 +46,26 @@ class DashboardShellTests(unittest.TestCase):
             p.stop()
         self.temp.cleanup()
 
+    def test_server_chip_shows_only_when_connected_and_its_poll_stops_while_hidden(self):
+        sidebar, page = self.w.sidebar, self.w.connect_page
+        self.assertTrue(sidebar.server.isHidden())                  # not connected to a server
+        page.status = dict(enabled=True, phase='approved', status='unreachable', error='timeout')
+        page.show_server_state()
+        self.assertFalse(sidebar.server.isHidden())
+        self.assertEqual((sidebar.server.kind, sidebar.server.text()), ('danger', 'Server: Offline'))
+        self.assertIn('firewall', sidebar.server.toolTip())
+        sidebar.set_collapsed(True)
+        self.assertTrue(sidebar.server.isHidden())
+        sidebar.set_collapsed(False)
+        page.status = {}
+        page.show_server_state()
+        self.assertTrue(sidebar.server.isHidden())
+        self.assertTrue(page.timer.isActive())
+        self.w.hide()
+        self.assertFalse(page.timer.isActive())
+        self.w.show()
+        self.assertTrue(page.timer.isActive())
+
     def test_click_keyboard_and_shortcuts_follow_visual_order(self):
         # Legacy IDs remain stable, while the new sidebar has the requested order.
         self.assertEqual([row.text() for row in self.w.sidebar.rows],

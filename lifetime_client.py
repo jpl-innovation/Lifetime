@@ -25,8 +25,67 @@ TRUST = ('address', 'certificate_pem', 'fingerprint', 'spki')
 LOST = ('certificate', 'hostname', 'tls', 'name', 'refused', 'timeout', 'dropped', 'network')
 
 
+PROBE_EVERY = 15        # seconds between reachability checks while the server answers
+PROBE_RETRY = 25        # longest wait between checks while it does not (10, 15, 20, then 25 s)
+STATUS_HEARTBEAT = 60   # the status file is rewritten at least this often, so a reader can tell the agent is alive
+
+
 class ResponseError(ValueError):
     """Untrusted or incompatible response (never includes response/secret values)."""
+
+
+class ServerWatch:
+    """Whether the server answers right now, for the desktop app's Server: Online / Offline chip.
+
+    The agent's own sync runs only every reporting interval and backs off to five minutes while the server is away,
+    so on its own cadence this checks with one pinned TLS handshake (lifetime_tls.verify_server: the stored
+    certificate or a renewal carrying the pinned key, no application data, nothing learned is kept). It does not
+    probe while the live socket is connected or a sync has just succeeded. When the server comes back it wakes the
+    sync loop, so waiting reports go out at once instead of after the backoff. Only a category is recorded."""
+    def __init__(self, agent, wake, live=lambda: False, probe=None, clock=time.time):
+        self.agent, self.wake, self.live, self.clock = agent, wake, live, clock
+        self.probe = probe or (lambda bundle: tls.verify_server(bundle, timeout=3))
+        self.failures, self.seen, self.written, self.written_at = 0, None, None, 0.0
+
+    @staticmethod
+    def _epoch(stamp):
+        import calendar
+        try:
+            return calendar.timegm(time.strptime(stamp, '%Y-%m-%dT%H:%M:%SZ')) if stamp else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def check(self):
+        """One check; returns the seconds until the next one."""
+        with self.agent._lock:
+            state = self.agent._load()
+        if not state['enabled'] or state['phase'] not in ('pending', 'approved') or not state.get('bundle'):
+            self.agent.reach, self.failures, self.written = None, 0, None
+            return PROBE_EVERY
+        now = self.clock()
+        synced = self._epoch(state.get('last_sync'))
+        self.seen = max(value for value in (self.seen, synced, 0) if value is not None) or None
+        problem = None
+        if self.live() or (state.get('status') == 'connected' and synced and now - synced < PROBE_EVERY):
+            reachable = True
+        else:
+            try:
+                self.probe(dict(state['bundle']))
+                reachable = True
+            except Exception as error:      # any failure is a category, never its text
+                reachable, problem = False, error_kind(error)
+        if reachable:
+            self.seen, self.failures = now, 0
+            if state.get('status') == 'unreachable':
+                self.wake.set()             # the server is back: send what waited now, not after the backoff
+        else:
+            self.failures = min(self.failures + 1, 10)
+        self.agent.reach = dict(server_reachable=reachable, server_problem=problem, checked_at=int(now),
+                                server_seen_at=int(self.seen) if self.seen else None)
+        if (reachable, problem) != self.written or now - self.written_at >= STATUS_HEARTBEAT:
+            self.written, self.written_at = (reachable, problem), now
+            self.agent.write_status()
+        return PROBE_EVERY if reachable else min(PROBE_RETRY, 5 + 5 * self.failures)
 
 
 def error_kind(error):

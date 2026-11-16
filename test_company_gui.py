@@ -390,5 +390,70 @@ class ConnectTests(unittest.TestCase):
         self.assertFalse(self.bundle_path.exists())
 
 
+class ServerStateTests(unittest.TestCase):
+    """The Server chip comes only from the agent's status file: connected, reachable, unreachable, not enrolled."""
+    NOW = 1_800_000_000
+
+    def state(self, language='en', **status):
+        from lifetime_connect import server_state
+        from lifetime_i18n import TABLES
+        t = lambda key, **fmt: TABLES[language][key].format(**fmt)
+        return server_state(dict(dict(enabled=True, phase='approved', status='connected'), **status), t, self.NOW)
+
+    def test_not_enrolled_is_not_connected(self):
+        from lifetime_connect import server_state
+        from lifetime_i18n import tr
+        for status in ({}, dict(enabled=False), dict(enabled=True, phase='revoked')):
+            self.assertEqual(server_state(status, tr)[:2], ('neutral', 'Not connected'))
+
+    def test_fresh_check_online_offline_and_the_reason_per_kind(self):
+        self.assertEqual(self.state(checked_at=self.NOW - 5, server_reachable=True)[:2], ('good', 'Server: Online'))
+        for kind, words in (('refused', 'not running'), ('timeout', 'firewall'), ('name', 'could not be found'),
+                            ('certificate', 'certificate has changed'), ('http-503', 'error 503')):
+            with self.subTest(kind=kind):
+                state = self.state(checked_at=self.NOW - 5, server_reachable=False, server_problem=kind,
+                                   server_seen_at=self.NOW - 40)
+                self.assertEqual((state[0], state[1]), ('danger', 'Server: Offline'))
+                self.assertTrue(state[2].startswith('Server: Offline · last reached '))
+                self.assertIn(words, state[3])
+                self.assertIn('Awake time keeps counting', state[3])
+
+    def test_a_silent_agent_is_checking_and_an_older_agent_is_judged_by_its_sync(self):
+        self.assertEqual(self.state(checked_at=self.NOW - 600, server_reachable=True)[0], 'info')
+        self.assertEqual(self.state()[:2], ('good', 'Server: Online'))
+        state = self.state(status='unreachable', error='timeout', last_sync='2026-11-16T08:00:00Z')
+        self.assertEqual(state[0], 'danger')
+        self.assertIn('firewall', state[3])
+
+    def test_vietnamese_words_fit_the_sidebar(self):
+        from PyQt6.QtGui import QFont, QFontMetrics
+        from lifetime_widgets_dashboard import chip_width
+        qt_app()
+        font = QFont('Segoe UI')
+        font.setPixelSize(13)
+        for state in (self.state('vi', checked_at=self.NOW, server_reachable=False, server_problem='timeout'),
+                      self.state('vi', checked_at=self.NOW - 600), self.state('vi', checked_at=self.NOW, server_reachable=True)):
+            with self.subTest(words=state[1]):
+                self.assertTrue(state[1].startswith('Máy chủ: '))
+                self.assertLessEqual(chip_width(QFontMetrics(font), state[1]), 200)     # the sidebar's 232 px less margins
+
+    def test_the_page_chip_changes_only_when_the_state_does_and_reads_no_network(self):
+        with patch('lifetime_connect.Tasks', FakeTasks), patch.dict('os.environ', LIFETIME_REDUCE_MOTION='1'), \
+                tempfile.TemporaryDirectory() as root, patch('socket.create_connection') as network, \
+                patch('lifetime_tls.verify_server') as probe:
+            page = ConnectPage(directory=root, machine_root=root)
+            self.addCleanup(page.timer.stop)
+            seen = []
+            page.serverState.connect(lambda *state: seen.append(state[0]))
+            status = dict(enabled=True, phase='approved', status='connected', server='https://office:8443',
+                          checked_at=time.time(), server_reachable=True)
+            for value in (status, status, dict(status, server_reachable=False, server_problem='refused'), {}):
+                page.tasks.resolve(value)
+            self.assertEqual(seen, ['good', 'danger', 'neutral'])
+            self.assertEqual(page.server_chip.text(), 'Not connected')
+            network.assert_not_called()
+            probe.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

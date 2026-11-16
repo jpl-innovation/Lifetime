@@ -17,6 +17,14 @@
   `lifetime-admin` are Admin; the socket's group `lifetime-console` lets an account connect but grants no role until
   one is assigned with `set_role`), so remote power from a Linux server now works with a named account. Alert secrets on
   Linux are a 0600 file (permissions, not encryption). Computers pair with it exactly as with a Windows server.
+- **The desktop app knows whether its server is on (desktop and agent):** while the computer is connected to a
+  Lifetime Server, a **Server: Online / Offline · last reached 14:05 / Checking…** chip sits under the status in the
+  sidebar and on the Connect page, with the reason (server not running, no answer or firewall, name not found,
+  certificate changed) and that awake time keeps counting and is sent later. The agent checks the server itself every
+  15 s (10-25 s while it is away) with one pinned TLS handshake and no data, skipping the check while the live socket
+  is up; the window only reads the agent's status file in the background, and stops while it is hidden. A server that
+  comes back gets the waiting reports at once. The Connect page now also shows why the last report failed (that line
+  was empty before). English and Vietnamese. Timing checked with a simulated clock, not on real machines.
 - **Groups ahead of time and one place for a computer's details (server):** **Manage groups** on the Devices page
   creates, renames and removes groups before any computer is in them (empty state when there are none); approving a
   computer can put it in a group straight away; **Edit details…** in a device's menu edits name, asset tag, group,

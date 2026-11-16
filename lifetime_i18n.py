@@ -1542,6 +1542,13 @@ CONNECT_VI = {
     'Computers are still in this group. Move them to another group first.': 'Vẫn còn máy tính trong nhóm này. Hãy chuyển chúng sang nhóm khác trước.',
     'Connection declined.': 'Đã từ chối kết nối.',
     "Can't reach the Lifetime server. Make sure it is running.": 'Không thể kết nối với máy chủ Lifetime. Hãy kiểm tra máy chủ đang chạy.',
+    'Not connected': 'Chưa kết nối',
+    'Server: Online': 'Máy chủ: Trực tuyến',
+    'Server: Offline': 'Máy chủ: Ngoại tuyến',
+    'Server: Offline · last reached {time}': 'Máy chủ: Ngoại tuyến · lần cuối {time}',
+    'Server: Checking…': 'Máy chủ: Đang kiểm tra…',
+    'Waiting for the Lifetime agent on this computer.': 'Đang chờ dịch vụ Lifetime trên máy tính này.',
+    'Awake time keeps counting on this computer and is sent when the server is back.': 'Thời gian hoạt động vẫn được đếm trên máy tính này và sẽ được gửi khi máy chủ trở lại.',
 }
 for _key, _text in CONNECT_VI.items():
     EN[_key] = _key

@@ -765,6 +765,13 @@ class Sidebar(QWidget):
         state.addWidget(status, 1)
         self.status = status
         box.addLayout(state)
+        from lifetime_widgets_dashboard import StatusChip
+        self.server = StatusChip()          # Server: Online / Offline, only while this computer is connected to one
+        self.server.setObjectName('sidebarServer')
+        self.server.setStyleSheet('font-size: 13px;')
+        self.server.hide()
+        self.server_known = False
+        box.addWidget(self.server)
         box.addSpacing(24)
         self.group = QButtonGroup(self)
         self.rows = []
@@ -804,6 +811,13 @@ class Sidebar(QWidget):
         box.addWidget(language_control)
         if theme_control is not None:
             box.addWidget(theme_control)
+
+    def set_server(self, kind, short, full, explanation):
+        """The connected server's state from the Connect page's background status read: short words here, the rest
+        in the tooltip. Hidden when this computer is not connected to a server."""
+        self.server.set_state(kind, short, '\n'.join(part for part in (full if full != short else '', explanation) if part))
+        self.server_known = kind != 'neutral'
+        self.server.setVisible(self.server_known and not self.collapsed)
 
     def refresh_theme(self):
         self.credit_pixmap = themed_logo(self.credit_path)
@@ -918,6 +932,7 @@ class Sidebar(QWidget):
         self.layout().setContentsMargins(10 if collapsed else 16, 24, 10 if collapsed else 16, 16)
         self.brand.setVisible(not collapsed)
         self.status.setVisible(not collapsed)
+        self.server.setVisible(self.server_known and not collapsed)
         self.credit.setVisible(not collapsed and not self.tight)
         self.credit_logo.setPixmap(crisp(self.credit_pixmap, 44 if collapsed else 200, CREDIT_HEIGHT, self))
         self.credit_logo.setToolTip(tr('Made by JPL Innovation'))

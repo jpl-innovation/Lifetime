@@ -658,5 +658,91 @@ class InvalidConnectionCodeTests(SyncFixture):
         self.assertEqual(self.machine.status()['status'], 'pending')
 
 
+class ServerWatchTests(SyncFixture):
+    """The agent's own reachability check behind the desktop's Server: Online / Offline chip."""
+    def setUp(self):
+        super().setUp()
+        import threading
+        from lifetime_client import ServerWatch
+        self.now, self.up, self.live, self.probes = [0.0], [True], [False], []
+        self.wake = threading.Event()
+
+        def probe(bundle):
+            self.probes.append(bundle['address'])
+            if not self.up[0]:
+                raise ConnectionRefusedError('nothing listens')
+        self.watch = ServerWatch(self.machine, self.wake, live=lambda: self.live[0], probe=probe,
+                                 clock=lambda: self.now[0])
+
+    def connected(self):
+        self.pair()
+        self.client.step(force=True)
+        self.assertEqual(self.machine.status()['status'], 'connected')
+        self.now[0] = protocol.timestamp(self.machine.status()['last_sync'].replace('Z', '+00:00')).timestamp()
+
+    def test_not_connected_records_nothing_and_never_probes(self):
+        self.assertEqual(self.watch.check(), 15)
+        self.assertNotIn('server_reachable', self.machine.status())
+        self.assertEqual(self.probes, [])
+
+    def test_a_fresh_sync_or_the_live_socket_counts_without_a_probe(self):
+        self.connected()
+        self.watch.check()
+        self.live[0] = True
+        self.now[0] += 100
+        self.watch.check()
+        self.assertEqual(self.probes, [])
+        status = json.loads((self.root / 'status.json').read_text(encoding='utf-8'))
+        self.assertEqual((status['server_reachable'], status['server_problem']), (True, None))
+
+    def test_each_failure_is_a_category_and_a_return_wakes_the_sync(self):
+        import socket
+        self.connected()
+        for error, kind in ((ConnectionRefusedError(), 'refused'), (TimeoutError(), 'timeout'),
+                            (socket.gaierror(), 'name'), (ssl.SSLCertVerificationError('other key'), 'certificate')):
+            with self.subTest(kind=kind):
+                self.now[0] += 30
+                self.watch.probe = lambda bundle, error=error: (_ for _ in ()).throw(error)
+                self.watch.check()
+                status = self.machine.status()
+                self.assertEqual((status['server_reachable'], status['server_problem']), (False, kind))
+        seen = status['server_seen_at']
+        self.assertLess(seen, self.now[0])
+        with self.machine._transaction() as state:
+            state['status'] = 'unreachable'         # the sync has noticed too and is backing off
+        self.watch.probe = lambda bundle: None
+        self.now[0] += 20
+        self.assertEqual(self.watch.check(), 15)
+        self.assertTrue(self.wake.is_set())
+        self.assertEqual(self.machine.status()['server_seen_at'], int(self.now[0]))
+
+    def test_online_and_offline_flip_within_thirty_seconds_and_writes_only_on_change(self):
+        self.connected()
+        writes = []
+        original = self.machine.write_status
+        self.machine.write_status = lambda: (writes.append(self.now[0]), original())
+        due = self.now[0]
+
+        def run_until(stop):
+            nonlocal due
+            seen = []
+            while due <= stop:
+                self.now[0] = due
+                due += self.watch.check()
+                seen.append((self.now[0], self.machine.status()['server_reachable']))
+            return seen
+        run_until(self.now[0] + 60)
+        down = self.now[0] + 7
+        self.up[0] = False
+        offline = next(at for at, reachable in run_until(down + 120) if at >= down and not reachable)
+        self.assertLessEqual(offline - down, 30)
+        back = self.now[0] + 3
+        self.up[0] = True
+        online = next(at for at, reachable in run_until(back + 120) if at >= back and reachable)
+        self.assertLessEqual(online - back, 30)
+        # Two changes plus a heartbeat at most every 60 s: never a write on every check.
+        self.assertLess(len(writes), len(self.probes))
+
+
 if __name__ == '__main__':
     unittest.main()

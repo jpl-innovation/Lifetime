@@ -33,7 +33,9 @@ def read_status(directory=None):
             value = json.loads(raw)
             if not isinstance(value, dict):
                 raise ValueError('Invalid status file')
-            return {key: value.get(key) for key in ('enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported')}
+            return {key: value.get(key) for key in ('enabled', 'server', 'status', 'last_sync', 'pending', 'dropped', 'policy', 'server_name', 'phase', 'reported',
+                                            'updates', 'trimmed', 'error', 'error_at', 'server_reachable', 'server_problem',
+                                            'server_seen_at', 'checked_at')}
         except FileNotFoundError:
             continue
     return dict(enabled=False, server=None, status='disabled', last_sync=None, pending=None, dropped=None)

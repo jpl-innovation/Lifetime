@@ -827,6 +827,8 @@ class Window(QWidget):
         reports_layout.addWidget(self.repair_notice)
         self.health = HealthPage(self.settings, self.open_settings)
         self.connect_page = ConnectPage(directory=data_dir())
+        self.connect_page.serverState.connect(self.sidebar.set_server)       # Server: Online / Offline, beside the status
+        self.sidebar.set_server(*self.connect_page.show_server_state())
         self.settings_page = SettingsPage(self, data_dir())
         for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page, self.settings_page):
             page.setMinimumWidth(0)
@@ -992,6 +994,8 @@ class Window(QWidget):
         self.verification.setText(tr('verify.intro', log=self.log_name))
         self.language_control.group.button(('en', 'vi').index(language())).setChecked(True)
         self.settings_page.load(self.settings)
+        self.connect_page._server_state = None
+        self.connect_page.show_server_state()      # the chips paint their words: say them in the new language
         for card in self.cards.values():
             card.target = None
         self.toggle_import(self.import_toggle.isChecked())
@@ -1215,6 +1219,9 @@ class Window(QWidget):
         super().showEvent(event)
         if hasattr(self, 'timer'):
             self.timer.start(1000)
+        if hasattr(self, 'connect_page') and not self.connect_page.timer.isActive():
+            self.connect_page.timer.start()     # the server status poll runs only while the window is shown
+            self.connect_page.poll()
         if getattr(self, '_shown_once', False) and getattr(self, 'active_page', None) == 0 and self.intro.done:
             self.hero.roll_again()      # brought back from the tray or restored: the total rolls in again
         if not getattr(self, '_shown_once', False):
@@ -1227,6 +1234,8 @@ class Window(QWidget):
         super().hideEvent(event)
         if hasattr(self, 'timer'):
             self.timer.stop()
+        if hasattr(self, 'connect_page'):
+            self.connect_page.timer.stop()
         for animation in self.findChildren(QVariantAnimation):
             if animation.state() == QVariantAnimation.State.Running:
                 animation.setCurrentTime(animation.duration())
