@@ -6,6 +6,23 @@ Set-StrictMode -Version Latest
 if ($env:OS -ne 'Windows_NT') { throw 'This uninstaller requires Windows.' }
 $administrator = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $administrator.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Open PowerShell as Administrator.' }
+# The dashboard is not part of the service or task: left open, its windows keep this installation's program files in
+# use and a later install stops on a locked file. End only dashboards running from this installation (the packaged
+# LifetimeServerDashboard.exe and its one-file child, or an interpreter running its lifetime_server_gui.py).
+$installRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'server-install.json') -PathType Leaf) { $PSScriptRoot } else {
+    $serverTask = Get-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server -ErrorAction SilentlyContinue
+    if ($serverTask -and $serverTask.Actions[0].WorkingDirectory) { [string]$serverTask.Actions[0].WorkingDirectory } else { Join-Path $env:ProgramFiles 'LifetimeServer' }
+}
+$dashboard = Join-Path $installRoot 'LifetimeServerDashboard.exe'
+$dashboardScript = Join-Path $installRoot 'lifetime_server_gui.py'
+if ($PSCmdlet.ShouldProcess($installRoot, 'Close the server dashboard windows running from this installation')) {
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -eq $dashboard -or ($_.CommandLine -and $_.CommandLine.Contains($dashboardScript)) } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $_.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+        }
+}
 $service = Get-Service -Name LifetimeServer -ErrorAction SilentlyContinue
 if ($service -and $PSCmdlet.ShouldProcess('LifetimeServer', 'Stop and remove this server service registration')) {
     if ($service.Status -ne 'Stopped') {

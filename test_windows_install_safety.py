@@ -168,6 +168,22 @@ class InstallerScriptTests(unittest.TestCase):
         self.assertIn('$_.ExecutablePath -eq $executable', uninstall)
         self.assertLess(uninstall.index('Stop-Process'), uninstall.index('Unregister-ScheduledTask'))
 
+    def test_the_server_uninstall_closes_this_installations_dashboard_before_anything_is_removed(self):
+        """Dashboard windows left open by the server uninstall locked a file during a later reinstall."""
+        uninstall = (PROJECT / 'uninstall_server_windows.ps1').read_text(encoding='utf-8')
+        closing = uninstall.index("$dashboard = Join-Path $installRoot 'LifetimeServerDashboard.exe'")
+        block = uninstall[closing:uninstall.index('$service = Get-Service')]
+        # Only this installation's dashboard: its packaged program, or an interpreter running its own script.
+        self.assertIn('$_.ExecutablePath -eq $dashboard', block)
+        self.assertIn("$dashboardScript = Join-Path $installRoot 'lifetime_server_gui.py'", block)
+        self.assertIn('$_.CommandLine.Contains($dashboardScript)', block)
+        self.assertIn("(Join-Path $PSScriptRoot 'server-install.json')", uninstall[:closing])     # the copy in the install folder
+        stop = uninstall.index('Stop-Process', closing)
+        self.assertLess(stop, uninstall.index('Stop-Service'))
+        self.assertLess(stop, uninstall.index('Unregister-ScheduledTask'))
+        self.assertLess(stop, uninstall.index('Remove-Item -LiteralPath $shortcutPath'))
+        self.assertLess(closing, stop)
+
     def test_a_packaged_agent_folder_counts_as_an_agent_installation_so_connecting_again_can_replace_it(self):
         """A Packaged install holds LifetimeAgent.exe and no lifetime_agent.py. The desktop's Finish passes -Reinstall,
         and the ownership check used to refuse that folder: 'not a Lifetime Agent installation' (exit 2)."""
