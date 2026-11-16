@@ -543,6 +543,34 @@ class CapabilityTests(SyncFixture):
         self.assertNotIn('problem', self.calls[-1][1])
         self.assertNotIn('problem', self.machine._load())
 
+    def test_connecting_again_clears_the_old_connections_error_and_last_problem(self):
+        """After a refused report (http-403) and a successful reconnect, both the Connect page and the server's
+        "Last problem" kept showing the old http-403."""
+        self.server_capabilities = protocol.CAPABILITIES
+        self.pair()
+        self.report()
+        self.store.revoke(self.machine.device_id)
+        status = self.report()
+        self.assertEqual((status['status'], status['error']), ('revoked', 'http-403'))
+        self.assertEqual(self.machine._load()['problem']['kind'], 'http-403')
+        self.bundle = tls.encode_bundle('https://localhost:8443', self.store.create_code()['code'], self.pem)
+        self.transport.side_effect = TimeoutError()
+        self.client.start_enrollment(self.bundle, {'display_name': 'Máy khách'}, dict(history=False, resources=False))
+        self.assertEqual(self.machine._load()['problem']['kind'], 'timeout')       # this connection's own failure
+        self.transport.side_effect = self.exchange
+        self.assertEqual(self.client.step(force=True)['status'], 'pending')
+        state = self.machine._load()
+        self.assertEqual((state['last_error'], state.get('problem')), (None, None))    # the server answered
+        with self.store._lock:      # a problem the server noted about the old pairing goes with the new approval
+            self.store._db.execute("UPDATE devices SET last_problem='rejected',last_problem_at='2026-11-15T01:00:00.000000+00:00'")
+            self.store._db.commit()
+        self.store.approve(state['enrollment']['request_id'])
+        self.assertEqual(self.client.step(force=True)['status'], 'approved')
+        status = self.report()
+        self.assertEqual((status['status'], status['error']), ('connected', None))
+        self.assertNotIn('problem', self.calls[-1][1])
+        self.assertIsNone(self.store.get_device(self.machine.device_id)['last_problem'])
+
     def test_capabilities_are_validated_and_forgotten_for_a_new_server(self):
         self.server_capabilities = protocol.CAPABILITIES
         self.pair(self.HISTORY)

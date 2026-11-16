@@ -198,8 +198,10 @@ class SyncClient:
                           and existing and existing['identity'] == identity and existing['policy'] == policy)
                 if not resume:
                     self.agent._set_policy(state, policy)
+                    state.pop('problem', None)      # a failure of the earlier connection is not this one's problem
                     state.update(reported=False, bundle=trust, credential=None, enabled=True,
                                  phase='enrolling', status='enrolling', enrollment_sent=False,
+                                 last_error=None, last_error_at=None,
                                  failures=0, next_attempt=0, capabilities=[], trimmed=False, legacy_server_until=0,
                                  pending_since=None,
                                  enrollment=dict(version=1, request_id=str(uuid.uuid4()),
@@ -382,6 +384,10 @@ class SyncClient:
                     else:
                         status = response['status']
                         current['enrollment_sent'] = True
+                        # The server answered: an earlier failed attempt (say an old code's http-403) is over, and is
+                        # not reported as the new computer record's "last problem" either.
+                        current.update(last_error=None, last_error_at=None)
+                        current.pop('problem', None)
                         if kind == 'claim' and status == 'approved':
                             current.update(credential=response['credential'], phase='approved',
                                            status='approved', next_attempt=0)

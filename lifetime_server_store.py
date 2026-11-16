@@ -721,7 +721,7 @@ class Store:
             db.execute("UPDATE requests SET status='revoked',poll_hash=NULL WHERE device_id=? AND request_id!=? AND status IN ('pending','approved','completed')",
                        (row['device_id'], request_id))
             # Approval owns the new consent; pairing never rewinds policy or usage.
-            db.execute("UPDATE devices SET status='approved',credential_hash=NULL,policy=?,history=NULL,history_received_at=NULL,readings=NULL,readings_received_at=NULL,health=NULL,health_received_at=NULL WHERE device_id=?",
+            db.execute("UPDATE devices SET status='approved',credential_hash=NULL,policy=?,history=NULL,history_received_at=NULL,readings=NULL,readings_received_at=NULL,health=NULL,health_received_at=NULL,last_problem=NULL,last_problem_at=NULL WHERE device_id=?",
                        (row['policy'], row['device_id']))
             db.execute('DELETE FROM performance_samples WHERE device_id=?', (row['device_id'],))
             self._cancel_device_commands(db, row['device_id'])
