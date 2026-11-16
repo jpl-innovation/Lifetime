@@ -128,7 +128,7 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(self.page.connected_title.text(), 'Connected')
         self.assertTrue(self.page.unreachable.isHidden())
         self.page.completed(0, dict(up, status='unreachable'))
-        self.assertEqual(self.page.connected_title.text(), 'Not connected right now')
+        self.assertEqual(self.page.connected_title.text(), 'Waiting for the server')
         self.assertFalse(self.page.unreachable.isHidden())
         self.page.completed(0, dict(up, status='unreachable', error='timeout'))      # and it says why
         self.assertIn('firewall', self.page.unreachable.text())
@@ -435,7 +435,7 @@ class ServerStateTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 state = self.state(checked_at=self.NOW - 5, server_reachable=False, server_problem=kind,
                                    server_seen_at=self.NOW - 40)
-                self.assertEqual((state[0], state[1]), ('danger', 'Server: Offline'))
+                self.assertEqual((state[0], state[1]), ('warning', 'Server: Offline'))     # amber: nothing to fix here
                 self.assertTrue(state[2].startswith('Server: Offline · last reached '))
                 self.assertIn(words, state[3])
                 self.assertIn('Awake time keeps counting', state[3])
@@ -444,7 +444,7 @@ class ServerStateTests(unittest.TestCase):
         self.assertEqual(self.state(checked_at=self.NOW - 600, server_reachable=True)[0], 'info')
         self.assertEqual(self.state()[:2], ('good', 'Server: Online'))
         state = self.state(status='unreachable', error='timeout', last_sync='2026-11-16T08:00:00Z')
-        self.assertEqual(state[0], 'danger')
+        self.assertEqual(state[0], 'warning')
         self.assertIn('firewall', state[3])
 
     def test_vietnamese_words_fit_the_sidebar(self):
@@ -467,12 +467,15 @@ class ServerStateTests(unittest.TestCase):
             self.addCleanup(page.timer.stop)
             seen = []
             page.serverState.connect(lambda *state: seen.append(state[0]))
+            self.assertTrue(page.server_chip.isHidden())                # personal use: no server status at all
             status = dict(enabled=True, phase='approved', status='connected', server='https://office:8443',
                           checked_at=time.time(), server_reachable=True)
-            for value in (status, status, dict(status, server_reachable=False, server_problem='refused'), {}):
+            page.tasks.resolve(status)
+            self.assertFalse(page.server_chip.isHidden())
+            for value in (status, dict(status, server_reachable=False, server_problem='refused'), {}):
                 page.tasks.resolve(value)
-            self.assertEqual(seen, ['good', 'danger', 'neutral'])
-            self.assertEqual(page.server_chip.text(), 'Not connected')
+            self.assertEqual(seen, ['good', 'warning', 'neutral'])
+            self.assertTrue(page.server_chip.isHidden())                # disconnected: the chip goes away
             network.assert_not_called()
             probe.assert_not_called()
 

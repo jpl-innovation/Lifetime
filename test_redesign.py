@@ -52,7 +52,7 @@ class DashboardShellTests(unittest.TestCase):
         page.status = dict(enabled=True, phase='approved', status='unreachable', error='timeout')
         page.show_server_state()
         self.assertFalse(sidebar.server.isHidden())
-        self.assertEqual((sidebar.server.kind, sidebar.server.text()), ('danger', 'Server: Offline'))
+        self.assertEqual((sidebar.server.kind, sidebar.server.text()), ('warning', 'Server: Offline'))
         self.assertIn('firewall', sidebar.server.toolTip())
         sidebar.set_collapsed(True)
         self.assertTrue(sidebar.server.isHidden())

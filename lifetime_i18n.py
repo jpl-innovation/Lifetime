@@ -1004,7 +1004,7 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
  'Continue?': 'Tiếp tục?',
  'Continue': 'Tiếp tục',
  'Found {server}': 'Đã tìm thấy {server}',
- 'Not connected right now': 'Hiện chưa kết nối',
+ 'Waiting for the server': 'Đang chờ máy chủ',
  'The server removed this computer. Ask for a new code on the server to connect again.': 'Máy chủ đã gỡ máy tính này. Hãy lấy mã mới trên máy chủ để kết nối lại.',
  'Delete older records permanently? Latest totals remain, with their original timestamps.': 'Xóa '
                                                                                             'vĩnh '
@@ -1359,7 +1359,7 @@ CONNECT_VI = {
     'Connect': 'Kết nối',
     'Connect to a server': 'Kết nối với máy chủ',
     'Enter the code shown on the server.': 'Nhập mã hiển thị trên máy chủ.',
-    'Link this computer to a Lifetime Server on your network so it can see how this computer is doing.': 'Kết nối máy tính này với Lifetime Server trong mạng của bạn để máy chủ xem tình trạng máy.',
+    "For workplace computers: connect to your IT team's Lifetime Server. Not needed for personal use — Lifetime works fully on its own.": 'Dành cho máy tính ở nơi làm việc: kết nối với Lifetime Server của bộ phận IT. Không cần nếu bạn dùng cá nhân — Lifetime vẫn hoạt động đầy đủ khi không kết nối.',
     'Refreshing…': 'Đang làm mới…',
     'Online now': 'Đang trực tuyến',
     '{connected} of {total} computers online': '{connected} trên {total} máy tính đang trực tuyến',

@@ -77,7 +77,7 @@ def server_state(status, t, now=None):
         return 'good', t('Server: Online'), t('Server: Online'), ''
     when = _reached_text(seen) if seen else ''
     full = t('Server: Offline · last reached {time}', time=when) if when else t('Server: Offline')
-    return 'danger', t('Server: Offline'), full, '\n'.join(part for part in (reason_text(problem, t), t(KEEPS_COUNTING)) if part)
+    return 'warning', t('Server: Offline'), full, '\n'.join(part for part in (reason_text(problem, t), t(KEEPS_COUNTING)) if part)
 
 
 def locate_server(value):
@@ -438,7 +438,7 @@ class ConnectPage(QWidget):
             self.steps.addWidget(panel)
         f = self.forms[0]
         self.note(f, 'Connect to a server', 'pageTitle')
-        self.note(f, 'Link this computer to a Lifetime Server on your network so it can see how this computer is doing.')
+        self.note(f, "For workplace computers: connect to your IT team's Lifetime Server. Not needed for personal use — Lifetime works fully on its own.")
         f.addWidget(PacketFlight(self.reduce_motion))
         # The tutorial is captioned onto the drawing: each end says what to do at that computer.
         ends = QHBoxLayout()
@@ -508,6 +508,7 @@ class ConnectPage(QWidget):
         self.connected_title = self.pulse(f, 'Connected', True)
         from lifetime_widgets_dashboard import StatusChip
         self.server_chip = StatusChip()
+        self.server_chip.hide()     # shown only while this computer is connected to a server
         f.addWidget(self.server_chip, 0, Qt.AlignmentFlag.AlignLeft)
         self._server_state = None
         # The connection as a card: the server's name, then its address, the last report and what is shared.
@@ -905,16 +906,17 @@ class ConnectPage(QWidget):
             self._server_state = state
             self.server_chip.set_state(state[0], state[2], state[3])
             self.serverState.emit(*state)
+        self.server_chip.setVisible(state[0] != 'neutral')     # a computer that never connects shows no server status
         return state
 
     def _set_reachable(self, reachable):
         """The title and dot must agree with the line below them: never 'Connected' beside 'Can't reach the server'."""
         state = self.show_server_state()
-        reachable = reachable and state[0] != 'danger'
+        reachable = reachable and state[0] != 'warning'
         reason = '' if reachable else (state[3] or self._reason())
         self.unreachable.setText(self.t("Can't reach the server right now. Lifetime will keep trying.") + ('\n' + reason if reason else ''))
         self.unreachable.setVisible(not reachable)
-        self.connected_title.setText(self.t('Connected' if reachable else 'Not connected right now'))
+        self.connected_title.setText(self.t('Connected' if reachable else 'Waiting for the server'))
         self.connected_title.dot.set_active(reachable)
 
     def failed(self, number, error):
