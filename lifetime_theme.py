@@ -279,6 +279,7 @@ def install():
     Style the actual popup window before native creation; leave tooltips square.
     Insets keep child viewports and selected rows inside the rounded surface.
     """
+    from PyQt6 import sip
     from PyQt6.QtCore import QObject, QEvent, Qt, QPointF, QRectF, QVariantAnimation, QEasingCurve
     from PyQt6.QtGui import QPainter, QColor, QPolygonF, QPen
     from PyQt6.QtWidgets import (QApplication, QWidget, QMenu, QAbstractScrollArea, QCheckBox, QLabel, QToolTip,
@@ -454,8 +455,17 @@ def install():
 
         def eventFilter(self, widget, event):
             kind = event.type()
-            if kind not in self.WATCHED or not isinstance(widget, QWidget):
+            if kind not in self.WATCHED or not isinstance(widget, QWidget) or sip.isdeleted(widget):
                 return False
+            # An exception leaving an event filter makes PyQt6 abort the whole program (qFatal). A widget can be
+            # torn down while Qt still delivers its events (Python's garbage collector freeing a window mid-event):
+            # touching it raises "wrapped C/C++ object ... has been deleted". Such an event is simply not handled.
+            try:
+                return self._filter(widget, event, kind)
+            except RuntimeError:
+                return False
+
+        def _filter(self, widget, event, kind):
             if kind == QEvent.Type.ToolTip:
                 # No tooltip in either app is written as HTML, so one that looks like HTML is somebody
                 # else's text (a computer name, a group, a reason). Show its characters, never its markup.

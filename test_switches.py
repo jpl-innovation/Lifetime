@@ -44,6 +44,19 @@ class SwitchTests(unittest.TestCase):
     def overlay(self):
         return self.box._lifetime_switch
 
+    def test_the_style_filter_ignores_a_destroyed_widget_instead_of_aborting_the_program(self):
+        """An exception leaving an event filter aborts a PyQt6 program. A window freed by Python's garbage collector
+        while Qt still delivered its events reached the filter as a deleted wrapper: CI crashed (0xC0000409)."""
+        from PyQt6 import sip
+        from PyQt6.QtCore import QEvent
+        surfaces = self.app._lifetime_surfaces
+        gone = QCheckBox('Gone')
+        sip.delete(gone)
+        for kind in (QEvent.Type.Polish, QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.Paint):
+            self.assertFalse(surfaces.eventFilter(gone, QEvent(kind)))
+        with patch.object(type(surfaces), '_filter', side_effect=RuntimeError('wrapped C/C++ object has been deleted')):
+            self.assertFalse(surfaces.eventFilter(self.box, QEvent(QEvent.Type.Resize)))
+
     def click(self):
         QTest.mouseClick(self.box, Qt.MouseButton.LeftButton, pos=self.overlay().geometry().center())
 
