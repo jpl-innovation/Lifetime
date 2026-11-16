@@ -19,7 +19,7 @@ from lifetime_i18n import tr, TABLES, datetime_text
 from lifetime_i18n_qt import QLabel, QPushButton
 from lifetime_company import read_status
 from lifetime_settings import read_settings
-from lifetime_theme import tokens
+from lifetime_theme import SWITCH_W, tokens
 from lifetime_glass import solid
 
 NO_SERVER = 'No server found with this code. Check that the server is on and that this computer is on the same network.'
@@ -133,23 +133,10 @@ class ConnectButton(QPushButton):
 
 
 class SharingSwitch(QCheckBox):
-    """Native checkbox keyboard/accessibility behavior, painted as a switch."""
+    """Native checkbox keyboard/accessibility behavior. lifetime_theme draws every QCheckBox as the app's
+    sliding switch, so this paints nothing of its own: a second switch drawn underneath showed through."""
     def hitButton(self, position):
         return self.rect().contains(position)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setOpacity(1.0 if self.isEnabled() else 0.5)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(tokens()['accent'] if self.isChecked() else tokens()['line']))
-        p.drawRoundedRect(QRectF(2, 10, 40, 24), 12, 12)
-        p.setBrush(QColor(tokens()['bg'] if self.isChecked() else '#FFFFFF'))
-        p.drawEllipse(QRectF(24 if self.isChecked() else 6, 14, 16, 16))
-        if self.hasFocus():
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(QColor(tokens()['muted']), 1))
-            p.drawRoundedRect(QRectF(0.5, 7.5, 43, 29), 14, 14)
 
 
 class StageMark(QWidget):
@@ -446,7 +433,7 @@ class ConnectPage(QWidget):
         switch = SharingSwitch()
         switch.setAccessibleName(self.t(title))
         switch.setChecked(checked)
-        switch.setFixedSize(44, 44)
+        switch.setFixedSize(SWITCH_W, 44)     # the theme's switch is SWITCH_W wide; narrower clipped its end
         row.addWidget(switch)
         layout.addLayout(row)
         return switch

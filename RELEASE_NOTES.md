@@ -17,6 +17,14 @@
   `lifetime-admin` are Admin; the socket's group `lifetime-console` lets an account connect but grants no role until
   one is assigned with `set_role`), so remote power from a Linux server now works with a named account. Alert secrets on
   Linux are a 0600 file (permissions, not encryption). Computers pair with it exactly as with a Windows server.
+- **Lifetime Server has its own icon** (navy and cream swapped against the desktop app's) in the Windows server
+  package, its Start menu shortcut and the Linux bundle; on Linux the two windows announce their own app ids
+  (`lifetime`, `lifetime-server`) so docks and taskbars show the right icon (the tar.gz installer adds a hidden
+  `lifetime-server.desktop` for it; an AppImage run without desktop integration shows the window icon only).
+- **Connect:** a server found by the one-code LAN scan is kept only at an address its certificate names; when the
+  certificate names only a host name, the computer moves to that name and checks the connection code against it
+  again, so pairing no longer fails later with a hostname error. The sharing switches on the Connect page use the
+  app's switch and are no longer clipped.
 - **Server command line:** `LifetimeServerRuntime admin --operation ... [--arguments JSON] [--field NAME]` (and
   `lifetime_server.py admin`) sends one request with the caller's own role, for headless servers and containers.
 - **Energy and cost from true awake time (both apps):** kWh and money per computer, group and fleet for today, 7 and

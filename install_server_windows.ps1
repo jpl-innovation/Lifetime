@@ -103,7 +103,7 @@ foreach ($name in @('LifetimeServerRuntime.exe', 'LifetimeServerDashboard.exe'))
     if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination $InstallDirectory -Force }
 }
 New-Item -ItemType Directory -Path (Join-Path $InstallDirectory 'assets'), (Join-Path $InstallDirectory 'docs') -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\lifetime.png'), (Join-Path $PSScriptRoot 'assets\lifetime.ico') -Destination (Join-Path $InstallDirectory 'assets') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\lifetime.png'), (Join-Path $PSScriptRoot 'assets\lifetime.ico'), (Join-Path $PSScriptRoot 'assets\lifetime-server.ico'), (Join-Path $PSScriptRoot 'assets\lifetime-server.png') -Destination (Join-Path $InstallDirectory 'assets') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\jpl_innovation.png') -Destination (Join-Path $InstallDirectory 'assets') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png') -Destination (Join-Path $InstallDirectory 'assets') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\SERVER_OPERATIONS.md') -Destination (Join-Path $InstallDirectory 'docs') -Force
@@ -184,7 +184,7 @@ if ($dashboardTarget) {
     $shortcut.TargetPath = $dashboardTarget
     $shortcut.Arguments = $dashboardArguments
     $shortcut.WorkingDirectory = $InstallDirectory
-    $shortcut.IconLocation = (Join-Path $InstallDirectory 'assets\lifetime.ico')
+    $shortcut.IconLocation = (Join-Path $InstallDirectory 'assets\lifetime-server.ico')
     $shortcut.Description = 'Lifetime Server dashboard'
     $shortcut.Save()
     $bytes = [IO.File]::ReadAllBytes($shortcutPath)

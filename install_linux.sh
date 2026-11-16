@@ -184,5 +184,14 @@ mkdir -p "$data_home/applications"
     done
     printf '\nIcon=%s\nTerminal=false\nCategories=Utility;\n' "$icon"
 } > "$data_home/applications/lifetime.desktop"
+if [[ -x "$install_dir/LifetimeServerDashboard" ]]; then
+    # Not a menu entry (the dashboard needs its server's --directory): it gives the dashboard's app id
+    # (lifetime-server) its own yellow icon in the dock and taskbar on Wayland.
+    {
+        printf '[Desktop Entry]\nType=Application\nName=Lifetime Server\nComment=Lifetime Server dashboard\nExec='
+        desktop_quote "$install_dir/LifetimeServerDashboard"
+        printf '\nIcon=%s\nTerminal=false\nNoDisplay=true\nCategories=Utility;\n' "$install_dir/assets/lifetime-server.png"
+    } > "$data_home/applications/lifetime-server.desktop"
+fi
 printf 'Open Lifetime to choose what to collect and whether to track at login. No tracking is started by this installer.\n'
 printf 'Installed Lifetime in %s. Remove it with uninstall_linux.sh.\n' "$install_dir"

@@ -49,7 +49,7 @@ package() {
         mkdir -p "$client/assets"
         cp -a "$work/dist/Lifetime/." "$client/"
         install -m 755 "$root/install_linux.sh" "$root/uninstall_linux.sh" "$client/"
-        install -m 644 "$root/assets/lifetime.png" "$client/assets/"
+        install -m 644 "$root/assets/lifetime.png" "$root/assets/lifetime-server.png" "$client/assets/"
         copy_docs "$client"
         tar -C "$work" -czf "$out/Lifetime-Linux-$arch.tar.gz" "Lifetime-Linux-$arch"
         # AppImage: the same bundle under usr/lib/lifetime

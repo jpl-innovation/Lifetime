@@ -15,7 +15,8 @@ if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
 fi
 rm -f "$config_home/systemd/user/lifetime-tracker.service" "$config_home/systemd/user/lifetime-company-agent.service" \
       "$config_home/autostart/lifetime-tracker.desktop" "$config_home/autostart/lifetime-company-agent.desktop" \
-      "$config_home/autostart/lifetime-tray.desktop" "$data_home/applications/lifetime.desktop"
+      "$config_home/autostart/lifetime-tray.desktop" "$data_home/applications/lifetime.desktop" \
+      "$data_home/applications/lifetime-server.desktop"
 if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl --user daemon-reload >/dev/null 2>&1 || true
 fi

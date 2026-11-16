@@ -181,8 +181,7 @@ class ServerWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
         set_style(read_style_preference(self.directory))
         self._apply_window_style()
-        icon_name = 'lifetime.ico' if sys.platform == 'win32' else 'lifetime.png'
-        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / 'assets' / icon_name)))
+        self.setWindowIcon(QIcon(str(server_icon_path())))
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -3165,6 +3164,14 @@ def _write_ui(directory, key, value):
         pass        # a dashboard without write access to the data folder (a Linux lifetime-admin member) forgets it
 
 
+def server_icon_path():
+    """The server's own icon (navy and cream swapped against the desktop app's), or the shared one if not shipped."""
+    assets = Path(__file__).resolve().parent / 'assets'
+    extension = 'ico' if sys.platform == 'win32' else 'png'
+    own = assets / f'lifetime-server.{extension}'
+    return own if own.exists() else assets / f'lifetime.{extension}'
+
+
 def create_application(argv=None):
     """The one place the dashboard's Qt application is configured.
 
@@ -3183,10 +3190,9 @@ def create_application(argv=None):
             pass
     configure_high_dpi()
     application = QApplication(list(argv or sys.argv[:1]))
+    application.setDesktopFileName('lifetime-server')
     application.setFont(QFont('Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans', 11))
-    assets = Path(__file__).resolve().parent / 'assets'
-    icon = assets / ('lifetime.ico' if sys.platform == 'win32' else 'lifetime.png')
-    application.setWindowIcon(QIcon(str(icon)))
+    application.setWindowIcon(QIcon(str(server_icon_path())))
     return application
 
 

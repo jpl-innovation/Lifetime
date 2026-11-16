@@ -15,7 +15,7 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, '..', '..'))
 MODULES = sorted(os.path.basename(p)[:-3] for p in glob.glob(os.path.join(ROOT, 'lifetime_*.py')))
 WINDOWS_ONLY = ['win32service', 'win32serviceutil', 'servicemanager', 'pywintypes', 'win32timezone', 'winreg']
 ASSETS = [(os.path.join(ROOT, 'assets', name), 'assets')
-          for name in ('lifetime.png', 'jpl_innovation.png', 'jpl_innovation_light.png')]
+          for name in ('lifetime.png', 'lifetime-server.png', 'jpl_innovation.png', 'jpl_innovation_light.png')]
 
 
 def qt_plugins():

@@ -131,6 +131,53 @@ def format_code(value):
     return 'LTS-' + '-'.join(raw[i:i+4] for i in range(0, len(raw), 4)) if raw else ''
 
 
+def certificate_names(host, port, pem, timeout):
+    """The DNS names and IP addresses of ``pem`` as served at host:port, read over a handshake that trusts
+    only ``pem`` (chain, validity, strict X.509) but not yet a name. No application data is sent."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.verify_flags |= ssl.VERIFY_X509_STRICT
+    context.check_hostname = False
+    context.load_verify_locations(cadata=pem)
+    with socket.create_connection((host, port), timeout=timeout) as raw:
+        with context.wrap_socket(raw, server_hostname=host) as secured:
+            certificate = secured.getpeercert() or {}
+    names = certificate.get('subjectAltName', ())
+    return ([value for kind, value in names if kind == 'DNS'],
+            [value.strip() for kind, value in names if kind == 'IP Address'])
+
+
+def named_origin(bundle, host, port, code, timeout=2):
+    """A server found by scanning addresses is reached at an address its certificate may not name.
+
+    Every later request checks the name strictly, so an address the certificate does not cover would
+    fail for ever ("hostname") and the server would never see the request to approve. Keep the address
+    when the certificate covers it; otherwise move to one of its names that reaches the same server and
+    passes the code check again; otherwise this server cannot be used from here.
+    """
+    import ipaddress
+    dns, ips = certificate_names(host, port, tls.decode_bundle(bundle)['certificate_pem'], timeout)
+    found = ipaddress.ip_address(host)
+    if any(_same_ip(value, found) for value in ips):
+        return bundle
+    for name in dns:
+        if '*' in name:
+            continue
+        try:
+            return bootstrap(f'https://{name}:{port}', code, timeout=timeout)
+        except (OSError, ValueError):
+            continue
+    raise ValueError('The server certificate does not name an address this computer can reach')
+
+
+def _same_ip(value, found):
+    import ipaddress
+    try:
+        return ipaddress.ip_address(value) == found
+    except ValueError:
+        return False
+
+
 def find_server(code):
     """Bounded LAN fallback. Only bootstrap's commitment match is trusted."""
     import ipaddress
@@ -146,7 +193,7 @@ def find_server(code):
         try:
             with socket.create_connection((host, 8443), timeout=0.4):
                 pass
-            return bootstrap('https://' + host + ':8443', code, timeout=0.4)
+            return named_origin(bootstrap('https://' + host + ':8443', code, timeout=0.4), host, 8443, code)
         except (OSError, ValueError):
             return None
     with ThreadPoolExecutor(max_workers=64) as pool:

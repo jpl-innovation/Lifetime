@@ -26,6 +26,7 @@ try {
     New-Item -ItemType Directory -Path $output, $work -Force | Out-Null
     $icon = Join-Path $PSScriptRoot 'assets\lifetime.ico'
     $dashboardImage = (Join-Path $PSScriptRoot 'assets\lifetime.png') + ';assets'
+    $serverIcon = Join-Path $PSScriptRoot 'assets\lifetime-server.ico'     # the dashboard's own (yellow) icon
     $creditImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation.png') + ';assets'
     $creditLightImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png') + ';assets'
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
@@ -43,7 +44,7 @@ try {
     # zoneinfo reads IANA time zones from the tzdata package through importlib on Windows: collect its modules and data.
     & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --collect-all tzdata @runtimeModules --exclude-module PyQt6 lifetime_server.py
     if ($LASTEXITCODE -ne 0) { throw 'Runtime build failed.' }
-    & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage lifetime_server_gui.py
+    & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --icon $serverIcon lifetime_server_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
     & $Python -m PyInstaller @common --console --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
     if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }
@@ -60,7 +61,7 @@ try {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $output
     }
     New-Item -ItemType Directory -Path (Join-Path $output 'assets'), (Join-Path $output 'docs') | Out-Null
-    Copy-Item -LiteralPath 'assets\lifetime.png', 'assets\lifetime.ico', 'assets\jpl_innovation.png', 'assets\jpl_innovation_light.png' -Destination (Join-Path $output 'assets')
+    Copy-Item -LiteralPath 'assets\lifetime.png', 'assets\lifetime.ico', 'assets\lifetime-server.ico', 'assets\lifetime-server.png', 'assets\jpl_innovation.png', 'assets\jpl_innovation_light.png' -Destination (Join-Path $output 'assets')
     Copy-Item -LiteralPath 'docs\SERVER_OPERATIONS.md' -Destination (Join-Path $output 'docs')
     Copy-Item -LiteralPath 'docs\SERVER_PROTOCOL.md' -Destination (Join-Path $output 'docs')
     Copy-Item -LiteralPath 'README.md', 'TECHNICIAN_VERIFICATION.md', 'SECURITY.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md' -Destination $output

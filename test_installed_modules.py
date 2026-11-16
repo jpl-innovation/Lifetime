@@ -117,6 +117,24 @@ class SourceInstallationTests(unittest.TestCase):
             self.assertIn(name, build)
         self.assertIn('rockylinux:8', (PROJECT/'.github/workflows/windows.yml').read_text(encoding='utf-8'))
 
+    def test_server_dashboard_icon_ships_with_every_package(self):
+        """The dashboard's own icon is in the Linux bundle, the Windows server package and its shortcut, and the
+        app ids the windows announce match the .desktop files the Linux installer writes."""
+        self.assertTrue((PROJECT/'assets/lifetime-server.png').is_file())
+        self.assertTrue((PROJECT/'assets/lifetime-server.ico').is_file())
+        for path, needle in (('packaging/linux/lifetime-linux.spec', "'lifetime-server.png'"),
+                             ('packaging/linux/build_linux.sh', 'assets/lifetime-server.png'),
+                             ('build_server_windows.ps1', "--add-data ($serverIcon + ';assets')"),
+                             ('build_server_windows.ps1', "'assets\\lifetime-server.ico'"),
+                             ('install_server_windows.ps1', "'assets\\lifetime-server.ico')"),
+                             ('install_linux.sh', 'applications/lifetime-server.desktop'),
+                             ('uninstall_linux.sh', 'applications/lifetime-server.desktop'),
+                             ('lifetime_server_gui.py', "setDesktopFileName('lifetime-server')"),
+                             ('lifetime_gui.py', "setDesktopFileName('lifetime')")):
+            with self.subTest(path=path, needle=needle):
+                self.assertIn(needle, (PROJECT/path).read_text(encoding='utf-8'))
+        self.assertIn('Icon=lifetime\n', (PROJECT/'packaging/linux/lifetime.desktop').read_text(encoding='utf-8'))
+
 
     def test_install_lists_provide_complete_headless_and_desktop_dependencies(self):
         project = Path(__file__).parent
