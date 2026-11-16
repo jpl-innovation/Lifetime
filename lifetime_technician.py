@@ -99,7 +99,7 @@ class ScrollDialog(QDialog):
 class IdentityDialog(ScrollDialog):
     def __init__(self, parent=None, directory=None, language=None):
         super().__init__(parent, directory, language)
-        self.setWindowTitle(self.t('Device identity'))
+        self.setWindowTitle(self.t('Computer identity'))
         settings = read_settings(directory)
         self.note('Optional. Leave blank to omit.')
         fields = QFormLayout()
@@ -168,10 +168,10 @@ class CoverageDialog(ScrollDialog):
             latest = getattr(parent, 'last_verification', None)
             if latest:
                 if latest.get('difference') is not None:
-                    lines.append(self.t('Latest Verify (current boot only)')+': '+str(latest['difference'])+' s')
+                    lines.append(self.t('Latest Verify (since last start-up only)')+': '+str(latest['difference'])+' s')
                 elif latest.get('message'):
-                    lines.append(self.t('Latest Verify (current boot only)')+': '+self.t(latest['message']))
-                lines.append(self.t('Verify compares the current boot only. It cannot prove complete historical coverage or recover missing OS logs.'))
+                    lines.append(self.t('Latest Verify (since last start-up only)')+': '+self.t(latest['message']))
+                lines.append(self.t('Verify only checks the time since the computer last started. It cannot prove complete historical coverage or recover missing OS logs.'))
             self.evidence.setPlainText('\n\n'.join(lines))
         except (ImportError, OSError, ValueError, TypeError) as error:
             self.evidence.setPlainText(self.t('Could not read coverage') + '\n' + str(error))

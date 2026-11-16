@@ -184,7 +184,7 @@ def hour_profile(ledger, start, end, daily, tz=None):
     except (ValueError, TypeError):
         complete_daily_span = False
     if daily and complete_daily_span and start <= min(daily) and end >= max(daily) and len(hourly) == 24 and all(valid_seconds(v) for v in hourly):
-        return [v/len(selected) for v in hourly], tr('Recorded hourly totals / recorded days' if ledger.get('daily_repair_version') or ledger.get('daily_allocation') else 'Recorded hourly totals / recorded days; boot credit excluded')
+        return [v/len(selected) for v in hourly], tr('Recorded hourly totals / recorded days' if ledger.get('daily_repair_version') or ledger.get('daily_allocation') else 'Recorded hourly totals / recorded days; time from start-up until recording began is left out')
     totals = [0.0]*24
     observed = set()
     for session in ledger.get('sessions', []):
@@ -860,7 +860,7 @@ class Insights(QWidget):
         self.distribution = Plot(unit='sessions')
         self.cards = [
             ChartCard(tr('Calendar · awake hours'), tr('Local days · outlined: today'), self.heatmap),
-            ChartCard(tr('Daily awake hours'), tr('Daily hours incl. boot credit · line: trailing 7-day average'), self.daily),
+            ChartCard(tr('Daily awake hours'), tr('Daily hours incl. time since start-up · line: 7-day average'), self.daily),
             ChartCard(tr('Cumulative lifetime hours'), tr('Includes imported history and the opening balance'), self.running),
             ChartCard(tr('Hour-of-day profile'), tr('Average awake hours in each local hour slot'), self.profile),
             ChartCard(tr('Weekday average'), tr('Average per recorded weekday; today is a partial day'), self.weekdays),

@@ -113,7 +113,7 @@ class AggregationTests(unittest.TestCase):
         self.assertIn('partial', text)
         profile, text = c.hour_profile(ledger, day-dt.timedelta(days=1), day, data, tz)
         self.assertEqual(profile, [3600]*24)
-        self.assertIn('boot credit excluded', text)
+        self.assertIn('until recording began is left out', text)
 
     def test_missing_hour_data_is_unavailable_not_faked(self):
         profile, _ = c.hour_profile(dict(hourly=[1]*24), self.today, self.today,

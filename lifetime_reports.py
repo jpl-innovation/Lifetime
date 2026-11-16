@@ -142,7 +142,7 @@ def build_report(ledger, settings, start=None, end=None, system_fields=None,
     stats.update(source_totals(ledger, start, end, history=history_allowed))
     notes = list(info['notes']) + [
         'Awake time means the computer was running and awake. It does not measure human activity, productivity, component health or remaining lifespan.',
-        'Live intervals are split across local days. Boot-time allocation uses retained sleep/resume evidence when available; otherwise its calendar distribution is estimated.',
+        'Live intervals are split across local days. Time since start-up is placed on days using saved sleep and wake records when available; otherwise it is estimated.',
         'Daily history is retained for up to 400 days; only the last 100 sessions are retained. Previously saved dates are not relabeled after timezone changes.',
         'Dates use saved local calendar labels; creation time includes the current UTC offset. Durations are seconds, not proof of continuous coverage.']
     if start is None:
@@ -171,7 +171,7 @@ def build_report(ledger, settings, start=None, end=None, system_fields=None,
                 comparison[key] = value
         if len(comparison) == 3:
             comparison['captured'] = verification.get('captured')
-            notes.append('Verify compares the current boot only. It cannot prove complete historical coverage or recover missing OS logs.')
+            notes.append('Verify only checks the time since the computer last started. It cannot prove complete historical coverage or recover missing OS logs.')
         else:
             comparison = {}
     return dict(version=VERSION, language=language,
@@ -205,7 +205,7 @@ def report_rows(report):
     for key, title in [('awake_seconds', 'Awake time (seconds)'), ('baseline_seconds', 'Manual baseline (seconds, not dated)'),
                        ('measured_seconds', 'Directly measured awake time (seconds)'), ('imported_seconds', 'Reconstructed OS history (seconds)'),
                        ('session_starts', 'Retained session starts'), ('longest_session_seconds', 'Longest recorded session (seconds)'),
-                       ('boots', 'Observed boots (all available data)')]:
+                       ('boots', 'Times started (all available data)')]:
         if key in ('baseline_seconds', 'boots') and period['start']:
             continue
         yield 'statistics', title, report['stats'][key]
@@ -219,7 +219,7 @@ def report_rows(report):
     yield 'coverage', 'First recorded date', report['first_record'] if period['start'] else c['first_record']
     yield 'coverage', 'Last recorded date', report['last_record'] if period['start'] else c['last_record']
     if report.get('verification') and not period['start']:
-        yield 'coverage', 'Current-boot Verify difference (seconds)', report['verification']['difference']
+        yield 'coverage', 'Verify difference since last start-up (seconds)', report['verification']['difference']
         yield 'coverage', 'Verify comparison captured', report['verification'].get('captured')
     for gap in c.get('gaps', []):
         start_day, end_day = _day(gap.get('start')), _day(gap.get('end'))
@@ -241,7 +241,7 @@ def report_html(report):
             'h1{font-size:20pt;}h2{font-size:13pt;margin-top:18pt;}table{width:100%;border-collapse:collapse;table-layout:fixed;}',
             'td,th{padding:5pt;border-bottom:1px solid #d8deda;text-align:left;}li{margin-bottom:5pt;}',
             '</style></head><body><h1>', esc(tr('Computer Awake-Time Report', lang)), '</h1>']
-    headings = {'identity': 'Device identity', 'system': 'Selected system information',
+    headings = {'identity': 'Computer identity', 'system': 'Selected system information',
                 'statistics': 'Awake time (seconds)', 'coverage': 'Coverage and sources',
                 'availability': 'Availability (server monitoring)', 'incidents': 'Incidents',
                 'health': 'Health summary', 'replacement': 'Replacement candidates', 'energy': 'Energy and cost'}

@@ -110,10 +110,10 @@ def rows(data, tr):
     displays = data.get('displays') or []
     result.append(('Displays', (f'{len(displays)} · '+'; '.join(fields(d, [('width', ' px'), ('height', ' px'), ('hz', ' Hz')]) for d in displays)) if displays else missing))
     result.append(('OS build / architecture / installed', fields(os, [('name', ''), ('build', ''), ('architecture', ''), ('installed', '')])))
-    result.append(('Uptime / last boot', fields(os, [('uptime_seconds', ' s'), ('last_boot', '')])))
+    result.append(('Time since start-up / last started', fields(os, [('uptime_seconds', ' s'), ('last_boot', '')])))
     domains = {'RAM slots used / total': 'memory', 'Physical disks': 'disks', 'Motherboard': 'board',
                'BIOS vendor / version / date': 'board', 'GPU driver / VRAM': 'gpus',
-               'OS build / architecture / installed': 'os', 'Uptime / last boot': 'os'}
+               'OS build / architecture / installed': 'os', 'Time since start-up / last started': 'os'}
     return [(tr(key), value.replace(missing, unavailable(domains.get(key)))) for key, value in result]
 
 
@@ -196,4 +196,4 @@ def sections(data, tr):
                 ('BIOS version', 'bios_version'), ('BIOS date', 'bios_date'))])]),
             (tr('Operating system'), [('', [row(label, os.get(key), unit, 'os') for label, key, unit in (
                 ('OS name', 'name', ''), ('OS build', 'build', ''), ('Architecture', 'architecture', ''),
-                ('Installed', 'installed', ''), ('Uptime', 'uptime_seconds', ' s'), ('Last boot', 'last_boot', ''))])])]
+                ('Installed', 'installed', ''), ('Time since start-up', 'uptime_seconds', ' s'), ('Last started', 'last_boot', ''))])])]

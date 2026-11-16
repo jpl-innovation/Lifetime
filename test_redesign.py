@@ -348,7 +348,7 @@ class DashboardShellTests(unittest.TestCase):
         self.assertEqual(len(self.w.report_rows), 3)
         self.assertEqual(len(self.w.report_list.findChildren(gui.QFrame, 'divider')), 2)
         with patch.object(self.w, 'open_technician') as action:
-            for title, dialog in (('Export report', gui.ExportDialog), ('Device identity', gui.IdentityDialog),
+            for title, dialog in (('Export report', gui.ExportDialog), ('Computer identity', gui.IdentityDialog),
                                   ('Coverage details', gui.CoverageDialog)):
                 QTest.mouseClick(self.w.technician_actions[title], Qt.MouseButton.LeftButton)
                 action.assert_called_with(dialog)

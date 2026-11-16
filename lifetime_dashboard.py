@@ -425,9 +425,9 @@ class SystemDashboard(QWidget):
             computer.append((tr('disk', path=disk['path']), storage(disk.get('used'), disk.get('total')), disk.get('percent')))
         if not data.get('disks'):
             computer.append(('Disks', None, None))
-        computer += [('Uptime · incl. sleep', span(clocks.get('uptime')), None),
-                     ('Awake since boot', span(clocks.get('awake')), None),
-                     ('Last boot', datetime_text(dt.datetime.fromtimestamp(boot)) if boot else None, None),
+        computer += [('Time since start-up · incl. sleep', span(clocks.get('uptime')), None),
+                     ('Awake since start-up', span(clocks.get('awake')), None),
+                     ('Last started', datetime_text(dt.datetime.fromtimestamp(boot)) if boot else None, None),
                      ('Fast Startup', 'On' if clocks.get('fast_startup') else 'Off' if clocks.get('fast_startup') is False else None, None)]
         chart = self.sparklines.charts
         mappings = [{'Power': chart['watts']}, {'Download': chart['down'], 'Upload': chart['up']},

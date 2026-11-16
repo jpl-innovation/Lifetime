@@ -18,7 +18,7 @@ from lifetime_settings import defaults, delete_history, normalize, save_settings
 CHOICES = (
     ('awake', 'Awake time', 'Required. Counts time while this computer is awake.'),
     ('history', 'Daily and hourly history', 'Shows when and how long you use this computer.'),
-    ('health', 'Health and stability', 'Reads system shutdown and sleep events, battery capacity and machine dates.'),
+    ('health', 'Health and stability', "Reads shutdown and sleep events, battery capacity and the computer's model and key dates."),
     ('battery', 'Battery and power', 'Shows charge, power use and battery condition.'),
     ('network', 'Network', 'Shows connection type, link speed and transfer speed.'),
     ('wifi_name', 'Wi-Fi network name', 'Optional. Network names can reveal your location.'),

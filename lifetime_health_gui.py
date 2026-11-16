@@ -90,7 +90,7 @@ class HealthPage(QWidget):
         self.machine = text('', 'caption')
         box.addWidget(self.machine)
         self.disabled = EmptyState('off', tr('Health readings are off'),
-                                   tr('Health readings are off. Enable Health and stability in Settings to read system events, battery condition and machine dates.'),
+                                   tr("Health readings are off. Turn on Health and stability in Settings to see shutdown and sleep events, battery condition and the computer's model and key dates."),
                                    tr('Open Settings'))
         self.disabled.setObjectName('insetPanel')
         self.disabled.layout().setContentsMargins(20, 20, 20, 20)
@@ -289,7 +289,7 @@ class HealthPage(QWidget):
                 model=machine.get('model') or tr('Not available'), bios=date(machine.get('bios')), installed=date(machine.get('installed'))))
             self.machine.setToolTip(tr('Linux OS install dates are estimates from system file dates.') if machine.get('estimated') else '')
         else:
-            self.machine.setText(tr('Machine dates unavailable'))
+            self.machine.setText(tr('Computer model and dates unavailable'))
         for key in self.panels:
             data = self.data.get(key)
             message = tr('Loading…') if data == 'loading' else unavailable if data is None else ''

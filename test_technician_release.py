@@ -98,8 +98,8 @@ class ReleaseTechnicianTests(unittest.TestCase):
         prefs = settings.normalize(dict(completed=True, history=True))
         result = reports.build_report(self.ledger(), prefs, verification=dict(event_seconds=3600, awake_seconds=3600, difference=0, captured='2026-11-07T12:00:00+07:00'))
         self.assertEqual(result['coverage']['status'], 'unknown')
-        self.assertIn('current boot only', ' '.join(result['notes']))
-        self.assertIn('Current-boot Verify difference', reports.report_html(result))
+        self.assertIn('since the computer last started', ' '.join(result['notes']))
+        self.assertIn('Verify difference since last start-up', reports.report_html(result))
 
     def test_settings_interview_keeps_identity_edited_while_open(self):
         import lifetime_gui as gui

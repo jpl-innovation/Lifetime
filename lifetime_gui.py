@@ -605,7 +605,7 @@ class Window(QWidget):
         self.cards = {}
         # Preserve the public stat keys and provenance mapping.
         for key, title, kind in (
-            ('first', 'Earliest known date', 'calendar'), ('boots', 'Boots observed', 'restart'),
+            ('first', 'Earliest known date', 'calendar'), ('boots', 'Times started', 'restart'),
             ('current', 'Current session', 'clock'), ('longest', 'Longest session', 'longest'),
             ('average', 'Average awake / day', 'average')):
             self.cards[key] = StatCard(tr(title), kind)
@@ -732,7 +732,7 @@ class Window(QWidget):
         self.report_rows = []
         for index, (title, description, dialog) in enumerate((
             ('Export report', 'Save a report of recorded awake time and coverage.', ExportDialog),
-            ('Device identity', 'Manage the device name, asset tag and ownership.', IdentityDialog),
+            ('Computer identity', 'Manage the computer name, asset tag and owner.', IdentityDialog),
             ('Coverage details', 'Review sources, dates and gaps in the record.', CoverageDialog))):
             row = QWidget()
             row.setObjectName('reportRow')
@@ -1316,8 +1316,8 @@ class Window(QWidget):
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)
-            self.status.setText(tr('Ledger unavailable'))
-            self.status_dot.setToolTip(tr('Ledger unavailable'))
+            self.status.setText(tr("Can't read saved data"))
+            self.status_dot.setToolTip(tr("Can't read saved data"))
             self.hint.setText(tr('ledger.error', error=error))
             self.hint.show()
             self.start.show()
@@ -1401,8 +1401,8 @@ class Window(QWidget):
         except (OSError, ValueError, TypeError, KeyError) as error:
             self.status_dot.tick(False)
             self.cards['current'].live.tick(False)
-            self.status.setText(tr('Ledger unavailable'))
-            self.status_dot.setToolTip(tr('Ledger unavailable'))
+            self.status.setText(tr("Can't read saved data"))
+            self.status_dot.setToolTip(tr("Can't read saved data"))
             self.hint.setText(tr('ledger.error', error=error))
             self.hint.show()
             self.start.show()

@@ -57,7 +57,7 @@ def server_state(status, t, now=None):
     if not status.get('enabled') or status.get('phase') not in ('pending', 'approved'):
         return 'neutral', t('Not connected'), t('Not connected'), ''
     checking = ('info', t('Server: Checking…'), t('Server: Checking…'),
-                t('Waiting for the Lifetime agent on this computer.'))
+                t("Waiting for Lifetime's background service on this computer."))
     now = time.time() if now is None else now
     checked = status.get('checked_at')
     if isinstance(checked, (int, float)) and not isinstance(checked, bool):
@@ -102,13 +102,13 @@ def locate_server(value):
 FINISH_FAILED = 'Could not finish connecting. Check that the server is on and try again.'
 # The agent installer's exit codes (install_agent_windows.ps1, Stop-Install; the agent's own 2-4 mean the same).
 SETUP_EXIT = {
-    2: 'Windows could not set up the reporting agent with these details. Check the code and try again. If the folder '
-       'Program Files\\LifetimeAgent holds files that are not from Lifetime, move them away first.',
+    2: "Windows could not set up Lifetime's reporting service with these details. Check the code and try again. If the folder "
+       "Program Files\\LifetimeAgent holds files that are not from Lifetime, move them away first.",
     3: "Could not reach the server, or it is not the server this code belongs to (its security certificate does not "
        "match). Check that the server is on and on the same network, and that the code is from that server.",
     4: 'The server refused this code: it was already used, has expired or was cancelled. Create a new code on the server.',
-    5: 'Setting up the reporting agent needs administrator approval. Sign in with an administrator account and try again.',
-    6: 'A Lifetime agent is already installed on this computer and was not replaced. Ask your IT team to replace it, then try again.',
+    5: "Setting up Lifetime's reporting service needs administrator approval. Sign in with an administrator account and try again.",
+    6: "Lifetime's reporting service is already installed on this computer and was not replaced. Ask your IT team to replace it, then try again.",
 }
 
 

@@ -1123,7 +1123,7 @@ covered=($old.TimeCreated -le $boot);events=$events} | ConvertTo-Json -Depth 5 -
     if not isinstance(data, dict):
         return dict(message='Not available · Windows event log could not be read')
     if not data.get('covered'):
-        return dict(message='Not available · Windows event log does not cover this boot')
+        return dict(message='Not available · the Windows event log does not go back to the last start-up')
     seconds = parse_event_awake(data.get('boot'), data.get('now'), data.get('events', []))
     awake = clocks.get('awake')
     # Align the independent clocks to the event-log snapshot instant.
