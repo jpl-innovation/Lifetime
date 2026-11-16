@@ -172,8 +172,8 @@ uninstall steps. Licenses of the pinned packages were re-read from their metadat
 sleep-after-hours sentence, how to update the desktop app and the agent (a former open question), removal steps,
 the approval wait, exit codes for the server installer and `-StagedUpdate` (from the scripts), `-Reinstall`, three
 Vietnamese labels; all 20 screenshots re-shot (yellow server logo, new Devices pane). Pages 6 and 18 viewed.
-13 `[CHECK]` items remain for the owner. **Owner decision:** the guide says Linux comes in 1.3.0, while the
-release notes and the release workflow ship the Linux packages with the next release.
+13 `[CHECK]` items remain for the owner. **Decided 16 November 2026:** Linux ships in 1.2.0 with Windows; guide v6
+(`C:\LifetimeTest\guide_final_v6\`) says so, and CI run 43846999822 passed on all 11 distributions.
 
 **Claims that depend on CI:** README's table ("Debian 10 ... CI containers") and SERVER_OPERATIONS ("installs,
 restarts and uninstalls in Debian 12 and Rocky 9 containers") are true only once a run is green; the last run that

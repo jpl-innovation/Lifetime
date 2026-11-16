@@ -4,6 +4,11 @@ Lifetime is free software, Copyright (C) 2026 JPL Innovation, licensed under the
 version 3 only** (GPL-3.0-only). The full text is in [LICENSE](LICENSE). You may copy, change and redistribute it,
 including for money, as long as the people who receive it get the same freedoms and the source code.
 
+**Additional permission for OpenSSL (GPL version 3, section 7).** JPL Innovation gives permission to link or combine
+Lifetime's own code with the OpenSSL library, or a modified version of it that uses the same licenses as OpenSSL,
+and to distribute the result. This permission covers only the code JPL Innovation holds the copyright to; it cannot
+change the licenses of the other components listed below. The Linux packages contain OpenSSL 1.1.1 (see below).
+
 **Source code.** The complete source for every release is in the public repository
 <https://github.com/jpl-innovation/Lifetime>: use the release tag that matches the version you received. Every
 downloadable package is built from that tagged source by the published build scripts (`build_windows.ps1`,
