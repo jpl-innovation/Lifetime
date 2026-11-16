@@ -1022,7 +1022,7 @@ class Window(QWidget):
                             save_settings(settings, data_dir())
                         except OSError:
                             pass
-                    QMessageBox.warning(self, tr('Login tracking could not be updated'), str(error))
+                    QMessageBox.warning(self, tr("Couldn't change the start-automatically setting"), str(error))
             later(100, finished)
         if settings['rebuild'] and (not previous.get('completed') or not previous.get('rebuild')):
             self.rebuild_history()

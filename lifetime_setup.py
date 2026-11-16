@@ -121,8 +121,8 @@ class SetupDialog(QDialog):
         for key, title, explanation in (
             ('rebuild', tr('Include earlier use of this computer?'),
              tr('Lifetime has only just been installed, so it can only count from now on. Say Yes and it reads your computer\'s own activity log to work out how long this computer has already been used. Nothing leaves this computer. Older records may be missing, so the earlier total can be approximate.')),
-            ('autostart', tr('Start tracking at login?'),
-             tr('Starts the awake-time tracker when you sign in. You can also start it yourself from Lifetime.'))):
+            ('autostart', tr('Start Lifetime automatically when the computer starts?'),
+             tr('Lifetime starts by itself each time you turn on the computer and sign in. You can also open it yourself.'))):
             page = self.page(tr(title), tr(explanation))
             # First run: pre-select "include earlier use" so a new user gets their real total without asking anyone.
             # The explanation above says exactly what is read; picking No is one click.
@@ -251,7 +251,7 @@ class SetupDialog(QDialog):
             value = self.choices()
             names = [tr(title) for key, title, _ in CHOICES if value[key]]
             self.summary.setText(tr('Tracking\n') + '\n'.join(names) + tr('\n\nEarlier usage: ') +
-                (tr('Add from the computer\'s own log') if value['rebuild'] else tr('Do not add')) + tr('\nStart at login: ') +
+                (tr('Add from the computer\'s own log') if value['rebuild'] else tr('Do not add')) + tr('\nStart automatically with the computer: ') +
                 (tr('Yes') if value['autostart'] else tr('No')))
         self.pages.currentWidget().verticalScrollBar().setValue(0)
 
@@ -361,8 +361,8 @@ class SettingsPage(QWidget):
         for key, title, explanation in (
             ('rebuild', 'Include earlier use of this computer?',
              "Lifetime has only just been installed, so it can only count from now on. Say Yes and it reads your computer's own activity log to work out how long this computer has already been used. Nothing leaves this computer. Older records may be missing, so the earlier total can be approximate."),
-            ('autostart', 'Start tracking at login?',
-             'Starts the awake-time tracker when you sign in. You can also start it yourself from Lifetime.')):
+            ('autostart', 'Start automatically with the computer',
+             'Lifetime starts by itself each time you turn on the computer and sign in. You can also open it yourself.')):
             panel, inner = self.panel()
             row = SwitchRow(tr(title), tr(explanation))
             inner.addWidget(row)
@@ -557,4 +557,4 @@ def configure_login(enabled):
     result = subprocess.run(command, capture_output=True, timeout=15,
                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if result.returncode:
-        raise OSError(tr('Login tracking could not be updated. Check your user task or service permissions.'))
+        raise OSError(tr("Couldn't change the start-automatically setting. Try again, or ask the person who looks after this computer to check that Lifetime is allowed to start by itself."))
