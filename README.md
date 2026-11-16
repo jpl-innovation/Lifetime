@@ -14,7 +14,13 @@ Made by [JPL Innovation](https://github.com/jpl-innovation).
 
 ![Selected demo computer](docs/screenshots/server-device.png)
 
-Devices shows shared Activity, Health and hardware details for a demo computer.
+Devices lists every computer. The selected one shows its group, status, power buttons and hardware, and further down the Activity and Health it shares.
+
+![Energy and lifecycle](docs/screenshots/server-energy.png)
+
+Energy shows what the fleet's awake time costs in kWh and money, per computer and per group.
+
+Screenshots use demo data and show the next release (1.2.0).
 
 
 ## Choose your edition
@@ -41,6 +47,8 @@ You can change sharing or disconnect from **Connect** at any time. Awake time is
 ## Download
 
 Go to the **[latest release](../../releases/latest)** and pick your system.
+
+This page already describes the next release, 1.2.0, which is not published yet. Until it is, the latest release is 1.1.0: it has no Linux AppImage or Linux server packages, and the features listed in the [release notes](RELEASE_NOTES.md) under "Next release" are not in it.
 
 Every release also contains **SHA256SUMS.txt**. To check a download, run `sha256sum -c SHA256SUMS.txt` (Linux) or `Get-FileHash Lifetime-Windows.zip` (Windows) and compare the value.
 
@@ -131,7 +139,7 @@ Without systemd there is no journal, so **Verify** and **Add earlier usage** say
   otherwise it is a typical or owner-set wattage and says *estimated*.
 - **Connect** – connect to a Lifetime Server with one code and manage sharing. While connected, a **Server: Online / Offline** chip (also under the status in the sidebar) shows whether the server answers now, when it last did and why not; awake time keeps counting and is sent when the server is back.
 - **Settings** – a page inside the app (not a pop-up window): language, appearance, what to track, adding earlier usage, start at login and deleting history. Every option is a sliding switch, green when on.
-- **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts.
+- **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts. **Incidents** lists alerts (see below), **groups** sort computers by room or team, and **Energy** shows kWh and cost, time on after hours, a replacement forecast and a health score for the whole fleet or one group.
 
 ### Appearance
 
