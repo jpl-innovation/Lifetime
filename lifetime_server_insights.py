@@ -6,7 +6,7 @@ Estimated figures always say so; a computer that does not share its awake histor
 """
 import math
 
-from PyQt6.QtCore import QTime, Qt
+from PyQt6.QtCore import QLocale, QTime, Qt
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QHeaderView, 
                              QLineEdit, QSizePolicy, QTableWidget, QTableWidgetItem, QTimeEdit, QWidget)
 from lifetime_i18n_qt import PlainLabel as QLabel
@@ -132,6 +132,7 @@ class InsightsUI:
         self.price = QDoubleSpinBox()
         self.price.setRange(0, 1e9)
         self.price.setDecimals(2)
+        self.price.setLocale(QLocale.c())       # "2500.00" as on the desktop app and in every figure, in both languages
         self.currency = QLineEdit()
         self.currency.setMaxLength(3)
         self.currency.setMaximumWidth(90)
@@ -495,6 +496,8 @@ class InsightsUI:
             return
         t, config = self.t, result['settings']
         currency = config['currency']
+        for spin in (self.battery_price, self.disk_price):      # unit prices are in the saved currency, like every cost
+            spin.setSuffix(' ' + currency)
         groups = sorted(result['groups'])
         chosen = self.scope.currentData()
         self.scope.blockSignals(True)

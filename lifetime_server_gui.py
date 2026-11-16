@@ -199,7 +199,7 @@ class ServerWindow(QMainWindow):
         brand.setContentsMargins(0, 0, 0, 0)
         brand.setSpacing(12)
         logo = QLabel()
-        logo.setPixmap(QPixmap(str(Path(__file__).parent / 'assets/lifetime.png')).scaled(36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        logo.setPixmap(QPixmap(str(server_icon_path('png'))).scaled(36, 36, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         brand.addWidget(logo)
         names = QVBoxLayout()
         names.setSpacing(0)
@@ -735,7 +735,16 @@ class ServerWindow(QMainWindow):
         self.page_size.setMinimumWidth(90)
         pagination.addWidget(self.page_size)
         table_layout.addLayout(pagination)
-        self.device_detail_panel, detail_layout = self._panel()
+        self.device_detail_panel, detail_outer = self._panel()
+        # Nothing selected: one sentence and nothing else, instead of power buttons and cards full of "Not available".
+        self.detail_hint = EmptyState('off')
+        detail_outer.addWidget(self.detail_hint)
+        self.detail_body = QWidget()
+        detail_layout = QVBoxLayout(self.detail_body)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(detail_outer.spacing())
+        detail_outer.addWidget(self.detail_body)
+        detail_outer.addStretch(1)
         self.detail_name = QLabel()
         self.detail_name.setWordWrap(True)
         self.detail_name.setStyleSheet('font-size: 22px; font-weight: 600;')
@@ -761,11 +770,6 @@ class ServerWindow(QMainWindow):
         presence_row.setContentsMargins(0, 0, 0, 0)
         self.presence_box.hide()
         detail_layout.addWidget(self.presence_box)
-        # Before anything is selected the rows below all read "Not available"; say why, at the top where it is seen.
-        self.detail_hint = QLabel()
-        self.detail_hint.setWordWrap(True)
-        self.detail_hint.setObjectName('muted')
-        detail_layout.addWidget(self.detail_hint)
         # The actions and the reason a button is disabled sit at the top: below the specifications they scrolled out of sight.
         self.control_reason = QLabel()
         self.control_reason.setWordWrap(True)
@@ -981,6 +985,12 @@ class ServerWindow(QMainWindow):
             self.power_grid.addWidget(button, i // columns, i % columns)
         self.device_grid.setAlignment(self.devices_panel, Qt.AlignmentFlag.AlignTop)
         self.device_grid.setAlignment(self.device_detail_scroll, Qt.AlignmentFlag.AlignTop)
+        self._fit_detail_text()
+
+    def _detail_shown(self, shown):
+        """The detail pane shows either one computer or, with none (or several) selected, only the sentence saying so."""
+        self.detail_hint.setVisible(not shown)
+        self.detail_body.setVisible(shown)
         self._fit_detail_text()
 
     def _fit_detail_text(self):
@@ -1802,15 +1812,20 @@ class ServerWindow(QMainWindow):
             self._render_fleet_detail(None)
         if self._admin_result:
             self._render_server_info(self._admin_result)
-        self.detail_hint.setText(self.t('Select a computer to see its details.'))
-        self.detail_hint.setVisible(not self._detail)
+        self.detail_hint.set_state('off', self.t('Select a computer to see its details.'))
+        self._detail_shown(bool(self._detail) or len(self.selected_device_ids()) == 1)
         if self._detail:
             self._render_detail(self._detail, preserve_edits=self._identity_dirty)
         else:
             self.detail_text.setPlainText(self.t('Select a device to view its usage, permissions and server-owned identity.'))
 
+    # One refresh with a computer selected starts ten loads (the pages, alerts, energy, roles, and the computer's detail
+    # and presence), and the device list asks for the detail again when it arrives. With the old limit of 8 the last
+    # ones were silently dropped: the detail pane and the Energy and Access pages kept old data until a later refresh.
+    MAX_JOBS = 24
+
     def _submit(self, work, callback, button=None, quiet=False):
-        if self._closed or len(self._jobs) >= 8:
+        if self._closed or len(self._jobs) >= self.MAX_JOBS:
             return False
         number = self.tasks.submit(work)
         self._jobs[number] = (callback, button)
@@ -2163,7 +2178,7 @@ class ServerWindow(QMainWindow):
             if box:
                 box.set_selected(box.device_id in selected_ids)
         selected = self.selected_device_ids()
-        self.detail_hint.setVisible(len(selected) != 1)
+        self._detail_shown(len(selected) == 1)
         self.export_button.setEnabled(bool(selected))
         self.export_button.setObjectName('primary' if selected else '')
         self.devices_add_button.setObjectName('' if selected else 'primary')     # one amber action at a time
@@ -3194,10 +3209,11 @@ def _write_ui(directory, key, value):
         pass        # a dashboard without write access to the data folder (a Linux lifetime-admin member) forgets it
 
 
-def server_icon_path():
-    """The server's own icon (navy and cream swapped against the desktop app's), or the shared one if not shipped."""
+def server_icon_path(extension=None):
+    """The server's own icon (navy and cream swapped against the desktop app's), or the shared one if not shipped.
+    The window and taskbar take the platform's format; the header logo inside the window asks for the PNG."""
     assets = Path(__file__).resolve().parent / 'assets'
-    extension = 'ico' if sys.platform == 'win32' else 'png'
+    extension = extension or ('ico' if sys.platform == 'win32' else 'png')
     own = assets / f'lifetime-server.{extension}'
     return own if own.exists() else assets / f'lifetime.{extension}'
 

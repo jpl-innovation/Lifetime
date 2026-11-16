@@ -7,7 +7,7 @@ Without enough readings the panel uses the wattage the owner set, else a typical
 import datetime as dt
 import json
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QLocale, QTimer
 from PyQt6.QtWidgets import QDoubleSpinBox, QGridLayout, QHBoxLayout, QLineEdit, QSizePolicy, QVBoxLayout
 
 import lifetime_insights as insights
@@ -128,6 +128,7 @@ class EnergyPanel(QFrame):
         self.price = QDoubleSpinBox()
         self.price.setRange(0, 1e9)
         self.price.setDecimals(2)
+        self.price.setLocale(QLocale.c())       # "2500.00" like every number the app prints, whatever Windows is set to
         self.currency = QLineEdit()
         self.currency.setMaxLength(3)
         self.currency.setMaximumWidth(90)

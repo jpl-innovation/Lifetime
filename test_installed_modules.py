@@ -126,6 +126,8 @@ class SourceInstallationTests(unittest.TestCase):
                              ('packaging/linux/build_linux.sh', 'assets/lifetime-server.png'),
                              ('build_server_windows.ps1', "--add-data ($serverIcon + ';assets')"),
                              ('build_server_windows.ps1', "'assets\\lifetime-server.ico'"),
+                             ('build_server_windows.ps1', '--add-data $serverLogo'),       # the header logo, in the .exe
+                             ('lifetime_server_gui.py', "server_icon_path('png')"),
                              ('install_server_windows.ps1', "'assets\\lifetime-server.ico')"),
                              ('install_linux.sh', 'applications/lifetime-server.desktop'),
                              ('uninstall_linux.sh', 'applications/lifetime-server.desktop'),

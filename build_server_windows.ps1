@@ -27,6 +27,7 @@ try {
     $icon = Join-Path $PSScriptRoot 'assets\lifetime.ico'
     $dashboardImage = (Join-Path $PSScriptRoot 'assets\lifetime.png') + ';assets'
     $serverIcon = Join-Path $PSScriptRoot 'assets\lifetime-server.ico'     # the dashboard's own (yellow) icon
+    $serverLogo = (Join-Path $PSScriptRoot 'assets\lifetime-server.png') + ';assets'     # the same, for the logo in its header
     $creditImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation.png') + ';assets'
     $creditLightImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png') + ';assets'
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
@@ -44,7 +45,7 @@ try {
     # zoneinfo reads IANA time zones from the tzdata package through importlib on Windows: collect its modules and data.
     & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --collect-all tzdata @runtimeModules --exclude-module PyQt6 lifetime_server.py
     if ($LASTEXITCODE -ne 0) { throw 'Runtime build failed.' }
-    & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --icon $serverIcon lifetime_server_gui.py
+    & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --add-data $serverLogo --icon $serverIcon lifetime_server_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
     & $Python -m PyInstaller @common --console --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
     if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }

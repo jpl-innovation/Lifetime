@@ -555,6 +555,24 @@ class ServerGuiTests(unittest.TestCase):
         self.assertIn('PRIVATE-OS', detail)
         self.assertIn('Received at: ' + self.window._timestamp('2020-01-01T00:01:00Z'), detail)
 
+    def test_a_refresh_with_a_computer_selected_drops_none_of_its_loads(self):
+        """The job limit was 8 while one refresh starts ten loads: the last ones (and the detail the device list asks
+        for again) were silently dropped, so the detail pane sometimes kept old data."""
+        row = device(1)
+        self.load([row])
+        self.select(row['device_id'])
+        accepted, submit = [], self.window._submit
+
+        def record(*arguments, **options):
+            accepted.append(submit(*arguments, **options))
+            return accepted[-1]
+        with patch.object(self.window, '_submit', side_effect=record):
+            self.window.refresh()                   # everything is queued before any answer is handled
+            started = len(accepted)
+            self.wait_idle()
+        self.assertGreaterEqual(started, 9)
+        self.assertNotIn(False, accepted)
+
     def test_device_daily_chart_and_empty_states_follow_policy(self):
         row = device(1)
         self.load([row])
@@ -1205,7 +1223,9 @@ class ServerGuiTests(unittest.TestCase):
         self.assertIn(('set_insight_settings', dict(values=dict(price=3000.0, currency='USD', laptop_watts=20.0, desktop_watts=80.0))),
                       [(o, a) for o, a, _ in self.api.calls])
         self.assertEqual(cost.text(), '300.00 USD')
+        self.assertEqual((ui.battery_price.suffix(), ui.disk_price.suffix()), (' USD', ' USD'))    # unit prices say their currency
         self.window.language_button.click()
+        self.assertEqual(ui.price.text(), '3000.00')        # as the figures and the desktop app print it, not "3000,00"
         self.assertIn('máy được đo khi chạy pin', ui.method.text())
         self.assertEqual(self.window.tabs.tabText(ui.index), 'Năng lượng')
 

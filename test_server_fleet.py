@@ -85,12 +85,21 @@ class FleetGuiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window.detail_hint.isHidden())
         self.assertIn('Select a computer', self.window.detail_hint.text())
+        # ...and nothing else: no power buttons or specification cards full of "Not available" for nobody.
+        self.assertTrue(self.window.detail_body.isHidden())
+        self.assertFalse(self.window.power_buttons['sleep'].isVisible() or self.window.spec_cards['CPU'].isVisible())
         self.window.table.selectRow(0)
         self.wait()
         self.assertTrue(self.window.detail_hint.isHidden())
+        self.assertTrue(self.window.power_buttons['sleep'].isVisible() and self.window.spec_cards['CPU'].isVisible())
         self.window.table.clearSelection()
         self.wait()
         self.assertFalse(self.window.detail_hint.isHidden())
+        self.assertTrue(self.window.detail_body.isHidden())
+        self.window.language = 'vi'
+        self.window.retranslate()
+        self.assertTrue(self.window.detail_body.isHidden())
+        self.assertIn('Chọn', self.window.detail_hint.text())
 
     def test_a_computer_without_a_group_says_no_group_not_not_available(self):
         self.seed()
