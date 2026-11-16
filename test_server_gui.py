@@ -1139,10 +1139,13 @@ class ServerGuiTests(unittest.TestCase):
         QTest.qWait(700)
         with patch('lifetime_server_devices.reduced_motion', return_value=False):
             self.window.tabs.setCurrentIndex(2)
-            QTest.qWait(90)
-            drawn, leading = bar.pill_rect(), QRectF(bar.indicator.geometry())
-            self.assertEqual(drawn.right(), leading.right())    # moving right: the right edge leads
-            self.assertLess(drawn.left(), leading.left())       # the left edge is still catching up
+            # Sample frames instead of one fixed wait: a slow runner can finish the stretch before a single 90 ms check.
+            frames = []
+            for _ in range(60):
+                QTest.qWait(5)
+                frames.append((bar.pill_rect(), QRectF(bar.indicator.geometry())))
+            self.assertTrue(any(drawn.right() == leading.right() and drawn.left() < leading.left()
+                                for drawn, leading in frames))  # moving right: the right edge leads, the left catches up
             QTest.qWait(700)
         self.assertEqual(bar.pill_rect().toRect(), bar.tabRect(2).adjusted(5, 5, -5, -5))
         with patch.dict('os.environ', {'LIFETIME_REDUCE_MOTION': '1'}):
