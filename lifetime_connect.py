@@ -139,7 +139,10 @@ def stage_script(source, names, target=AGENT_SETUP_TARGET):
             "Assert-NotLinked $target; New-Item -ItemType Directory -Force -Path $target | Out-Null; " + STAGE_ACL +
             "foreach ($file in @(" + files + ")) { $copy = Join-Path $target $file[0]; Assert-NotLinked $copy; "
             "Copy-Item -LiteralPath $file[1] -Destination $copy -Force; "
-            "if ((Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash -ne $file[2]) { Remove-Item -LiteralPath $copy -Force; throw 'The agent setup files changed while waiting for approval.' } }; ")
+            # .NET, not Get-FileHash: that is a script function Windows PowerShell cannot find when this app was started
+            # from PowerShell 7 (which leaves its own module path in the environment).
+            "$hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($copy))).Replace('-', ''); "
+            "if ($hash -ne $file[2]) { Remove-Item -LiteralPath $copy -Force; throw 'The agent setup files changed while waiting for approval.' } }; ")
 
 
 # Administrators and SYSTEM: full control. Users: read and run. Nothing inherited from the parent folder.
@@ -194,7 +197,10 @@ def run_agent(action, policy, bundle=None, directory=None, display_name=None):
             command = [str(setup / 'LifetimeAgent.exe')] + args
             installer = setup / 'install_agent_windows.ps1'
             if action == 'finish' and installer.name in names:
-                command = ['powershell.exe', '-NoProfile', '-File', str(installer), '-Mode', 'Packaged',
+                # -ExecutionPolicy Bypass: Windows clients refuse every script file by default ("running scripts is
+                # disabled on this system"), and the approving administrator's own policy is the one that applies.
+                command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                           '-File', str(installer), '-Mode', 'Packaged',
                            '-EnableReporting', '-BundleFile', str(path), '-Start', '-DisplayName', display_name or socket.gethostname()]
                 for key, flag in dict(history='TrackHistory', resources='ResourceReadings', health='HealthReadings', control='PowerControl',
                                       updates='AllowUpdates').items():

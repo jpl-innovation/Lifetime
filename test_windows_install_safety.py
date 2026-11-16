@@ -70,6 +70,8 @@ class ConnectElevationTests(unittest.TestCase):
             self.assertIn(str(self.setup / expected), script)
             self.assertNotIn(str(self.user), script)
             self.assertNotIn('EncodedCommand', script)
+            if action == 'finish':      # Windows clients refuse script files by default: the installer must still run
+                self.assertRegex(script, r'-ExecutionPolicy Bypass -File "?[^"]*install_agent_windows\.ps1')
 
     def test_without_them_the_elevated_step_copies_to_program_files_and_checks_each_hash_before_running(self):
         script = self.elevated()
@@ -79,10 +81,11 @@ class ConnectElevationTests(unittest.TestCase):
         self.assertIn('D:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)', inner)     # users cannot write
         for name in connect.AGENT_SETUP:
             self.assertIn(hashlib.sha256((self.user / name).read_bytes()).hexdigest(), inner)
-        copied, started = inner.index('Get-FileHash'), inner.index('Start-Process')
+        copied, started = inner.index('ComputeHash'), inner.index('Start-Process')
         self.assertLess(copied, started)
         run = inner[started:]
         self.assertIn(str(self.setup / 'install_agent_windows.ps1'), run)
+        self.assertIn('-ExecutionPolicy Bypass -File', run)
         self.assertNotIn(str(self.user), run)        # nothing from the per-user folder is executed
 
     def test_a_link_where_the_setup_folder_should_be_is_not_trusted(self):

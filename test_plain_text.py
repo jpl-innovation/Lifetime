@@ -7,6 +7,7 @@ with markup and walk every widget.
 """
 import ast
 import html
+import os
 from pathlib import Path
 import socket
 import sys
@@ -35,7 +36,9 @@ from qt_test_support import qt_app
 from render_server import populate
 
 ROOT = Path(__file__).parent
-PICTURE = (ROOT / 'assets' / 'lifetime.png').as_posix()       # 1280 px wide: a label that loads it becomes huge
+# 1280 px wide: a label that loads it becomes huge. Relative to the working directory, so the text stays under the
+# protocol's 128 characters wherever the checkout is (a long absolute path made the server refuse the readings on CI).
+PICTURE = Path(os.path.relpath(ROOT / 'assets' / 'lifetime.png')).as_posix()
 HOSTILE = f'<b>B</b><img src="{PICTURE}"><a href="http://lifetime.invalid/">A</a>'
 SHORT = '<b>B</b><a href="x:">A</a>'       # check names are limited to 80 characters
 # The only labels allowed to be rich text. Each builds its HTML from html.escape()d values.
