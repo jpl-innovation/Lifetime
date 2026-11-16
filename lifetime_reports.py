@@ -15,7 +15,7 @@ import tempfile
 from lifetime_settings import IDENTITY_FIELDS, SYSTEM_FIELDS, export_allowed, iso_date
 from lifetime_identity import LABELS as IDENTITY_LABELS
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 MAX_PREVIEW_DAYS = 90
 
 

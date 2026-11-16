@@ -1,8 +1,8 @@
 # Roadmap status (Stages 0-5)
 
 Status of every item of the merged master plan (15 Nov 2026) on `latest-main`. Baseline before the stages: `46bf982`.
-Nothing here has been released as a version yet (the last release is 1.1.0); the branch is on the public
-repository. The final verification before 1.2.0 is in [qa/final-verification.md](qa/final-verification.md).
+Everything marked done here was released in Lifetime 1.2.0 (17 November 2026). The final verification before
+that release is in [qa/final-verification.md](qa/final-verification.md).
 
 **Status words**
 

@@ -48,7 +48,7 @@ You can change sharing or disconnect from **Connect** at any time. Awake time is
 
 Go to the **[latest release](../../releases/latest)** and pick your system.
 
-This page already describes the next release, 1.2.0, which is not published yet. Until it is, the latest release is 1.1.0: it has no Linux AppImage or Linux server packages, and the features listed in the [release notes](RELEASE_NOTES.md) under "Next release" are not in it.
+User guides in English and Vietnamese (PDF) are attached to each release, next to the downloads.
 
 Every release also contains **SHA256SUMS.txt**. To check a download, run `sha256sum -c SHA256SUMS.txt` (Linux) or `Get-FileHash Lifetime-Windows.zip` (Windows) and compare the value.
 

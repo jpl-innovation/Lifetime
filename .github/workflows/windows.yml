@@ -186,5 +186,7 @@ jobs:
             echo "::error::Release $GITHUB_REF_NAME already exists. Its files are not replaced; tag a new version."
             exit 1
           fi
+          # The release text is this version's section only (the first "## " heading up to the next one).
+          awk '/^## /{n++} n==1' RELEASE_NOTES.md > release-text.md
           gh release create "$GITHUB_REF_NAME" Lifetime-Windows.zip Lifetime-Server-Windows.zip Lifetime-Linux-x86_64.AppImage Lifetime-Linux-x86_64.tar.gz Lifetime-Server-Linux-x86_64.tar.gz Lifetime-Server-Linux-aarch64.tar.gz SHA256SUMS.txt \
-            --title "Lifetime $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+            --title "Lifetime $GITHUB_REF_NAME" --notes-file release-text.md
