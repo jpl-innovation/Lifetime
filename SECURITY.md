@@ -124,10 +124,29 @@ invitation to recover. Failures do not roll back when authentication fails.
 Every new-code attempt also uses persistent per-source-IP backoff: after the
 third failure, delays start at one second and double to a five-minute ceiling.
 The counter resets after an hour without failures. Only a SHA-256 hash of the
-source IP is retained, in at most 4,096 throttle entries. The existing persistent
-server-wide limit of ten failed enrollments per 60 seconds also applies across
-IPs and Store instances. These intentionally conservative limits permit a LAN
-attacker to cause temporary lockout; admin approval is still the final gate.
+source IP is retained, in at most 4,096 throttle entries. For invitation codes
+that back-off and the five-failure lock on each invitation are the limit: wrong
+codes from one address hold back that address, not every computer. A shared
+ceiling of 200 failed enrollments per 60 seconds remains across all addresses.
+Legacy 12-character bundle codes, and callers whose address is unknown, keep the
+persistent server-wide limit of ten failures per 60 seconds, so a LAN attacker
+can still lock those out temporarily; admin approval is still the final gate.
+
+Opening a connection needs no credential, so one remote address may hold at most
+8 of the 32 short-request slots at once; further connections from it are closed
+before the TLS handshake. Loopback is not counted and live sockets hand their
+slot back. Many computers behind one NAT address share that allowance: their
+requests are short and are retried, but a large site behind a single address is
+not yet measured.
+
+Two limits are known and left for an owner decision. The connection code commits
+to the server certificate with 40 bits (above): prefer single-use, short-lived
+codes, and treat a multi-use code shared with many people as weaker; a longer
+commitment needs a new, longer code format. The agent and server installers
+accept a non-default install folder that already exists if it holds a Lifetime
+marker file, and a Python found on PATH outside `C:\Users`: use the default
+Program Files folders and a machine-wide Python that only administrators can
+write.
 
 ## Discovery, data and administration
 
@@ -212,6 +231,35 @@ consent, per-computer and per-account rate limits, ten-minute expiry, audit trai
 account with an Admin or Operator role assigned to that account itself, never over the shared token, and it stops when
 that role is removed. It never sends a bulk command.
 
+## Text from other computers, and the Windows installers
+
+A computer chooses its own name and reports its own hardware strings; administrators type group, check and role names;
+a server tells the desktop app its name. None of it is ever interpreted as HTML. Every label in both apps is a
+plain-text label by default (`lifetime_i18n_qt.PlainLabel`); the three that use rich text escape each value with
+`html.escape`, as do the detail views and the HTML/PDF report. Labels Qt builds itself (message boxes, input
+dialogs) are made plain before they are measured, and a tooltip that looks like HTML is shown as its characters. Email
+and webhook messages are plain text. `test_plain_text` fills both windows with markup and fails if any of it renders,
+or if a module imports the stock `QLabel` again. Before this, a computer named `<img src="\\host\x.png">` could make
+the administrator's console fetch that file (on Windows, an SMB sign-in to the attacker's machine).
+
+The desktop installer runs partly as an administrator inside `%LOCALAPPDATA%\Lifetime`, which the signed-in user
+controls. It refuses to install through a link or junction, checks every file it copies, and hands ownership back only
+for the files it wrote (it no longer walks the folder). What the Connect page asks approval to run as administrator is
+never taken from that folder: the installer copies `LifetimeAgent.exe` and the two agent scripts to
+`%ProgramFiles%\LifetimeAgentSetup` (Administrators and SYSTEM write, Users read), and when that copy is missing the
+one approved step creates it and checks each file's SHA-256 against what the app read before running anything. That
+first copy still trusts the per-user files once; installing with administrator approval avoids even that. Not yet
+exercised on a real standard-user PC with a separate administrator account. A source (Python) install still elevates
+`lifetime_agent.py` from the per-user folder and is meant for development.
+
+Release builds install exact package versions (`requirements-server.txt`, `requirements-desktop.txt`,
+`requirements-build.txt`, and the Linux build script), use GitHub actions pinned to commits, check the AppImage tool
+and runtime against recorded SHA-256 values, and never replace the files of a published release. Package hashes
+(`--require-hashes`), container base images pinned by digest and signed checksums are not in place.
+
+A role's SID must be a complete SID wherever it is read, including from a restored backup, and is the only thing
+written into the admin pipe's access list. The admin command and the Windows service log an error's kind, not its text.
+
 ## Agent updates
 
 A computer takes an agent update only when its owner switched updates on (off by default, kept on the computer, not
@@ -224,7 +272,10 @@ refused). It refuses an older version unless the server marks the offer as a rol
 package.** The administrator's installer (`install_agent_windows.ps1 -StagedUpdate`, as SYSTEM) checks the SHA-256 again
 before replacing the program and keeps the previous one. The trust root is the pinned server and the administrator who
 approved the checksum: a compromised server administrator could offer a malicious package with a matching checksum,
-which the signature check stops only for signed releases. Lifetime releases are not yet code-signed.
+which the signature check stops only for signed releases. Lifetime releases are not yet code-signed. Until they are,
+switching updates on means trusting the server's administrators with SYSTEM on that computer: an unsigned package is
+accepted, any publisher Windows trusts counts as signed, and a rollback has no minimum version. Requiring the Lifetime
+publisher's signature and a version floor needs a code-signing certificate (an owner decision).
 
 ## Alerts, notifications and the mail password
 
