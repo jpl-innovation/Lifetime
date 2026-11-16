@@ -38,6 +38,10 @@ class ConnectTests(unittest.TestCase):
         self.enterContext(patch('lifetime_connect.Tasks', FakeTasks))
         self.enterContext(patch.dict('os.environ', LIFETIME_REDUCE_MOTION='1'))
         self.page = ConnectPage(directory=self.root.name, machine_root=Path(self.root.name)/'agent')
+        # Delete the page when the test ends (this cleanup runs last). A page left to Python's cycle collector could
+        # be freed while Qt was delivering events to a later test's widgets: the process crashed (Windows, Python 3.11).
+        self.addCleanup(self.app.processEvents)
+        self.addCleanup(self.page.deleteLater)
         self.addCleanup(self.page.close)
         self.addCleanup(self.page.timer.stop)
         self.page.tasks.resolve(dict(enabled=False))
@@ -346,6 +350,8 @@ class ConnectTests(unittest.TestCase):
                         self.assertGreaterEqual(button.width(), button.fontMetrics().horizontalAdvance(button.text()) + 16)
                         self.assertTrue(button.parentWidget().rect().contains(button.geometry()))
                         page.close()
+                        page.deleteLater()          # now, not whenever the cycle collector runs (see setUp)
+                        self.app.processEvents()
 
     def test_search_order_and_mismatches(self):
         with patch('lifetime_discovery.discover', return_value=[dict(address='https://wrong:8443'), dict(address='https://right:8443')]), patch('lifetime_connection.bootstrap', side_effect=[ValueError(), 'verified']) as bootstrap, patch('lifetime_connection.find_server') as fallback:
