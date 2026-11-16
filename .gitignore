@@ -28,3 +28,13 @@ server-demo-*/
 fleet-report/
 !packaging/linux/lifetime-linux.spec
 build-linux/
+.job-commits/
+.lifetime-local-commits/
+*.bundle
+s1-gui-*/
+.guide-build/
+alert-secrets.bin
+*.p12
+*.crt
+*-backup*.zip
+*.zip.sha256
