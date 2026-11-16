@@ -311,7 +311,8 @@ class LanFallbackTests(unittest.TestCase):
         context.wrap_socket.side_effect = wrap
         addresses = [(socket.AF_INET, 1, 6, '', (ip, 0)) for ip in
                      ('192.0.2.8', '192.0.2.9', '127.0.0.1', '169.254.1.2')]
-        with patch.object(connection.socket, 'getaddrinfo', return_value=addresses), patch.object(connection.socket, 'create_connection', side_effect=connect), patch.object(connection.ssl, 'SSLContext', return_value=context), patch.object(connection.tls, 'encode_bundle', return_value='VERIFIED') as encode:
+        with patch.object(connection.socket, 'getaddrinfo', return_value=addresses), patch.object(connection.socket, 'create_connection', side_effect=connect), patch.object(connection.ssl, 'SSLContext', return_value=context), patch.object(connection.tls, 'encode_bundle', return_value='VERIFIED') as encode, \
+                patch.object(connection, 'named_origin', side_effect=lambda bundle, *_: bundle):
             self.assertEqual(connection.find_server(code), 'VERIFIED')
         encode.assert_called_once()
         self.assertEqual(encode.call_args.args[0], 'https://192.0.2.254:8443')
@@ -329,6 +330,32 @@ class LanFallbackTests(unittest.TestCase):
         with patch.object(connection.socket, 'getaddrinfo', return_value=addresses), patch.object(connection.socket, 'create_connection', return_value=raw), patch.object(connection, 'bootstrap', side_effect=ssl.SSLCertVerificationError('wrong server')):
             with self.assertRaises(ValueError):
                 connection.find_server(connection.issue('0'*64))
+
+
+class NamedOriginTests(unittest.TestCase):
+    """A server found by IP must end up at an address its certificate names, or not at all."""
+    def setUp(self):
+        self.enterContext(patch.object(connection.tls, 'decode_bundle', return_value=dict(certificate_pem='PEM')))
+
+    def test_address_named_by_certificate_is_kept(self):
+        with patch.object(connection, 'certificate_names', return_value=(['office'], ['192.0.2.7'])), \
+                patch.object(connection, 'bootstrap') as bootstrap:
+            self.assertEqual(connection.named_origin('BY-IP', '192.0.2.7', 8443, 'CODE'), 'BY-IP')
+        bootstrap.assert_not_called()
+
+    def test_unnamed_address_moves_to_a_certificate_name_that_passes_the_code_check(self):
+        with patch.object(connection, 'certificate_names', return_value=(['*.example', 'stale', 'office'], [])), \
+                patch.object(connection, 'bootstrap', side_effect=[OSError('no such host'), 'BY-NAME']) as bootstrap:
+            self.assertEqual(connection.named_origin('BY-IP', '100.64.0.9', 8443, 'CODE'), 'BY-NAME')
+        self.assertEqual([call.args[0] for call in bootstrap.call_args_list],
+                         ['https://stale:8443', 'https://office:8443'])
+        self.assertTrue(all(call.args[1] == 'CODE' for call in bootstrap.call_args_list))
+
+    def test_no_usable_name_fails_closed(self):
+        with patch.object(connection, 'certificate_names', return_value=(['office'], ['192.0.2.8'])), \
+                patch.object(connection, 'bootstrap', side_effect=ssl.SSLCertVerificationError('other server')):
+            with self.assertRaises(ValueError):
+                connection.named_origin('BY-IP', '192.0.2.7', 8443, 'CODE')
 
 
 if __name__ == '__main__':
