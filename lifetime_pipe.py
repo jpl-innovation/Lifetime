@@ -18,6 +18,8 @@ PREFIX = '\\\\.\\pipe\\LifetimeServer-admin-'
 MAX_MESSAGE = 1024 * 1024 + 4096
 SYSTEM, ADMINISTRATORS = 'S-1-5-18', 'S-1-5-32-544'
 CLIENT_ACCESS = 0x0012019B      # read, write data and attributes; never FILE_CREATE_PIPE_INSTANCE (0x4)
+WRITE_DAC = 0x00040000          # open mode: lets the server replace the pipe's access list when a role changes
+DACL_PROTECTED = 0x80000004     # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
 
 ERROR_FILE_NOT_FOUND, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_PIPE_BUSY = 2, 5, 109, 231
 ERROR_MORE_DATA, ERROR_PIPE_CONNECTED, ERROR_IO_PENDING, ERROR_NO_DATA = 234, 535, 997, 232
@@ -76,6 +78,7 @@ if sys.platform == 'win32':
                                           wintypes.LPWSTR, ctypes.POINTER(_D), ctypes.POINTER(_D)], _B),
             (_adv, 'ConvertStringSecurityDescriptorToSecurityDescriptorW',
              [wintypes.LPCWSTR, _D, ctypes.POINTER(_P), _P], _B),
+            (_adv, 'SetKernelObjectSecurity', [_H, _D, _P], _B),
             (_adv, 'GetSecurityInfo', [_H, ctypes.c_int, _D, ctypes.POINTER(_P), _P, _P, _P, ctypes.POINTER(_P)], _D)):
         _function = getattr(_dll, _name)
         _function.argtypes, _function.restype = _args, _result
@@ -252,7 +255,7 @@ class PipeServer:
     def __init__(self, name, handler, descriptor, workers=16, timeout=10):
         _windows()
         self.name, self.handler, self.descriptor, self.timeout = name, handler, descriptor, timeout
-        self._first, self._thread, self._stop = True, None, None
+        self._first, self._thread, self._stop, self._listening = True, None, None, None
         self._workers, self._lock = set(), threading.Lock()
         self._slots = threading.BoundedSemaphore(workers)
 
@@ -262,16 +265,35 @@ class PipeServer:
             raise _error()
         try:
             attributes = _SECURITY_ATTRIBUTES(ctypes.sizeof(_SECURITY_ATTRIBUTES), descriptor, False)
-            # duplex | overlapped | first instance (fails if someone created the name first); message mode, no remote clients
-            flags = 0x3 | 0x40000000 | (0x80000 if self._first else 0)
+            # duplex | overlapped | WRITE_DAC | first instance (fails if someone created the name first); message mode,
+            # no remote clients
+            flags = 0x3 | 0x40000000 | WRITE_DAC | (0x80000 if self._first else 0)
             handle = _k32.CreateNamedPipeW(self.name, flags, 0x4 | 0x2 | 0x8, 255, 65536, 65536, 0,
                                            ctypes.byref(attributes))
+            if handle not in (None, INVALID_HANDLE) and not self._first:
+                # Windows keeps ONE access list for the whole pipe, the one its first instance was created with: the
+                # descriptor given to a later instance is ignored. Set it again here, or a role granted or removed
+                # after the server started would never change who may connect until the next start.
+                _adv.SetKernelObjectSecurity(handle, DACL_PROTECTED, descriptor)
         finally:
             _k32.LocalFree(descriptor)
         if handle in (None, INVALID_HANDLE):
             raise _error()
         self._first = False
         return handle
+
+    def refresh(self):
+        """Apply the current roles to the pipe now. Called after a role changes, so the account that was just given
+        (or denied) a role is admitted (or refused) on its very next connection."""
+        handle = self._listening
+        descriptor = _P()
+        if handle in (None, INVALID_HANDLE) or not _adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                self.descriptor(), 1, ctypes.byref(descriptor), None):
+            return False
+        try:
+            return bool(_adv.SetKernelObjectSecurity(handle, DACL_PROTECTED, descriptor))
+        finally:
+            _k32.LocalFree(descriptor)
 
     def start(self):
         self._stop = _event()
@@ -318,6 +340,7 @@ class PipeServer:
         # The next listening instance is created before a connected one is handed to its worker, so a client always
         # finds the pipe (busy at worst, never missing) and never falls back to the token by mistake.
         while handle is not None:
+            self._listening = handle
             try:
                 connected = self._connect(handle)
             except OSError:
