@@ -23,4 +23,4 @@ if ($task -and $PSCmdlet.ShouldProcess('\Lifetime\Agent', 'Stop and remove this 
     Unregister-ScheduledTask -TaskPath '\Lifetime\' -TaskName Agent -Confirm:$false
 }
 Write-Host 'Agent registration removed. Program files, machine identity, accounting, credentials and outbox remain.'
-Write-Host 'Revoke the device on the server when decommissioning it. Standalone desktop tasks and per-user ledgers were not changed.'
+Write-Host 'Revoke this computer on the server when it is retired. The desktop Lifetime app and its awake-time history were not changed.'

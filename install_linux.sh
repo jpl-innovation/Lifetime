@@ -75,20 +75,20 @@ journal_access() {
     local journal_test answer
     journal_test="$(LC_ALL=C journalctl --system -n 1 --no-pager 2>&1)" || journal_test="permission denied"
     if [[ "$journal_test" == *"not seeing messages"* || "$journal_test" == *"permission denied"* || "$journal_test" == *"insufficient permissions"* ]]; then
-        printf 'Reading the full system journal lets Lifetime add the time this computer was used before you installed it. Adding your user to systemd-journal requires approval and a new login.\n'
+        printf 'Reading the full system journal lets Lifetime add the time this computer was used before you installed it. Adding your user to the systemd-journal group needs your password and takes effect after you sign out and back in.\n'
         read -r -p 'Run sudo usermod -aG systemd-journal for your user? (y/N) ' answer || answer=''
         if [[ "$answer" == 'y' || "$answer" == 'Y' ]]; then
             sudo usermod -aG systemd-journal "$(id -un)" || printf 'Journal access unchanged; earlier usage may be incomplete.\n'
         else
-            printf 'Continuing without journal access changes; earlier usage may be incomplete.\n'
+            printf 'Journal access not changed; earlier usage may be incomplete.\n'
         fi
     fi
 }
 # company_agent_service COMMAND...: the company reporting agent at login, after explicit consent
 company_agent_service() {
     local answer agent_dir
-    printf 'The company agent records a separate awake-time ledger while you are signed in. Reporting needs separate consent and an approved connection code in Company server. Optional history and system readings stay off.\n'
-    read -r -p 'Install and start the company agent at login? (y/N) ' answer || answer=''
+    printf 'The workplace reporting service keeps its own awake-time record while you are signed in. Nothing is sent until you connect it on the Connect page with a code from your IT team and the server approves it. Optional history and system readings stay off.\n'
+    read -r -p 'Install the workplace reporting service and start it automatically with the computer? (y/N) ' answer || answer=''
     [[ "$answer" == 'y' || "$answer" == 'Y' ]] || return 0
     agent_dir="${XDG_STATE_HOME:-$HOME/.local/state}/lifetime-agent"
     if [[ ! -f "$agent_dir/machine.sqlite" ]]; then
@@ -103,7 +103,7 @@ company_agent_service() {
         write_autostart "$config_home/autostart/lifetime-company-agent.desktop" 'Lifetime company agent' \
             "$@" --directory "$agent_dir" --run
         (umask 077; nohup "$@" --directory "$agent_dir" --run >/dev/null 2>&1 &)
-        printf 'The company agent starts at every sign-in (XDG autostart) and is running now.\n'
+        printf 'The workplace reporting service is running and now starts automatically each time you sign in.\n'
     fi
 }
 
@@ -213,5 +213,5 @@ if [[ -x "$install_dir/LifetimeServerDashboard" ]]; then
         printf '\nIcon=%s\nTerminal=false\nNoDisplay=true\nCategories=Utility;\n' "$install_dir/assets/lifetime-server.png"
     } > "$data_home/applications/lifetime-server.desktop"
 fi
-printf 'Open Lifetime to choose what to collect and whether to track at login. No tracking is started by this installer.\n'
+printf 'Open Lifetime to choose what to collect and whether it starts automatically with the computer. This installer does not start tracking.\n'
 printf 'Installed Lifetime in %s. Remove it with uninstall_linux.sh.\n' "$install_dir"

@@ -1,6 +1,6 @@
 # Shared source/executable installer; PowerShell 5.1 compatible.
 $ErrorActionPreference = 'Stop'
-Write-Host 'Administrator approval is requested to read the full Windows activity log (so Lifetime can add the time this computer was used before you installed it) and to start tracking at login.'
+Write-Host 'Windows will ask for administrator approval. Lifetime uses it to read the full Windows activity log (to add the time this computer was used before Lifetime was installed) and to start automatically when the computer starts.'
 $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $Admin = ([Security.Principal.WindowsPrincipal]::new($Identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $OriginalUser) { $OriginalUser = $Identity.Name }
@@ -22,14 +22,14 @@ if (-not $Admin -and -not $ElevationAttempted) {
         $Child = Start-Process -FilePath powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru `
             -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $Encoded)
     } catch {
-        Write-Host 'Administrator approval was declined or unavailable. Continuing per-user; earlier usage may be incomplete.'
+        Write-Host 'Administrator approval was not given, so Lifetime is installed for your account only. Earlier usage may be incomplete.'
     }
     if ($Child) {
-        if ($Child.ExitCode -ne 0) { throw "Elevated installer exited with code $($Child.ExitCode)." }
+        if ($Child.ExitCode -ne 0) { throw "The part of the installation that needs administrator approval stopped (code $($Child.ExitCode)). Run the installer again." }
         return
     }
 }
-if (-not $Admin -and $ElevationAttempted) { Write-Host 'Continuing per-user; earlier usage may be incomplete.' }
+if (-not $Admin -and $ElevationAttempted) { Write-Host 'Lifetime is installed for your account only. Earlier usage may be incomplete.' }
 function Assert-NotLinked([string]$Path) {
     # This script may be running as an administrator inside a folder the signed-in user controls. A junction or
     # symbolic link there would send its copies, and the ownership it hands back, to whatever the link points at.
@@ -119,7 +119,7 @@ try {
     } else {
         Disable-ScheduledTask -TaskName 'Lifetime Tracker' | Out-Null
     }
-} catch { Write-Host 'Login task could not be registered. Lifetime will offer to configure it in Settings.' }
+} catch { Write-Host 'Lifetime could not set itself to start automatically. Turn on Start automatically with the computer in the Lifetime Settings.' }
 $Menu = Join-Path $OriginalAppData 'Microsoft\Windows\Start Menu\Programs'
 New-Item -ItemType Directory -Force -Path $Menu | Out-Null
 $Shell = New-Object -ComObject WScript.Shell
@@ -162,7 +162,7 @@ if ($Admin) {
         }
     }
 } elseif ($ExePackage -and (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'LifetimeAgentSetup\LifetimeAgent.exe'))) {
-    Write-Host 'The machine agent setup files in Program Files were not updated (no administrator approval). Run this installer again and approve it before connecting this computer to a server.'
+    Write-Host 'The files used to connect to a workplace Lifetime Server were not updated (no administrator approval). This matters only for workplace computers: run this installer again and approve it before you connect.'
 }
 if ($Closed.Count) { Write-Host 'Lifetime was running and was closed so its programs could be replaced. Open it again from the Start menu.' }
-Write-Host 'Installed for the original user. Open Lifetime from the Start menu to choose what to collect and whether to track at login.'
+Write-Host 'Lifetime is installed. Open Lifetime from the Start menu to choose what to collect and whether it starts automatically with the computer.'

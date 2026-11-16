@@ -291,7 +291,7 @@ class LinuxAgentPathTests(unittest.TestCase):
         script = (ROOT/'install_linux.sh').read_text(encoding='utf-8')
         self.assertIn('company_agent=false', script)
         self.assertIn('--company-agent', script)
-        self.assertIn('Install and start the company agent at login? (y/N)', script)
+        self.assertIn('Install the workplace reporting service and start it automatically with the computer? (y/N)', script)
         self.assertIn('lifetime-company-agent.service', script)
         self.assertIn('UMask=0077', script)
         self.assertIn('NoNewPrivileges=true', script)
