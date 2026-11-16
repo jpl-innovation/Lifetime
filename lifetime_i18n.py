@@ -1546,7 +1546,7 @@ CONNECT_VI = {
     'Server: Online': 'Máy chủ: Trực tuyến',
     'Server: Offline': 'Máy chủ: Ngoại tuyến',
     'Server: Offline · last reached {time}': 'Máy chủ: Ngoại tuyến · lần cuối {time}',
-    'Server: Checking…': 'Máy chủ: Đang kiểm tra…',
+    'Server: Checking…': 'Máy chủ: Đang kiểm tra',     # no ellipsis: fits the 200 px sidebar chip with Linux fallback fonts too
     'Waiting for the Lifetime agent on this computer.': 'Đang chờ dịch vụ Lifetime trên máy tính này.',
     'Awake time keeps counting on this computer and is sent when the server is back.': 'Thời gian hoạt động vẫn được đếm trên máy tính này và sẽ được gửi khi máy chủ trở lại.',
 }

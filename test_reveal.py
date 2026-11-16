@@ -135,7 +135,7 @@ class RevealTests(unittest.TestCase):
         QTest.qWait(360)
         gaps = sorted(b - a for a, b in zip(ticks, ticks[1:]))
         self.assertGreater(len(gaps), 5)
-        self.assertLess(gaps[len(gaps) // 2], 0.021)                     # the median frame stays near 16 ms
+        self.assertLess(gaps[len(gaps) // 2], 0.025)                     # the median frame stays near 16 ms (a slowed clock would be ~33 ms; CI runners jitter)
 
     def test_reduced_motion_finishes_the_intro_at_once(self):
         intro = reveal.Intro(self.window, 200, reduced=lambda: True)
