@@ -468,7 +468,7 @@ class ServerWindow(QMainWindow):
         title.setObjectName('sectionTitle')
         filters.addWidget(title, 1)
         self.fleet_search = QLineEdit()
-        self.bind(self.fleet_search, 'Search devices', 'setPlaceholderText')
+        self.bind(self.fleet_search, 'Search computers', 'setPlaceholderText')
         self.fleet_search.setMaximumWidth(300)
         filters.addWidget(self.fleet_search)
         self.fleet_group = QComboBox()
@@ -478,7 +478,7 @@ class ServerWindow(QMainWindow):
         filters.addWidget(self.fleet_group)
         fleet_layout.addLayout(filters)
         self.fleet_table = QTableWidget(0, 5)
-        self.fleet_table.setAccessibleName(self.t('Fleet devices'))
+        self.fleet_table.setAccessibleName(self.t('Computer list'))
         self._style_table(self.fleet_table)
         self.fleet_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.fleet_table.setSortingEnabled(False)  # Sorting happens across the entire store.
@@ -514,7 +514,7 @@ class ServerWindow(QMainWindow):
         self.today_bar.setTextVisible(False)
         self.today_bar.setAccessibleName(self.t('Selected date awake time, out of 24 hours'))
         detail_layout.addWidget(self.today_bar)
-        self.open_device_button = self.button('Open device', self.open_fleet_device)
+        self.open_device_button = self.button('Open computer', self.open_fleet_device)
         detail_layout.addWidget(self.open_device_button, 0, Qt.AlignmentFlag.AlignRight)
         self.chart_panel, chart_layout = self._panel()
         chart_header = QHBoxLayout()
@@ -529,7 +529,7 @@ class ServerWindow(QMainWindow):
         chart_layout.addLayout(chart_header)
         self.daily_chart = DailyChart()
         chart_layout.addWidget(self.daily_chart)
-        note = self.label('Known daily contributions only · device-local dates')
+        note = self.label("Known daily contributions only · each computer's local dates")
         note.setObjectName('muted')
         chart_layout.addWidget(note)
         self.events_panel, events_layout = self._panel()
@@ -591,7 +591,7 @@ class ServerWindow(QMainWindow):
         self.overview_usage = QWidget()
         usage_layout = QVBoxLayout(self.overview_usage)
         self.counts = {}
-        for key in ('All devices', 'Online', 'Offline', 'Pending approval', 'Approved', 'Denied', 'Disconnected', 'Unavailable'):
+        for key in ('All computers', 'Online', 'Offline', 'Pending approval', 'Approved', 'Denied', 'Disconnected', 'Unavailable'):
             value = QLabel(self.t('Not available'))
             self.counts[key] = value
             value.setParent(self.overview_usage)
@@ -604,7 +604,7 @@ class ServerWindow(QMainWindow):
             self.fleet_totals[key] = value
             totals_form.addRow(self.label(key), value)
         usage_layout.addLayout(totals_form)
-        note = self.label('One latest snapshot per device; snapshots are not added over time.')
+        note = self.label('One latest snapshot per computer; snapshots are not added over time.')
         note.setWordWrap(True)
         usage_layout.addWidget(note)
         self.snapshot_scope = QLabel()
@@ -659,7 +659,7 @@ class ServerWindow(QMainWindow):
         layout.addLayout(title_row)
         self.search = QLineEdit()
         self.search.setMinimumWidth(220)
-        self.bind(self.search, 'Search devices', 'setPlaceholderText')
+        self.bind(self.search, 'Search computers', 'setPlaceholderText')
         self.group = QComboBox()
         self.group.addItem(self.t('All groups'), '')
         self.group.setMaximumWidth(260)       # group names are typed by people and can be long; the list shows them whole
@@ -1349,7 +1349,7 @@ class ServerWindow(QMainWindow):
                                           'Server key SHA-256', 'Certificate SHA-256')),
                               ('Hardware', ('CPU', 'RAM', 'Operating system')),
                               ('Right now', ('CPU usage', 'Memory used', 'Last seen')),
-                              ('Connected computers', ('All devices', 'Connected', 'Pending approval', 'Database size'))):
+                              ('Connected computers', ('All computers', 'Connected', 'Pending approval', 'Database size'))):
             panel, content = self._section(heading)
             form = QFormLayout()
             form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
@@ -1383,7 +1383,7 @@ class ServerWindow(QMainWindow):
                   'Server key SHA-256': info.get('key_fingerprint'),
                   'Certificate expires': self._certificate_text(info.get('certificate') or {}),
                   'Database size': byte_text(info.get('database_size'), missing),
-                  'All devices': counts.get('total'), 'Connected': counts.get('reporting'), 'Pending approval': counts.get('pending')}
+                  'All computers': counts.get('total'), 'Connected': counts.get('reporting'), 'Pending approval': counts.get('pending')}
         for key in ('Certificate SHA-256', 'Server key SHA-256'):
             fingerprint = values[key]
             if fingerprint:     # groups of eight wrap inside the row instead of being cut off
@@ -1542,14 +1542,14 @@ class ServerWindow(QMainWindow):
         credit.addWidget(QLabel(CLIENT_VERSION))
         about_layout.addLayout(credit)
         self.admin_layout.addWidget(about)
-        access, access_layout = self._section('Device access')
+        access, access_layout = self._section('Computer access')
         gate(access, 'revoke')
-        access_layout.addWidget(self.button('Choose device', lambda: self.tabs.setCurrentIndex(1)), 0, Qt.AlignmentFlag.AlignLeft)
-        self.admin_selected = QLabel(self.t('Select a device in Devices.'))
+        access_layout.addWidget(self.button('Choose computer', lambda: self.tabs.setCurrentIndex(1)), 0, Qt.AlignmentFlag.AlignLeft)
+        self.admin_selected = QLabel(self.t('Select a computer in Devices.'))
         self.admin_selected.setWordWrap(True)
         access_layout.addWidget(self.admin_selected)
-        self.admin_revoke = self.button('Revoke selected device', self.revoke)
-        self.admin_reenable = self.button('Re-enable selected device', self.add_device)
+        self.admin_revoke = self.button('Revoke selected computer', self.revoke)
+        self.admin_reenable = self.button('Re-enable selected computer', self.add_device)
         self.admin_revoke.setEnabled(False)
         self.admin_reenable.setEnabled(False)
         access_layout.addWidget(self.admin_revoke, 0, Qt.AlignmentFlag.AlignLeft)
@@ -1647,7 +1647,7 @@ class ServerWindow(QMainWindow):
         if hasattr(self, 'admin_revoke'):
             self.admin_revoke.setEnabled(bool(enabled and self._detail and self._detail.get('status') != 'revoked'))
             self.admin_reenable.setEnabled(bool(enabled and self._detail and self._detail.get('status') == 'revoked'))
-            self.admin_selected.setText((self._detail.get('identity', {}).get('display_name') or self._detail['device_id']) if self._detail else self.t('Select a device in Devices.'))
+            self.admin_selected.setText((self._detail.get('identity', {}).get('display_name') or self._detail['device_id']) if self._detail else self.t('Select a computer in Devices.'))
             self._admin_selection_changed()
         self._power_state(self._detail)
 
@@ -1797,7 +1797,7 @@ class ServerWindow(QMainWindow):
             segment.setText(self.t(key))
         self.style_control.setAccessibleName(self.t('Style'))
         for widget, key in ((self.status_filter, 'Status'),
-                            (self.table, 'Devices'), (self.detail_text, 'Device details'),
+                            (self.table, 'Devices'), (self.detail_text, 'Computer details'),
                             (self.page_size, 'Page size'), (self.pending_requests, 'Pending requests'),
                             (self.interval, 'Reporting interval (seconds)'), (self.events, 'Recent events'),
                             (self.bundle_output, 'Enrollment bundle'), (self.retention_date, 'Delete records before (UTC)')):
@@ -1817,7 +1817,7 @@ class ServerWindow(QMainWindow):
         if self._detail:
             self._render_detail(self._detail, preserve_edits=self._identity_dirty)
         else:
-            self.detail_text.setPlainText(self.t('Select a device to view its usage, permissions and server-owned identity.'))
+            self.detail_text.setPlainText(self.t('Select a computer to view its usage, permissions and server-owned identity.'))
 
     # One refresh with a computer selected starts ten loads (the pages, alerts, energy, roles, and the computer's detail
     # and presence), and the device list asks for the detail again when it arrives. With the old limit of 8 the last
@@ -1920,7 +1920,7 @@ class ServerWindow(QMainWindow):
 
     def _render_overview(self, result):
         self.alerts.overview(result.get('alerts'))
-        for key, code in (('All devices', 'total'), ('Online', 'reporting'),
+        for key, code in (('All computers', 'total'), ('Online', 'reporting'),
                           ('Offline', 'report-overdue'), ('Pending approval', 'pending'),
                           ('Approved', 'approved'), ('Denied', 'denied'), ('Disconnected', 'revoked'), ('Unavailable', 'unavailable')):
             self.counts[key].setText(str(result['counts'][code]))
@@ -1928,7 +1928,7 @@ class ServerWindow(QMainWindow):
         for key, field in (('Measured', 'measured_seconds'), ('Imported', 'imported_seconds'), ('Baseline', 'baseline_seconds')):
             value = totals.get(field)
             self.fleet_totals[key].setText(self.t('Not available') if value is None else f'{value / 3600:,.2f}')
-        self.snapshot_scope.setText(self.t('{known} devices have snapshots; {unknown} have no snapshot. Totals include known devices only.',
+        self.snapshot_scope.setText(self.t('{known} computers have snapshots; {unknown} have none. Totals include only computers with a snapshot.',
                                             known=result['known_devices'], unknown=result['unknown_devices']))
         self.overview_health.setText(self.t('Service available · schema {version} · server time {time}',
                                             version=result['schema_version'], time=result['server_time']))
@@ -2119,7 +2119,7 @@ class ServerWindow(QMainWindow):
                                    self.t('No computers match. Choose Add device to connect a computer.'), self.t('Add device'))
         self.previous_button.setEnabled(self._offset > 0)
         self.next_button.setEnabled(self._offset + len(rows) < self._device_matching)
-        self.page_label.setText(self.t('Showing {start} to {end} of {total} devices',
+        self.page_label.setText(self.t('Showing {start} to {end} of {total} computers',
             start=self._offset + 1 if rows else 0, end=self._offset + len(rows), total=self._device_matching))
         page_size = self.page_size.currentData()
         current_page = self._offset // page_size
@@ -2193,7 +2193,7 @@ class ServerWindow(QMainWindow):
             self._detail_revision += 1
             self._detail = None
             self._clear_device_detail()
-            self.detail_text.setPlainText(self.t('Select a device to view its usage, permissions and server-owned identity.'))
+            self.detail_text.setPlainText(self.t('Select a computer to view its usage, permissions and server-owned identity.'))
             self._set_device_actions(False)
             return
         device_id = selected[0]
@@ -2269,7 +2269,7 @@ class ServerWindow(QMainWindow):
             self._set_device_actions(False)
 
     def _clear_device_detail(self):
-        self.detail_name.setText(self.t('Device details'))
+        self.detail_name.setText(self.t('Computer details'))
         self.detail_group.clear()
         self.detail_group.hide()
         for edit in self.identity_fields.values():
@@ -2328,7 +2328,7 @@ class ServerWindow(QMainWindow):
                 **({'daily_allocation': {'estimated': True}} if history.get('daily_estimated') else {})))
             if history.get('boots') is not None:
                 from lifetime_charts import hm
-                self.activity_stats.setText(self.t('Boots {boots} · current session {current} · longest session {longest}',
+                self.activity_stats.setText(self.t('Started {boots} times · current session {current} · longest session {longest}',
                     boots=f"{history['boots']:,}", current=hm(history.get('current_session_seconds') or 0),
                     longest=hm(history.get('longest_session_seconds') or 0)))
         else:
@@ -2419,7 +2419,7 @@ class ServerWindow(QMainWindow):
         contents += '<p style="margin:4px 0">' + '<br>'.join(e(line) for line in lines if line) + '</p>'
         self.detail_text.setHtml(contents)
         self.detail_text.setToolTip(self._timestamp(device.get('last_received_at')))
-        self.device_id_label.setText(self.t('Device ID') + ': ' + device['device_id'])
+        self.device_id_label.setText(self.t('Computer ID') + ': ' + device['device_id'])
         self.copy_device_id.setEnabled(True)
         self.detail_text.verticalScrollBar().setValue(scroll)
         if not preserve_edits:
@@ -2809,14 +2809,14 @@ class ServerWindow(QMainWindow):
         self._kpi_alerts = {key for key, count in (('Offline', counts['overdue']), ('Pending approval', counts['pending'])) if count}
         self._style_kpis()
         self.kpis['Awake today'].setText(self._duration(result['today']['seconds']))
-        self.kpi_notes['Awake today'].setText(self.t('{count} reporting devices', count=result['today']['devices']))
+        self.kpi_notes['Awake today'].setText(self.t('{count} reporting computers', count=result['today']['devices']))
         self.kpis['Pending approval'].setText(str(counts['pending']))
         self._style_kpis()
         self._overview_data = True
         self._arm_overview_entrance()
         self.kpi_notes['Pending approval'].setText(self.t('Administrator review required'))
         self.fleet_empty.setVisible(counts['total'] == 0)
-        self.fleet_empty.set_state('setup', self.t('No devices yet'),
+        self.fleet_empty.set_state('setup', self.t('No computers yet'),
                                    self.t('Add a computer with a one-time code; it shows here once you approve it.'), self.t('Add device'))
         waiting = max(0, counts['enrolled'] - counts['connected'] - counts['overdue'])
         self.state_strip.set_counts([(key, kind, self.t(words), number) for key, kind, words, number in (
@@ -2857,7 +2857,7 @@ class ServerWindow(QMainWindow):
         self.fleet_previous.setEnabled(self._fleet_offset > 0)
         self.fleet_next.setEnabled(self._fleet_offset + len(result['rows']) < result['matching'])
         self.fleet_page_number.setText(str(self._fleet_offset // 6 + 1))
-        self.fleet_page_label.setText(self.t('Showing {start} to {end} of {total} devices',
+        self.fleet_page_label.setText(self.t('Showing {start} to {end} of {total} computers',
             start=self._fleet_offset + 1 if result['rows'] else 0, end=self._fleet_offset + len(result['rows']), total=result['matching']))
         self.daily_chart.day_label = lambda day: self._date(day, year=False)
         self.daily_chart.set_samples(result['daily'], self.t('No dated reports yet'), self.t('h'))
@@ -2890,8 +2890,8 @@ class ServerWindow(QMainWindow):
         self.open_device_button.setEnabled(bool(row))
         self.today_bar.setVisible(bool(row and row['today'] is not None))
         if not row:
-            self.fleet_detail_text.setText('<p style="font-size:18px; font-weight:600; margin:0 0 4px 0">' + html.escape(self.t('Device details')) + '</p><p>' +
-                                          html.escape(self.t('Select a device to view its recorded usage.')) + '</p>')
+            self.fleet_detail_text.setText('<p style="font-size:18px; font-weight:600; margin:0 0 4px 0">' + html.escape(self.t('Computer details')) + '</p><p>' +
+                                          html.escape(self.t('Select a computer to view its recorded usage.')) + '</p>')
             return
         e = lambda value: html.escape(str(value))
         totals = row['totals']

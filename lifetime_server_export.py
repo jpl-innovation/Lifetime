@@ -24,7 +24,7 @@ class ServerExportDialog(ExportDialog):
         self.tasks = Tasks(self)
         self.tasks.completed.connect(self.completed)
         self.tasks.failed.connect(self.failed)
-        self.note('Server exports use current reporting permissions. Optional system fields remain excluded unless selected and permitted by the device.')
+        self.note('Server exports use current reporting permissions. Optional system fields remain excluded unless selected and permitted by the computer.')
         self.scope = QComboBox()
         self.scope.addItem(self.t('All computers'), None)
         for group in groups:

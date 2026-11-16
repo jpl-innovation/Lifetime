@@ -416,7 +416,7 @@ class ServerGuiTests(unittest.TestCase):
 
     def test_zero_devices_truthful_empty_and_unknown_totals(self):
         self.assertEqual(self.window.table.rowCount(), 0)
-        self.assertEqual(self.window.counts['All devices'].text(), '0')
+        self.assertEqual(self.window.counts['All computers'].text(), '0')
         self.assertEqual(self.window.fleet_totals['Measured'].text(), 'Not available')
         self.assertFalse(self.window.export_button.isEnabled())
         self.assertFalse(self.window.save_identity_button.isEnabled())
@@ -427,7 +427,7 @@ class ServerGuiTests(unittest.TestCase):
     def test_fleet_overview_is_independent_of_pagination_and_filters(self):
         self.load([device(i) for i in range(60)])
         self.assertEqual(self.window.table.rowCount(), 25)
-        self.assertEqual(self.window.counts['All devices'].text(), '60')
+        self.assertEqual(self.window.counts['All computers'].text(), '60')
         self.assertEqual(self.window.fleet_totals['Measured'].text(), '60.00')
         # The overview panel shows the five most recent events without a scrollbar; the full log is in Administration.
         self.assertEqual(len(self.window.events.events), 5)       # an event rail: dot, words, then time and computer
@@ -436,14 +436,14 @@ class ServerGuiTests(unittest.TestCase):
         self.window.search.setText('Computer 059')
         self.wait_idle()
         self.assertEqual(self.window.table.rowCount(), 1)
-        self.assertEqual(self.window.counts['All devices'].text(), '60')
+        self.assertEqual(self.window.counts['All computers'].text(), '60')
         self.assertEqual(self.arguments('overview'), [{}] * len(self.arguments('overview')))
 
     def test_unknown_device_totals_do_not_become_zero(self):
         known, unknown = device(1), device(2)
         unknown['totals'] = None
         self.load([known, unknown])
-        self.assertIn('1 devices have snapshots; 1 have no snapshot', self.window.snapshot_scope.text())
+        self.assertIn('1 computers have snapshots; 1 have none', self.window.snapshot_scope.text())
         self.assertEqual(self.window.fleet_totals['Measured'].text(), '1.00')
         self.select(unknown['device_id'])
         self.assertIn('Measured\nNot available', self.window.detail_text.toPlainText())
@@ -861,7 +861,7 @@ class ServerGuiTests(unittest.TestCase):
         self.api.fail.add('overview')
         self.window.refresh()
         self.wait_idle()
-        self.assertEqual(self.window.counts['All devices'].text(), '1')
+        self.assertEqual(self.window.counts['All computers'].text(), '1')
         self.assertIn('Overview unavailable', self.window.overview_health.text())
         all_text = '\n'.join(widget.text() for widget in self.window.findChildren(QLabel))
         self.assertNotIn('SECRET', all_text)
@@ -905,7 +905,7 @@ class ServerGuiTests(unittest.TestCase):
         self.assertIsInstance(self.window.group, QComboBox)
         self.assertEqual(self.window.table.parentWidget().objectName(), 'panel')
         self.assertEqual(self.window.device_detail_panel.objectName(), 'panel')
-        self.assertEqual(self.window.page_label.text(), 'Showing 1 to 25 of 60 devices')
+        self.assertEqual(self.window.page_label.text(), 'Showing 1 to 25 of 60 computers')
         self.assertEqual([self.window.device_pages.itemAt(i).widget().text() for i in range(3)], ['1', '2', '3'])
         self.assertFalse(self.window.export_button.isEnabled())
         self.assertNotEqual(self.window.export_button.objectName(), 'primary')
@@ -925,7 +925,7 @@ class ServerGuiTests(unittest.TestCase):
         self.window.device_pages.itemAt(2).widget().click()
         self.wait_idle()
         self.assertEqual(self.window._offset, 50)
-        self.assertEqual(self.window.page_label.text(), 'Showing 51 to 60 of 60 devices')
+        self.assertEqual(self.window.page_label.text(), 'Showing 51 to 60 of 60 computers')
         self.assertFalse(self.window.next_button.isEnabled())
 
     def test_detail_fields_copy_localized_dates_and_responsive_grid(self):
@@ -1630,7 +1630,7 @@ class ServerGuiTests(unittest.TestCase):
         self.wait_idle()
         text = self.window.detail_text.toPlainText()
         for expected in ('Incidents', 'Disk almost full · 4%', 'Acknowledged', 'Paused by maintenance',
-                         'Telemetry missing: Processor busy'):
+                         'Readings missing: Processor busy'):
             self.assertIn(expected, text)
 
     def test_alert_settings_save_through_the_admin_api(self):

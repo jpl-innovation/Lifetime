@@ -16,11 +16,11 @@ _POWER_VI = {
     'Power action failed': 'Thao tác nguồn thất bại',
     'Remote power': 'Điều khiển nguồn từ xa',
     'Invalid command action': 'Thao tác lệnh không hợp lệ',
-    'Device must be approved and online': 'Thiết bị phải được phê duyệt và trực tuyến',
-    'Device already has a pending command': 'Thiết bị đã có một lệnh đang chờ',
+    'Device must be approved and online': 'Máy tính phải được phê duyệt và đang trực tuyến',
+    'Device already has a pending command': 'Máy tính đã có một lệnh đang chờ',
     'Unknown command': 'Lệnh không xác định',
     'Command is no longer pending': 'Lệnh không còn ở trạng thái chờ',
-    'Wake requires an approved offline device with remote power consent': 'Đánh thức yêu cầu thiết bị ngoại tuyến đã được phê duyệt và đồng ý điều khiển nguồn từ xa',
+    'Wake requires an approved offline device with remote power consent': 'Chỉ đánh thức được máy tính đã phê duyệt, đang ngoại tuyến và đã đồng ý điều khiển nguồn từ xa',
     'No MAC addresses are available': 'Không có địa chỉ MAC',
     'Lifetime: your IT team is restarting this computer in 1 minute. Save your work now.': 'Lifetime: bộ phận IT sẽ khởi động lại máy tính này sau 1 phút. Hãy lưu công việc ngay.',
     'Lifetime: your IT team is shutting down this computer in 1 minute. Save your work now.': 'Lifetime: bộ phận IT sẽ tắt máy tính này sau 1 phút. Hãy lưu công việc ngay.',
@@ -850,11 +850,11 @@ for _key, _text in _SERVER_VI.items():
 _COMPANY_VI = {
     'Company server': 'Máy chủ công ty',
     'Reading local status…': 'Đang đọc trạng thái trên máy…',
-    'Enrollment bundle': 'Gói ghép nối',
-    'Open enrollment file': 'Mở tệp ghép nối',
+    'Enrollment bundle': 'Gói đăng ký',
+    'Open enrollment file': 'Mở tệp đăng ký',
     'Send basic system information': 'Gửi thông tin hệ thống cơ bản',
     'Pair computer': 'Ghép nối máy tính',
-    'Check enrollment': 'Kiểm tra ghép nối',
+    'Check enrollment': 'Kiểm tra đăng ký',
     'Refresh local status': 'Làm mới trạng thái trên máy',
     'Stop company reporting': 'Dừng báo cáo về công ty',
     'Reporting enabled': 'Đã bật báo cáo',
@@ -872,7 +872,7 @@ for _key, _text in _COMPANY_VI.items():
     EN[_key] = _key
     VI[_key] = _text
 for _key, _text in {
-    'Server exports use current reporting permissions. Optional system fields remain excluded unless selected and permitted by the device.': 'Báo cáo máy chủ dùng quyền báo cáo hiện tại. Các trường hệ thống tùy chọn chỉ được kèm khi đã chọn và máy tính cho phép.',
+    'Server exports use current reporting permissions. Optional system fields remain excluded unless selected and permitted by the computer.': 'Báo cáo máy chủ dùng quyền báo cáo hiện tại. Các trường hệ thống tùy chọn chỉ được kèm khi đã chọn và máy tính cho phép.',
     'Preparing report…': 'Đang chuẩn bị báo cáo…',
     'Could not export the server report. Check the local service, administrator access and output folder, then try again.': 'Không thể xuất báo cáo máy chủ. Kiểm tra dịch vụ trên máy, quyền quản trị và thư mục lưu rồi thử lại.',
     'unreachable': 'Không thể liên lạc', 'conflict': 'Xung đột dữ liệu',
@@ -888,7 +888,7 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
     'Health readings are off on this computer': 'Máy tính này đang tắt thông tin sức khỏe',
     'No activity history reported yet': 'Chưa nhận được lịch sử hoạt động',
     'No health details reported yet': 'Chưa nhận được chi tiết sức khỏe',
-    'Boots {boots} · current session {current} · longest session {longest}': 'Khởi động {boots} lần · phiên hiện tại {current} · phiên dài nhất {longest}',
+    'Started {boots} times · current session {current} · longest session {longest}': 'Khởi động {boots} lần · phiên hiện tại {current} · phiên dài nhất {longest}',
     'No awake time recorded yet': 'Chưa ghi nhận thời gian hoạt động',
     'Average {average} a day · longest day {longest} on {day}': 'Trung bình {average} mỗi ngày · ngày dài nhất {longest} vào {day}',
     'Live': 'Trực tiếp', '24 hours': '24 giờ', 'Performance range': 'Khoảng hiệu suất',
@@ -937,21 +937,17 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
  'Previous': 'Trước',
  'Next': 'Tiếp',
  'Last report received': 'Lần nhận báo cáo gần nhất',
- 'Device ID': 'Mã thiết bị',
- 'Select a device to view its usage, permissions and server-owned identity.': 'Chọn thiết bị để '
-                                                                              'xem thời gian sử '
-                                                                              'dụng, quyền và '
-                                                                              'thông tin do máy '
-                                                                              'chủ quản lý.',
- 'Device details': 'Chi tiết thiết bị',
+ 'Computer ID': 'Mã máy tính',
+ 'Select a computer to view its usage, permissions and server-owned identity.': 'Chọn máy tính để xem thời gian sử dụng, quyền và thông tin do máy chủ quản lý.',
+ 'Computer details': 'Chi tiết máy tính',
  'Server-owned identity': 'Thông tin do máy chủ quản lý',
  'Save identity': 'Lưu thông tin',
  'Revoke credential': 'Thu hồi thông tin xác thực',
  'Enrollment requests': 'Yêu cầu đăng ký',
  'Approve': 'Phê duyệt',
  'Deny': 'Từ chối',
- 'Export selected': 'Xuất thiết bị đã chọn',
- 'Export fleet': 'Xuất toàn bộ thiết bị',
+ 'Export selected': 'Xuất các máy đã chọn',
+ 'Export fleet': 'Xuất toàn bộ máy tính',
  'Usage snapshots (hours; never added together)': 'Thời gian tích lũy (giờ; không cộng các bản '
                                                   'chụp)',
  'Measured': 'Đo trực tiếp',
@@ -975,23 +971,7 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
  'Allowed uses': 'Số lần sử dụng',
  'Create enrollment bundle': 'Tạo gói đăng ký',
  'Enrollment bundle': 'Gói đăng ký',
- 'Share this bundle only with the technician pairing the computer. Approval is still required.': 'Chỉ '
-                                                                                                 'chia '
-                                                                                                 'sẻ '
-                                                                                                 'gói '
-                                                                                                 'này '
-                                                                                                 'với '
-                                                                                                 'kỹ '
-                                                                                                 'thuật '
-                                                                                                 'viên '
-                                                                                                 'ghép '
-                                                                                                 'nối '
-                                                                                                 'máy '
-                                                                                                 'tính. '
-                                                                                                 'Vẫn '
-                                                                                                 'cần '
-                                                                                                 'phê '
-                                                                                                 'duyệt.',
+ 'Share this bundle only with the technician pairing the computer. Approval is still required.': 'Chỉ chia sẻ gói này với kỹ thuật viên đang kết nối máy tính. Vẫn cần phê duyệt.',
  'Expires at {time}': 'Hết hạn lúc {time}',
  'Expires {date} at {time}': 'Hết hạn ngày {date} lúc {time}',
  'Use this instead when the computer cannot find the server automatically.': 'Dùng dòng này khi máy tính không tự tìm thấy máy chủ.',
@@ -1060,34 +1040,11 @@ SERVER_DASHBOARD_VI = {'Lifetime Server': 'Lifetime Server',
  'No pending requests': 'Không có yêu cầu đang chờ',
  'Configuration': 'Cấu hình',
  'Current boundary (UTC): {time}': 'Mốc lưu giữ hiện tại (UTC): {time}',
- 'All devices': 'Tất cả thiết bị',
- 'Fleet overview; independent of the device search and filters.': 'Tổng quan toàn bộ thiết bị; độc '
-                                                                  'lập với tìm kiếm và bộ lọc '
-                                                                  'thiết bị.',
+ 'All computers': 'Tất cả máy tính',
+ 'Fleet overview; independent of the computer search and filters.': 'Tổng quan toàn bộ máy tính; độc lập với tìm kiếm và bộ lọc.',
  'Latest cumulative snapshots (hours)': 'Tổng tích lũy gần nhất (giờ)',
- 'One latest snapshot per device; snapshots are not added over time.': 'Một bản chụp gần nhất cho '
-                                                                       'mỗi thiết bị; không cộng '
-                                                                       'các bản chụp theo thời '
-                                                                       'gian.',
- '{known} devices have snapshots; {unknown} have no snapshot. Totals include known devices only.': '{known} '
-                                                                                                   'thiết '
-                                                                                                   'bị '
-                                                                                                   'có '
-                                                                                                   'bản '
-                                                                                                   'chụp; '
-                                                                                                   '{unknown} '
-                                                                                                   'thiết '
-                                                                                                   'bị '
-                                                                                                   'chưa '
-                                                                                                   'có. '
-                                                                                                   'Tổng '
-                                                                                                   'chỉ '
-                                                                                                   'gồm '
-                                                                                                   'thiết '
-                                                                                                   'bị '
-                                                                                                   'có '
-                                                                                                   'dữ '
-                                                                                                   'liệu.',
+ 'One latest snapshot per computer; snapshots are not added over time.': 'Một bản chụp gần nhất cho mỗi máy tính; không cộng các bản chụp theo thời gian.',
+ '{known} computers have snapshots; {unknown} have none. Totals include only computers with a snapshot.': '{known} máy tính có bản chụp; {unknown} máy chưa có. Tổng chỉ gồm các máy có bản chụp.',
  'Recent events': 'Sự kiện gần đây',
  'Event': 'Sự kiện',
  'Time': 'Thời điểm',
@@ -1191,48 +1148,48 @@ SERVER_S1_VI = {
     'Awake on selected date': 'Chạy trong ngày đã chọn',
     'Organisation': 'Tổ chức',
     'Save organisation': 'Lưu tên tổ chức',
-    'Device access': 'Quyền kết nối thiết bị',
-    'Choose device': 'Chọn thiết bị',
-    'Select a device in Devices.': 'Chọn một máy trong mục Thiết bị.',
-    'Revoke selected device': 'Thu hồi thiết bị đã chọn',
-    'Re-enable selected device': 'Cho phép thiết bị kết nối lại',
-    'Re-enabling requires a new invitation and approval on the same computer. Its device ID and history are preserved.': 'Để kết nối lại, cần lời mời mới và phê duyệt trên cùng máy tính. Mã thiết bị và lịch sử được giữ nguyên.',
+    'Computer access': 'Quyền kết nối của máy tính',
+    'Choose computer': 'Chọn máy tính',
+    'Select a computer in Devices.': 'Chọn một máy tính trong mục Thiết bị.',
+    'Revoke selected computer': 'Thu hồi máy tính đã chọn',
+    'Re-enable selected computer': 'Cho phép máy tính đã chọn kết nối lại',
+    'Re-enabling requires a new invitation and approval on the same computer. Its computer ID and history are kept.': 'Để kết nối lại, cần lời mời mới và phê duyệt trên cùng máy tính. Mã máy tính và lịch sử được giữ nguyên.',
     'Local network': 'Mạng nội bộ',
     'Server unavailable': 'Không kết nối được máy chủ',
     'Server running': 'Máy chủ đang chạy',
     'Export report': 'Xuất báo cáo',
-    'Fleet overview': 'Tổng quan thiết bị',
+    'Fleet overview': 'Tổng quan máy tính',
     'Report date': 'Ngày báo cáo',
     'Today · {date}': 'Hôm nay · {date}',
     'Add device': 'Thêm thiết bị',
     'Awake today': 'Chạy hôm nay',
     'Review': 'Xem xét',
-    'No devices yet. Add device': 'Chưa có thiết bị. Thêm thiết bị',
-    'Search devices': 'Tìm thiết bị',
+    'No computers yet. Add device': 'Chưa có máy tính nào. Thêm thiết bị',
+    'Search computers': 'Tìm máy tính',
     'All groups': 'Tất cả nhóm',
-    'Fleet devices': 'Danh sách thiết bị',
+    'Computer list': 'Danh sách máy tính',
     'Device': 'Thiết bị',
     'Last report': 'Báo cáo gần nhất',
     'Daily awake hours': 'Giờ chạy mỗi ngày',
     'Last 7 days': '7 ngày qua',
     'Last 30 days': '30 ngày qua',
     'Chart range': 'Khoảng thời gian biểu đồ',
-    'Known daily contributions only · device-local dates': 'Chỉ tính dữ liệu đã nhận · theo ngày trên từng máy',
+    "Known daily contributions only · each computer's local dates": 'Chỉ tính dữ liệu đã nhận · theo ngày trên từng máy',
     'No dated reports yet': 'Chưa có báo cáo theo ngày',
     'Local server: {name}': 'Máy chủ nội bộ: {name}',
     'Updated {time}': 'Cập nhật lúc {time}',
     'Check the reporting connection': 'Kiểm tra kết nối gửi báo cáo',
-    '{count} reporting devices': '{count} thiết bị có dữ liệu',
+    '{count} reporting computers': '{count} máy tính có dữ liệu',
     'Administrator review required': 'Cần quản trị viên xét duyệt',
-    'Showing {start} to {end} of {total} devices': 'Hiển thị {start} đến {end} trên {total} thiết bị',
+    'Showing {start} to {end} of {total} computers': 'Hiển thị {start} đến {end} trên {total} máy tính',
     '{hours} h {minutes:02} m': '{hours} giờ {minutes:02} phút',
     '{hours} h': '{hours} giờ',
     'h': 'g',
     '{n} s ago': '{n} giây trước',
     '{n} min ago': '{n} phút trước',
     '{n} h ago': '{n} giờ trước',
-    'Open device': 'Mở thiết bị',
-    'Select a device to view its recorded usage.': 'Chọn thiết bị để xem thời gian chạy đã ghi nhận.',
+    'Open computer': 'Mở máy tính',
+    'Select a computer to view its recorded usage.': 'Chọn máy tính để xem thời gian hoạt động đã ghi nhận.',
     'No group': 'Chưa có nhóm',
     'Recorded awake time': 'Thời gian chạy đã ghi nhận',
     'Client version': 'Phiên bản ứng dụng',
@@ -1695,7 +1652,7 @@ _ALERTS_VI = {
     'The server did not accept this. Check the values and try again.':
         'Máy chủ không chấp nhận thay đổi này. Hãy kiểm tra các giá trị rồi thử lại.',
     'Not expected online now': 'Hiện không cần trực tuyến',
-    'Telemetry missing: {rules}': 'Thiếu số liệu: {rules}',
+    'Readings missing: {rules}': 'Thiếu số liệu: {rules}',
     'Computer offline': 'Máy tính ngoại tuyến',
     'No report received': 'Không nhận được báo cáo',
     'Processor busy': 'Bộ xử lý quá tải',
@@ -2020,7 +1977,7 @@ _DASHBOARD_WIDGETS_VI = {
     'No incidents match this filter.': 'Không có sự cố nào khớp bộ lọc này.',
     'Memory & graphics': 'Bộ nhớ & đồ họa',
     '{free} free of {total}': 'trống {free} trên {total}',
-    'No devices yet': 'Chưa có thiết bị',
+    'No computers yet': 'Chưa có máy tính nào',
     'Add a computer with a one-time code; it shows here once you approve it.': 'Thêm máy tính bằng mã dùng một lần; máy sẽ hiện ở đây sau khi bạn phê duyệt.',
     'No report yet': 'Chưa có báo cáo',
     'No computers match': 'Không có máy tính phù hợp',

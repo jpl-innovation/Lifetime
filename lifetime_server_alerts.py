@@ -349,7 +349,7 @@ class AlertsUI:
         if status and not status.get('expected'):
             notes.append(self.t('Not expected online now'))
         if status.get('missing'):
-            notes.append(self.t('Telemetry missing: {rules}', rules=', '.join(self.t(RULE_TEXT.get(r, r)) for r in status['missing'])))
+            notes.append(self.t('Readings missing: {rules}', rules=', '.join(self.t(RULE_TEXT.get(r, r)) for r in status['missing'])))
         if notes:
             text += '<p style="margin:4px 0">' + e(' · '.join(notes)) + '</p>'
         incidents = alerts.get('incidents') or []
