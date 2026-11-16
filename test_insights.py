@@ -234,6 +234,17 @@ class HealthScoreTests(unittest.TestCase):
         result = insights.fleet(items, insights.settings(), TODAY)
         self.assertEqual(result['groups']['Lab']['health'], dict(score=50, known=2, unknown=1))
 
+    def test_a_computer_that_shares_only_awake_time_has_no_score_and_is_left_out_of_averages(self):
+        """Only "agent up to date" was known for it, so it scored 100."""
+        awake_only = dict(device_id='a', group='Lab', kind='laptop', client_version='1.2.0')
+        result = insights.health(awake_only, '1.2.0')
+        self.assertEqual((result['score'], result['unknown']), (None, ['stability', 'battery', 'disk', 'temperature']))
+        self.assertEqual(('agent', 'good', True), result['factors'][-1])         # still listed, just not a score
+        scored = dict(awake_only, device_id='b', health=dict(crashes_30d=1, shutdowns_30d=0))
+        self.assertEqual(insights.health(scored, '1.2.0')['score'], 75)         # (50 + 100) / 2: with a reading it counts
+        fleet = insights.fleet([awake_only, scored], insights.settings(), TODAY, '1.2.0')
+        self.assertEqual(fleet['fleet']['health'], dict(score=75, known=1, unknown=1))
+
 
 class DesktopPanelTests(unittest.TestCase):
     """The desktop Reports page panel: its own on-battery readings (insights.json, never the ledger) and settings."""

@@ -487,9 +487,10 @@ def factors(events_30d, battery_health, has_battery=True, disk_free=NOT_APPLICAB
 def health_score(factors):
     """factors: [(name, kind, value)] where kind is good / warning / danger, or None when the reading is missing.
     Each known factor scores 100 (good), 50 (warning) or 0 (danger); the score is their average. None when nothing
-    is known: a missing reading never counts as good."""
+    is known: a missing reading never counts as good. The agent being up to date is not a health reading: on its own
+    (a computer that shares only awake time) there is no score, not 100."""
     known = [kind for _, kind, _ in factors if kind in ('good', 'warning', 'danger')]
-    if not known:
+    if not any(kind in ('good', 'warning', 'danger') for name, kind, _ in factors if name != 'agent'):
         return None
     return round(sum({'good': 100, 'warning': 50, 'danger': 0}[kind] for kind in known) / len(known))
 
