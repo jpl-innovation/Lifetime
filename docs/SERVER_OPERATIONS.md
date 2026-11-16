@@ -139,6 +139,12 @@ what each computer shares; nothing is stored except the settings and one disk/ba
   daylight-saving day has an empty or double hour) against its business hours, or the **office hours** setting when its
   schedule is Automatic, Always or Never. An hour cut by the opening or closing time is shared by minutes. Older
   computers that do not send hourly history count as unknown.
+- **Groups** are a computer's Group (department) field. **Manage groups** on the Devices page (operations `groups`,
+  readable by every role; `add_group`, `rename_group`, `remove_group`, Admin, audited with the group name) creates
+  groups before any computer is in them, so they can be picked when approving a computer or in **Edit details** from a
+  device's menu. Renaming a group moves its computers and, in monitoring, its expected hours, maintenance windows,
+  after-hours sleep policy, wattage and agentless checks. Removing forgets a created group; a group stays listed while
+  a computer is in it. A backup taken before this release still restores (its copy gains the new table first).
 - **Sleep after hours** (`set_sleep_policy`, Admin): only a named Windows account with an Admin or Operator role
   assigned to the account itself can turn it on (not the token, and not membership of Administrators alone, which the
   server cannot re-check later). Every 15 seconds the server looks at that group's computers whose owner allows remote
@@ -207,7 +213,7 @@ only) and then removed; keep or copy those files under your retention policy.
 
 **Save backup** (Admin) writes one archive, for example `lifetime-server-backup.zip`, and `lifetime-server-backup.zip.sha256`
 beside it. The archive holds consistent copies (SQLite backup API, taken while the server runs) of `server.sqlite`
-(computers, reports, settings), `monitoring.sqlite` (alert history, incidents, rules, schedules, maintenance windows,
+(computers, reports, settings, groups created ahead of time), `monitoring.sqlite` (alert history, incidents, rules, schedules, maintenance windows,
 checks, notification settings) and `access.sqlite` (roles and the audit trail), the TLS identity (`server-key.pem`,
 `server-cert.pem`, `server-cert.previous.pem` when present), the server's configuration (address, ports, version and
 `server-install.json` when found), and a manifest with each file's SHA-256 and size. It never contains `admin-token`

@@ -174,7 +174,10 @@ def _check(work):
         with contextlib.closing(sqlite3.connect((work / 'server.sqlite').as_uri() + '?mode=ro', uri=True,
                                                 isolation_level=None)) as db:
             db.execute('PRAGMA trusted_schema=OFF')
-            Store._validate_backup(db)
+            with contextlib.closing(sqlite3.connect(':memory:', isolation_level=None)) as copy:
+                db.backup(copy)
+                Store.upgrade_backup(copy)      # an archive from the previous schema restores like its own backup
+                Store._validate_backup(copy)
         Monitor.read_backup(work / 'server.monitoring.sqlite').close()
     except (sqlite3.Error, ValueError, TypeError, KeyError):
         raise Problem('database') from None

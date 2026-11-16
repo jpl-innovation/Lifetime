@@ -250,6 +250,10 @@ _ADMIN = {
     'revoke': ('revoke', ('device_id',), ()),
     'delete': ('delete_device', ('device_id',), ()),
     'identity': ('update_identity', ('device_id', 'identity'), ()),
+    'groups': ('list_groups', (), ()),
+    'add_group': ('add_group', ('group',), ()),
+    'remove_group': ('remove_group', ('group',), ()),
+    'rename_group': ('rename_group', ('group', 'new_name'), ()),
     'retain': ('retain', ('before',), ()),
     'backup': ('backup', ('path',), ()),
     'restore': ('restore', ('path',), ()),
@@ -690,6 +694,8 @@ class ServerRuntime:
         result = getattr(self._store, method)(**value)
         if operation == 'delete':
             self.monitor.forget(value['device_id'])
+        elif operation == 'rename_group':     # its hours, maintenance, sleep policy, wattage and checks move with it
+            self.monitor.rename_group(value['group'].strip(), value['new_name'].strip())
         elif operation == 'overview':      # alert badges ride along with the counters
             result = dict(result, alerts=self.monitor.summary())
         elif operation == 'device':

@@ -5,7 +5,7 @@ import sys
 
 from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit,
+from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
                             QPushButton, QTabBar, QVBoxLayout, QWidget)
 
 from lifetime_theme import THEMES, install, T
@@ -181,8 +181,231 @@ class DailyChart(QLabel):
         super().mouseMoveEvent(event)
 
 
+class GroupField(QComboBox):
+    """A text field with a dropdown of the groups already in use, like a spreadsheet list: pick one or type a new one.
+
+    Speaks the same small API as the QLineEdit identity fields (text, setText, clear, textEdited).
+    """
+    textEdited = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.lineEdit().textEdited.connect(self.textEdited)
+        self.activated.connect(lambda _index: self.textEdited.emit(self.currentText()))
+
+    def text(self):
+        return self.currentText()
+
+    def setText(self, value):
+        self.setEditText(value or '')
+
+    def clear(self):
+        self.setEditText('')            # keep the list; only empty the text
+
+    def setMaxLength(self, length):
+        self.lineEdit().setMaxLength(length)
+
+    def setPlaceholderText(self, text):
+        self.lineEdit().setPlaceholderText(text)
+
+    def set_groups(self, groups):
+        text = self.currentText()
+        self.blockSignals(True)
+        QComboBox.clear(self)
+        self.addItems([group for group in groups if group])
+        self.setEditText(text)
+        self.blockSignals(False)
+
+
+class DeviceDetailsDialog(QDialog):
+    """Edit a computer's name, asset tag, group, location and deployment date in one place (the ⋯ menu's Edit details)."""
+
+    FIELDS = (('display_name', 'Display name'), ('asset_tag', 'Asset tag'), ('department', 'Group'),
+              ('location', 'Location'), ('deployment_date', 'Deployment date'))
+
+    def __init__(self, identity, groups, translate, parent=None):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QDialogButtonBox, QFormLayout
+        self.t, self._original = translate, dict(identity or {})
+        self.setWindowTitle(translate('Edit details'))
+        self.setMinimumWidth(460)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.fields = {}
+        for field, key in self.FIELDS:
+            edit = GroupField() if field == 'department' else QLineEdit()
+            if field == 'department':
+                edit.set_groups(groups)
+            edit.setMaxLength(4096)
+            edit.setText(self._original.get(field, ''))
+            edit.setAccessibleName(translate(key))
+            label = QLabel(translate(key))
+            label.setBuddy(edit)
+            form.addRow(label, edit)
+            self.fields[field] = edit
+        self.fields['deployment_date'].setPlaceholderText(translate('YYYY-MM-DD (optional)'))
+        self.fields['department'].setPlaceholderText(translate('Choose or type a group'))
+        layout.addLayout(form)
+        self.error = QLabel()
+        self.error.setWordWrap(True)
+        self.error.setStyleSheet(T('color: #FF8A8A;'))
+        self.error.hide()
+        layout.addWidget(self.error)
+        buttons = QDialogButtonBox()
+        self.save = buttons.addButton(translate('Save'), QDialogButtonBox.ButtonRole.AcceptRole)
+        self.save.setObjectName('primary')
+        buttons.addButton(translate('Cancel'), QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def identity(self):
+        """The full identity to save: the edited fields, plus any other field the computer already had."""
+        return dict(self._original, **{field: edit.text().strip() for field, edit in self.fields.items()})
+
+    def _save(self):
+        from lifetime_protocol import validate_identity
+        try:
+            validate_identity(self.identity())
+        except ValueError:
+            self.error.setText(self.t('Check the details. The deployment date must look like 2026-11-16, or be left empty.'))
+            self.error.show()
+            return
+        self.accept()
+
+
+class GroupsDialog(QDialog):
+    """Create, rename and remove groups, including ones no computer is in yet.
+
+    `run(operation, arguments, done)` sends one admin call in the background and calls `done(result, success)`.
+    """
+
+    def __init__(self, translate, run, parent=None, can_edit=True):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QListWidget
+        self.t, self.run, self.groups, self.changed = translate, run, [], False
+        self.setWindowTitle(translate('Manage groups'))
+        self.resize(480, 460)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+        note = QLabel(translate('Create groups here first, then pick them for any computer. A computer is in a group when its Group field matches the name.'))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        add_row = QHBoxLayout()
+        self.new_name = QLineEdit()
+        self.new_name.setMaxLength(120)
+        self.new_name.setPlaceholderText(translate('New group name'))
+        self.new_name.setAccessibleName(translate('New group name'))
+        self.add_button = QPushButton(translate('Add group'))
+        self.add_button.setObjectName('primary')
+        self.add_button.clicked.connect(self._add)
+        self.new_name.returnPressed.connect(self._add)
+        add_row.addWidget(self.new_name, 1)
+        add_row.addWidget(self.add_button)
+        layout.addLayout(add_row)
+        self.list = QListWidget()
+        self.list.setAccessibleName(translate('Groups'))
+        self.list.currentRowChanged.connect(lambda _row: self._update_buttons())
+        layout.addWidget(self.list, 1)
+        from lifetime_widgets_dashboard import EmptyState
+        self.empty = EmptyState('setup', translate('No groups yet'),
+                                translate('Add a group above, then pick it for any computer.'))
+        self.empty.hide()
+        layout.addWidget(self.empty, 1, Qt.AlignmentFlag.AlignTop)
+        actions = QHBoxLayout()
+        self.rename_button = QPushButton(translate('Rename…'))
+        self.rename_button.clicked.connect(self._rename)
+        self.remove_button = QPushButton(translate('Remove'))
+        self.remove_button.clicked.connect(self._remove)
+        actions.addWidget(self.rename_button)
+        actions.addWidget(self.remove_button)
+        actions.addStretch()
+        close = QPushButton(translate('Close'))
+        close.clicked.connect(self.accept)
+        actions.addWidget(close)
+        layout.addLayout(actions)
+        self.message = QLabel()
+        self.message.setWordWrap(True)
+        self.message.setStyleSheet(T('color: #FF8A8A;'))
+        layout.addWidget(self.message)
+        self.can_edit = can_edit
+        for widget in (self.new_name, self.add_button):
+            widget.setEnabled(can_edit)
+        self._update_buttons()
+        self._call('groups', {})
+
+    def _call(self, operation, arguments):
+        self.run(operation, arguments, lambda result, ok: self._done(operation, result, ok))
+
+    def _done(self, operation, result, success):
+        from PyQt6 import sip
+        if sip.isdeleted(self):         # the answer came after the dialog was closed
+            return
+        if not success or not isinstance(result, list):
+            self.message.setText(self.t("Couldn't update groups. Check that the Lifetime server is running."))
+            return
+        self.changed = self.changed or operation != 'groups'
+        self.message.clear()
+        self.show_groups(result)
+
+    def show_groups(self, groups):
+        current = self.selected()
+        self.groups = groups
+        self.list.clear()
+        for group in groups:
+            count = group.get('computers', 0)
+            self.list.addItem(self.t('{name}  ·  {count} computers', name=group['name'], count=count) if count != 1
+                              else self.t('{name}  ·  1 computer', name=group['name']))
+        names = [group['name'] for group in groups]
+        self.list.setVisible(bool(groups))
+        self.empty.setVisible(not groups)
+        if current and current['name'] in names:
+            self.list.setCurrentRow(names.index(current['name']))
+        self._update_buttons()
+
+    def selected(self):
+        row = self.list.currentRow()
+        return self.groups[row] if 0 <= row < len(self.groups) else None
+
+    def _update_buttons(self):
+        chosen = self.selected()
+        self.rename_button.setEnabled(bool(self.can_edit and chosen))
+        empty = bool(chosen and chosen.get('created') and not chosen.get('computers'))
+        self.remove_button.setEnabled(bool(self.can_edit and empty))
+        self.remove_button.setToolTip('' if not chosen or empty else
+                                      self.t('Computers are still in this group. Move them to another group first.'))
+
+    def _add(self):
+        name = self.new_name.text().strip()
+        if name:
+            self.new_name.clear()
+            self._call('add_group', dict(group=name))
+
+    def _rename(self):
+        from PyQt6.QtWidgets import QInputDialog
+        chosen = self.selected()
+        if not chosen:
+            return
+        name, ok = QInputDialog.getText(self, self.t('Rename group'),
+                                        self.t('New name for {name}. Its computers and settings move with it.', name=chosen['name']),
+                                        text=chosen['name'])
+        if ok and name.strip() and name.strip() != chosen['name']:
+            self._call('rename_group', dict(group=chosen['name'], new_name=name.strip()))
+
+    def _remove(self):
+        chosen = self.selected()
+        if chosen and chosen.get('created') and not chosen.get('computers'):
+            self._call('remove_group', dict(group=chosen['name']))
+
+
 class AddDeviceSheet(QDialog):
-    def __init__(self, issued, origin, translate, parent=None, client=None):
+    def __init__(self, issued, origin, translate, parent=None, client=None, groups=()):
         super().__init__(parent)
         install()
         from lifetime_connection import connection_line
@@ -250,7 +473,26 @@ class AddDeviceSheet(QDialog):
         self.error.setWordWrap(True)
         layout.addWidget(self.error)
         self.decisions = QWidget()
-        row = QHBoxLayout(self.decisions)
+        decision_layout = QVBoxLayout(self.decisions)
+        decision_layout.setContentsMargins(0, 0, 0, 0)
+        # Ask for the group while the computer is being approved, instead of leaving it to the device's detail panel.
+        group_row = QHBoxLayout()
+        group_label = QLabel(translate('Group (optional)'))
+        self.group_choice = QComboBox()
+        self.group_choice.setEditable(True)
+        self.group_choice.setMinimumWidth(260)
+        self.group_choice.setAccessibleName(translate('Group'))
+        self.group_choice.addItem('')
+        for group in groups or ():
+            self.group_choice.addItem(group)
+        self.group_choice.lineEdit().setPlaceholderText(translate('Choose or type a group'))
+        self.group_choice.lineEdit().setMaxLength(4096)
+        group_label.setBuddy(self.group_choice)
+        group_row.addWidget(group_label)
+        group_row.addWidget(self.group_choice, 1)
+        decision_layout.addLayout(group_row)
+        row = QHBoxLayout()
+        decision_layout.addLayout(row)
         self.approve = QPushButton(translate('Approve'))
         self.approve.setObjectName('primary')
         self.deny = QPushButton(translate('Deny'))
@@ -285,7 +527,25 @@ class AddDeviceSheet(QDialog):
         self.approve.setEnabled(False)
         self.deny.setEnabled(False)
         request_id = self.request['request_id']
-        self.tasks.submit(lambda: self.client.call(operation, request_id=request_id))
+        if operation != 'approve':
+            self.tasks.submit(lambda: self.client.call(operation, request_id=request_id))
+            return
+        group = self.group_choice.currentText().strip()
+        client = self.client
+
+        def approve():
+            result = client.call('approve', request_id=request_id)
+            if not group:
+                return result
+            # Identity is replaced as a whole, so keep whatever the computer already has and only set its group.
+            try:
+                identity = dict(client.call('device', device_id=result['device_id']).get('identity') or {})
+                identity['department'] = group
+                client.call('identity', device_id=result['device_id'], identity=identity)
+            except Exception:
+                return dict(result, group=group, group_saved=False)
+            return dict(result, group=group, group_saved=True)
+        self.tasks.submit(approve)
 
     def completed(self, number, result):
         self._busy = False
@@ -299,7 +559,13 @@ class AddDeviceSheet(QDialog):
         elif self._operation == 'approve':
             self.finished_connection = True
             self.timer.stop()
-            self.message.setText(self.t('{name} connected', name=self.request['name']))
+            text = self.t('{name} connected', name=self.request['name'])
+            if isinstance(result, dict) and result.get('group'):
+                if result.get('group_saved'):
+                    text += '\n' + self.t('Group: {group}', group=result['group'])
+                else:
+                    text += '\n' + self.t("The group was not saved. Set it on the Devices page under Group.")
+            self.message.setText(text)
             self.decisions.hide()
             self.done.setFocus()
         else:

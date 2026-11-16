@@ -360,6 +360,9 @@ readings that stop arriving show as "telemetry missing" on the computer, not as 
 
 - **Incidents** lists current and past problems: one incident per continuous problem, with its timeline, who
   acknowledged it and when, and when it recovered. The header shows the number of open alerts.
+- **Groups**: **Manage groups** on the Devices page creates groups before any computer is in them; pick one when
+  approving a computer or under **Edit details…** in a device's menu (name, asset tag, group, location, deployment
+  date). Renaming a group carries its computers and its hours, maintenance windows, sleep policy and wattage along.
 - **Expected online hours** (everyone, a group or one computer): always, never, or business hours with a time zone,
   weekdays and holidays. The default expects desktops always and laptops never, so a laptop asleep after work
   raises nothing. **Maintenance windows** pause alerts.

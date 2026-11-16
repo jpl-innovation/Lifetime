@@ -17,6 +17,13 @@
   `lifetime-admin` are Admin; the socket's group `lifetime-console` lets an account connect but grants no role until
   one is assigned with `set_role`), so remote power from a Linux server now works with a named account. Alert secrets on
   Linux are a 0600 file (permissions, not encryption). Computers pair with it exactly as with a Windows server.
+- **Groups ahead of time and one place for a computer's details (server):** **Manage groups** on the Devices page
+  creates, renames and removes groups before any computer is in them (empty state when there are none); approving a
+  computer can put it in a group straight away; **Edit details…** in a device's menu edits name, asset tag, group,
+  location and deployment date together. Renaming a group also moves its computers' energy, after-hours, health and
+  sleep-after-hours grouping, its expected hours, maintenance windows, wattage and agentless checks. New Admin
+  operations `groups`, `add_group`, `rename_group`, `remove_group` follow the same roles and audit trail (Unix socket
+  roles on Linux too). Server database schema 10; backups from schema 9 still restore. English and Vietnamese.
 - **Lifetime Server has its own icon** (navy and cream swapped against the desktop app's) in the Windows server
   package, its Start menu shortcut and the Linux bundle; on Linux the two windows announce their own app ids
   (`lifetime`, `lifetime-server`) so docks and taskbars show the right icon (the tar.gz installer adds a hidden

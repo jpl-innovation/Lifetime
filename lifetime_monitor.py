@@ -1074,6 +1074,39 @@ class Monitor:
             self._setting(db, 'sleep_policies', json.dumps(policies, sort_keys=True))
         return policies
 
+    def rename_group(self, old, new):
+        """Carry what is set for a group (its hours, maintenance windows, after-hours sleep, wattage and agentless
+        checks) over to its new name, so renaming a group never silently drops them. A setting the new name already
+        has wins over the old one's."""
+        if any(not isinstance(name, str) or not name or len(name) > 128 or any(ord(c) < 32 for c in name)
+               for name in (old, new)):
+            return
+        before, after = old.casefold(), new.casefold()
+        moved_checks = False
+        with self._transaction() as db:
+            db.execute("UPDATE OR IGNORE schedules SET key=? WHERE scope='group' AND key=?", (after, before))
+            if before != after:
+                db.execute("DELETE FROM schedules WHERE scope='group' AND key=?", (before,))
+            db.execute("UPDATE maintenance SET key=? WHERE scope='group' AND key=?", (after, before))
+            policies = json.loads(self._setting(db, 'sleep_policies') or '{}')
+            if before in policies:
+                policy = policies.pop(before)
+                policies.setdefault(after, dict(policy, group=new))
+                self._setting(db, 'sleep_policies', json.dumps(policies, sort_keys=True))
+            saved = json.loads(self._setting(db, 'insights') or '{}')
+            watts = saved.get('group_watts') or {}
+            if before in watts:
+                value = watts.pop(before)
+                watts.setdefault(after, value)
+                self._setting(db, 'insights', json.dumps(dict(saved, group_watts=watts), sort_keys=True))
+            for check_id, raw in db.execute('SELECT id,config FROM checks').fetchall():
+                config = json.loads(raw)
+                if (config.get('group') or '').casefold() == before:
+                    moved_checks = True
+                    db.execute('UPDATE checks SET config=? WHERE id=?', (json.dumps(dict(config, group=new), sort_keys=True), check_id))
+        if moved_checks:
+            self._push_checks()
+
     def trends(self):
         """{device_id: [(day, battery health %, system disk free %)]} oldest first: the daily readings kept for
         replacement forecasts (only from computers that share their readings)."""

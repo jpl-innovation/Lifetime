@@ -158,6 +158,28 @@ class AdminTests(unittest.TestCase):
         self.public('sync', message, credential)
         return request['device_id']
 
+    def test_groups_are_admin_operations_and_a_rename_carries_the_group_settings(self):
+        people = self.people()
+        device = self.computer()
+        self.assertEqual(self.call(people['viewer'], 'groups')[0], 200)
+        self.assertEqual(self.call(people['operator'], 'add_group', group='Spare')[0], 403)
+        status, groups = self.call(people['admin'], 'add_group', group='Spare')
+        self.assertEqual((status, [g['name'] for g in groups]), (200, ['Lab', 'Spare']))
+        self.assertEqual(self.runtime.access.audit(limit=1)[0]['target'], 'group=Spare')
+        self.assertEqual(self.call(people['admin'], 'set_sleep_policy', group='Lab', enabled=True)[0], 200)
+        self.admin.call('set_insight_settings', values=dict(group_watts={'Lab': 60}))
+        self.admin.call('set_schedule', scope='group', key='Lab', kind='business')
+        status, groups = self.call(people['admin'], 'rename_group', group='Lab', new_name='Science')
+        self.assertEqual((status, [g['name'] for g in groups]), (200, ['Science', 'Spare']))
+        row = self.runtime.access.audit(limit=1)[0]
+        self.assertEqual((row['action'], row['target'], row['result']), ('rename_group', 'group=Lab', 'ok'))
+        self.assertEqual(self.admin.call('device', device_id=device)['identity']['department'], 'Science')
+        found = self.admin.call('insights')
+        self.assertEqual(list(found['sleep_policies']), ['science'])
+        self.assertEqual(found['settings']['group_watts'], {'science': 60.0})
+        self.assertEqual([c['group'] for c in found['computers']], ['Science'])
+        self.assertIn(('group', 'science'), [(s['scope'], s['key']) for s in self.admin.call('schedules')])
+
     def test_sleep_after_hours_needs_an_account_role_and_sends_single_audited_commands(self):
         people = self.people()
         idle, busy, refused, other = self.computer(), self.computer(cpu=80), self.computer(control=False), self.computer(group='Office')
