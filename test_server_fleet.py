@@ -6,7 +6,6 @@ import sys
 import tempfile
 import time
 import unittest
-import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from unittest.mock import patch
 from urllib.parse import urlsplit
 

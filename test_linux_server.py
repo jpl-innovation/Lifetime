@@ -12,7 +12,6 @@ import types
 import unittest
 from unittest.mock import patch
 
-import test_compat  # noqa: F401
 import lifetime_access as access
 import lifetime_server as server
 import lifetime_unix_admin as unix

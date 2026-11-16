@@ -9,7 +9,6 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-import test_compat  # noqa: F401
 import lifetime_insights as insights
 import lifetime_permissions as permissions
 import lifetime_server_reports as reports

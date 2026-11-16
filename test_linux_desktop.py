@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-import test_compat  # noqa: F401
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import lifetime_import as importer

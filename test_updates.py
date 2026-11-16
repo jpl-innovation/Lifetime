@@ -11,7 +11,6 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-import test_compat  # noqa: F401  (enterContext on Python 3.10)
 import lifetime_permissions as permissions
 import lifetime_updates as updates
 

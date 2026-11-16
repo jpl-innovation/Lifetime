@@ -5,7 +5,6 @@ import tempfile
 import threading
 import time
 import unittest
-import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from pathlib import Path
 from unittest.mock import Mock, patch
 

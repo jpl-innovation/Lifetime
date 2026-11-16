@@ -6,7 +6,6 @@ import sys
 import tempfile
 import types
 import unittest
-import test_compat  # enterContext on Python 3.10
 from pathlib import Path
 from unittest.mock import patch
 

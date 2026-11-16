@@ -2,7 +2,6 @@
 import datetime as dt
 import unittest
 
-import test_compat  # noqa: F401
 import lifetime_insights as insights
 
 TODAY = dt.date(2026, 11, 16)

@@ -14,7 +14,6 @@ import threading
 import unittest
 from unittest.mock import patch
 import uuid
-import test_compat  # noqa: F401  (enterContext on Python 3.10)
 
 import lifetime_monitor as monitoring
 import lifetime_notify as notify

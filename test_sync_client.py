@@ -13,7 +13,6 @@ import sqlite3
 import ssl
 import sys
 import unittest
-import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from unittest.mock import patch
 from urllib.parse import urlsplit
 

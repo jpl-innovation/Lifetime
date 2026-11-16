@@ -10,7 +10,6 @@ import sys
 import tempfile
 import threading
 import unittest
-import test_compat  # noqa: F401  (enterContext on Python 3.10)
 from unittest.mock import Mock, patch
 
 import lifetime_agent as agent

@@ -17,7 +17,6 @@ import uuid
 import zipfile
 from unittest.mock import patch
 
-import test_compat  # noqa: F401
 import lifetime_access as access
 import lifetime_server as server
 import lifetime_server_backup as archive
