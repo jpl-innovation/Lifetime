@@ -597,6 +597,27 @@ class RuntimeTests(unittest.TestCase):
             for connection in sockets:
                 connection.close()
 
+    def test_one_remote_address_cannot_hold_every_request_slot(self):
+        """Audit L3: opening a connection needs no credential, so one host on the LAN could take all 32 slots."""
+        public = self.runtime._servers[0]
+        closed = []
+        with patch.object(server.ThreadingHTTPServer, 'process_request'), \
+                patch.object(public, 'shutdown_request', side_effect=closed.append):
+            for number in range(server.MAX_PER_ADDRESS + 3):
+                public.process_request(('greedy', number), ('192.0.2.5', 40000 + number))
+            self.assertEqual(len(closed), 3)                                     # refused before a slot or a thread
+            self.assertEqual(self.runtime._slots._value, server.MAX_CONNECTIONS - server.MAX_PER_ADDRESS)
+            public.process_request('other', ('192.0.2.6', 40000))               # everyone else still gets in
+            self.assertEqual(len(closed), 3)
+            public._release('192.0.2.5')
+            public.process_request('again', ('192.0.2.5', 50000))               # and so does the first, once one ends
+            self.assertEqual(len(closed), 3)
+            for address in ['192.0.2.5'] * server.MAX_PER_ADDRESS + ['192.0.2.6']:
+                public._release(address)
+        self.assertEqual(self.runtime._slots._value, server.MAX_CONNECTIONS)
+        self.assertEqual(public._held, {})
+        public._connections.clear()
+
     def test_handshake_header_and_body_deadlines_reclaim_slots(self):
         public = self.runtime._servers[0]
         with patch.object(server, 'HANDSHAKE_TIMEOUT', 0.2):

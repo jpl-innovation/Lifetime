@@ -36,6 +36,7 @@ from lifetime_server_store import (AuthenticationError, ConflictError, Store,
 import lifetime_tls as tls
 
 MAX_CONNECTIONS = 32
+MAX_PER_ADDRESS = 8       # request slots one remote address may hold at once: a quarter, so one host cannot take them all
 HANDSHAKE_TIMEOUT = 5
 HEADER_TIMEOUT = 10
 BODY_TIMEOUT = 10
@@ -167,6 +168,8 @@ class _Server(ThreadingHTTPServer):
         self._connections = set()
         self._detached = set()      # long-lived sockets that have handed their request slot back
         self._connections_lock = threading.Lock()
+        self._owner = {}            # connection -> remote address, for handing its slot back
+        self._held = {}             # remote address -> request slots it holds now (loopback is not counted)
         self._stopping = False
         if ':' in address[0]:
             self.address_family = socket.AF_INET6
@@ -176,20 +179,35 @@ class _Server(ThreadingHTTPServer):
         return not self.admin or ipaddress.ip_address(client_address[0]).is_loopback
 
     def process_request(self, request, client_address):
-        # Acquire before starting a worker or attempting a TLS handshake.
-        if not self.runtime._slots.acquire(blocking=False):
+        # Acquire before starting a worker or attempting a TLS handshake. No credential is needed to open a
+        # connection, so one address may hold only some of the slots: the rest stay free for everyone else.
+        address = client_address[0]
+        counted = not ipaddress.ip_address(address.split('%')[0]).is_loopback
+        with self._connections_lock:
+            crowded = counted and self._held.get(address, 0) >= MAX_PER_ADDRESS
+        if crowded or not self.runtime._slots.acquire(blocking=False):
             self.shutdown_request(request)
             return
         with self._connections_lock:
             self._connections.add(request)
+            if counted:
+                self._held[address] = self._held.get(address, 0) + 1
         try:
             super().process_request(request, client_address)
         except BaseException:
             with self._connections_lock:
                 self._connections.discard(request)
-            self.runtime._slots.release()
+            self._release(address)
             self.shutdown_request(request)
             raise
+
+    def _release(self, address):
+        with self._connections_lock:
+            if address in self._held:
+                self._held[address] -= 1
+                if self._held[address] <= 0:
+                    del self._held[address]
+        self.runtime._slots.release()
 
     def process_request_thread(self, request, client_address):
         connection = request
@@ -202,6 +220,7 @@ class _Server(ThreadingHTTPServer):
                                                           do_handshake_on_connect=False)
                     self._connections.discard(request)
                     self._connections.add(connection)
+                self._owner[connection] = client_address[0]
             if self.context:
                 with _deadline(connection, HANDSHAKE_TIMEOUT):
                     connection.do_handshake()
@@ -213,10 +232,11 @@ class _Server(ThreadingHTTPServer):
             self.shutdown_request(connection)
             with self._connections_lock:
                 self._connections.discard(connection)
+                self._owner.pop(connection, None)
                 detached = connection in self._detached
                 self._detached.discard(connection)
             if not detached:
-                self.runtime._slots.release()
+                self._release(client_address[0])
 
     def detach(self, connection):
         """A live socket stays open for hours: give its short-request slot back right away."""
@@ -224,7 +244,8 @@ class _Server(ThreadingHTTPServer):
             if connection in self._detached:
                 return
             self._detached.add(connection)
-        self.runtime._slots.release()
+            address = self._owner.get(connection)
+        self._release(address)
 
     def close_connections(self):
         with self._connections_lock:
