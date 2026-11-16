@@ -109,7 +109,7 @@ cd Lifetime-Linux-x86_64
 ./install_linux.sh            # ./uninstall_linux.sh removes it again; your history is kept
 ```
 
-Tracking at login is chosen inside Lifetime. Where systemd runs it uses a systemd **user** service; on distributions without systemd (Devuan, antiX, MX with SysV, Void, Artix, Gentoo with OpenRC) it uses XDG autostart (`~/.config/autostart`), which every desktop above honours. Nothing needs root; sudo is only offered (never run on its own) to let you read the full system journal for earlier usage.
+Whether Lifetime starts automatically with the computer is chosen inside Lifetime (it starts when you sign in to your desktop). Where systemd runs it uses a systemd **user** service; on distributions without systemd (Devuan, antiX, MX with SysV, Void, Artix, Gentoo with OpenRC) it uses XDG autostart (`~/.config/autostart`), which every desktop above honours. Nothing needs root; sudo is only offered (never run on its own) to let you read the full system journal for earlier usage.
 
 Without systemd there is no journal, so **Verify** and **Add earlier usage** say "Not available" and Lifetime counts from the day you install it. Missing tools (`nmcli`/`iw` for Wi-Fi, `lspci` for graphics names) only make those fields say "Not available". Remote power from a Lifetime Server uses `systemctl`, or without systemd `loginctl` (elogind) or logind over D-Bus, never sudo and never a password prompt; if none is available the server is told "not supported".
 
@@ -133,12 +133,12 @@ Without systemd there is no journal, so **Verify** and **Add earlier usage** say
 - **Activity** – calendar heatmap, daily hours with a 7-day average, cumulative lifetime hours, hour-of-day and weekday profiles, and a session-length histogram, for 30 days, 90 days, a year or everything. **Show data** reveals the numbers behind every chart.
 - **System** – live power and battery, network and Wi-Fi, graphics, CPU, memory and disks, each with a small five-minute trend next to its reading. A hardware section lists the computer's details in plain groups: processor (clock speed, and temperature where the computer reports it), cooling fans (count and speed where the firmware exposes them, otherwise it says so), network cards (name, Wi-Fi, Ethernet or virtual, link speed), memory modules, disks (model, SSD or HDD, health), motherboard and BIOS, graphics driver, displays and the operating system build. Anything a computer does not report shows "Not available" with a short reason; nothing is guessed. Serial numbers and user names are never collected.
 - **Health** – stability (unexpected shutdowns and crashes), battery wear and cycles, and sleep patterns, when you allow Health. A 0-100 health score with its parts (unknown parts are shown and left out), and a **Replacement forecast**: when the battery reaches 80 % health and when the system disk runs out of room, or "not enough data" with what it has.
-- **Reports** – export a PDF or CSV report, edit the device identity, review coverage, and see **Energy and cost**:
+- **Reports** – export a PDF or CSV report, edit the computer identity, review coverage, and see **Energy and cost**:
   kWh and money today, this week and this month from the awake time, with a note when the computer was on after
   office hours. Power is *measured* only from this computer's own on-battery readings (Battery permission);
   otherwise it is a typical or owner-set wattage and says *estimated*.
 - **Connect** – optional, for workplace computers: connect to your IT team's Lifetime Server with one code and manage sharing. Not needed for personal use. While connected, a **Server: Online / Offline** chip (also under the status in the sidebar) shows whether the server answers now, when it last did and why not; Offline is amber, not red, because awake time keeps counting and is sent when the server is back. A computer that is not connected shows no server status at all.
-- **Settings** – a page inside the app (not a pop-up window): language, appearance, what to track, adding earlier usage, start at login and deleting history. Every option is a sliding switch, green when on.
+- **Settings** – a page inside the app (not a pop-up window): language, appearance, what to track, adding earlier usage, **Start automatically with the computer** and deleting history. Every option is a sliding switch, green when on.
 - **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts. **Incidents** lists alerts (see below), **groups** sort computers by room or team, and **Energy** shows kWh and cost, time on after hours, a replacement forecast and a health score for the whole fleet or one group.
 
 ### Appearance
@@ -160,7 +160,7 @@ Glass also supports a light theme:
 
 On first run Lifetime asks, one question at a time, what you want to track. Awake time is the only required item; battery, network, Wi-Fi name, graphics and resource readings are each opt-in, and anything you turn off is never read. Everything stays on your computer; nothing is uploaded. You can change choices, switch language, theme and style, or delete collected history on the **Settings** page at any time. Hardware, health and activity details are sent to a Lifetime Server only if you connected the computer and allowed history or readings; turning a choice off stops it at once.
 
-**Why admin on Windows?** Adding your earlier usage (the time before you installed Lifetime) reads the full System event log and registering the login task works best with administrator rights. If you decline the prompt, Lifetime installs for your user only and history rebuild may be limited. The installer never installs files into the administrator's profile.
+**Why admin on Windows?** Adding your earlier usage (the time before you installed Lifetime) reads the full System event log, and setting Lifetime to start automatically with the computer works best with administrator rights. If you decline the prompt, Lifetime installs for your account only and history rebuild may be limited. The installer never installs files into the administrator's profile.
 
 ## How it counts
 
@@ -203,7 +203,7 @@ Lifetime is free software under the [GNU General Public License v3](LICENSE) (GP
 
 ## Technician workflow
 
-**Device identity** adds an optional display name, asset tag, department/location and
+**Computer identity** adds an optional display name, asset tag, department/location and
 deployment date (YYYY-MM-DD). Leave any field blank or clear it later; no business
 profile is required. Values are saved locally in the existing `settings.json` without
 changing consent. The existing Settings interview and EN/VI selector continue to work.
@@ -214,7 +214,7 @@ consent permits it; it is never added automatically to a report.
 OS record, first/last recorded dates, sources, gaps and estimated allocation. Older
 versions may not have preserved an exact recording-start timestamp. The OS-date clue
 is not a manufacture, purchase or true first-use date. A successful Verify comparison
-applies to the current boot and does not prove complete historical coverage.
+applies only to the time since the computer last started and does not prove complete historical coverage.
 
 Awake time does not measure human activity, productivity, component health or remaining
 lifespan. Missing dates are unavailable rather than assumed to be zero-use days.
@@ -257,7 +257,7 @@ destroy the previous valid file. Choose another writable location if a save fail
 
 Rerun the normal installer over the installed version; keep the existing data directory,
 `ledger.json` and `settings.json`. On Windows the installer closes a running Lifetime and
-tracker, replaces them and starts the tracker again if it starts at login. A machine agent
+tracker, replaces them and starts the tracker again if it starts automatically with the computer. A machine agent
 installed by Connect is replaced with `install_agent_windows.ps1 -Mode Packaged -Reinstall
 -Start` (elevated; the connection is kept) or by Disconnect and Connect; see the release
 notes. Data written by 1.1.0 is covered by `test_upgrade_from_1_1_0.py`. Existing consent,
@@ -372,7 +372,7 @@ processor or memory above X %, battery health below X %, temperature above X °C
 repeated crashes (from Health, only when the computer shares Health) and a Lifetime version older than a minimum you
 set. A problem must last the whole duration before an incident opens and stay away five minutes before it resolves,
 so short spikes and flapping do not flood anyone. A computer that does not share a reading is never alerted on it;
-readings that stop arriving show as "telemetry missing" on the computer, not as a failure.
+readings that stop arriving show as "Readings missing" on the computer, not as a failure.
 
 - **Incidents** lists current and past problems: one incident per continuous problem, with its timeline, who
   acknowledged it and when, and when it recovered. The header shows the number of open alerts.

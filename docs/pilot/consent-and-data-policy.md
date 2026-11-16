@@ -28,7 +28,7 @@ network.
 | Category | Used in this pilot? | What it is |
 |---|---|---|
 | Awake time (always, needed to connect) | Yes | How long the computer has been switched on and awake, in totals and increments. |
-| History by day | [Yes/No] | Daily awake totals, the hour-of-day profile, recent sessions (start and length), boot count. |
+| History by day | [Yes/No] | Daily awake totals, the hour-of-day profile, recent sessions (start and length), how many times the computer started. |
 | Specs and live readings | [Yes/No] | Processor, memory, disk, battery, network type and live usage percentages; hardware details; network card addresses (MAC, only for Wake-on-LAN). |
 | Health | [Yes/No] | Counts of unexpected shutdowns and crashes, battery wear, sleep patterns. |
 | Remote sleep/restart | [Yes/No] | IT may sleep, restart or shut down this computer. A one-minute warning is shown before a restart or shut down; sleep happens at once (nothing open is closed). |
