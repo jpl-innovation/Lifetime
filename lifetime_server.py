@@ -1162,18 +1162,32 @@ def _offline(args):
     return 0 if report.get('ok') else 1
 
 
+def error_kind(error):
+    """What may be written to a log, the event log or stderr about an error: its class and, for operating-system
+    errors, the error code's name. Never its text, which can carry paths, addresses or names."""
+    import errno
+    code = ''
+    if isinstance(error, OSError):
+        code = errno.errorcode.get(error.errno) or (f'WinError {error.winerror}' if getattr(error, 'winerror', None) else '')
+    return type(error).__name__ + (f' ({code})' if code else '')
+
+
 def _admin(args):
     """One administration request to the running server through lifetime_admin (the identity-bound pipe or socket
     first, then the token), so roles, validation and the audit trail apply exactly as for the dashboard."""
     import json
-    from lifetime_admin import AdminClient
+    from lifetime_admin import AdminClient, NotAllowed
     try:
         arguments = json.loads(args.arguments or '{}')
         if not isinstance(arguments, dict) or not args.operation:
             raise ValueError('Give --operation and a JSON object in --arguments')
         result = AdminClient(args.directory, args.admin_port).call(args.operation, **arguments)
-    except (OSError, ValueError) as error:
-        print(f'Lifetime Server admin: {type(error).__name__}: {error}', file=sys.stderr)
+    except ValueError as error:     # raised by this program with fixed wording (bad arguments, HTTP status)
+        own = type(error) in (ValueError, NotAllowed)       # not, say, a JSON error quoting what was typed
+        print(f'Lifetime Server admin: {error if own else type(error).__name__}', file=sys.stderr)
+        return 1
+    except OSError as error:        # the kind only: operating-system messages carry paths and addresses
+        print(f'Lifetime Server admin: {error_kind(error)}', file=sys.stderr)
         return 1
     if args.field:
         item = result[0] if isinstance(result, list) and result else result

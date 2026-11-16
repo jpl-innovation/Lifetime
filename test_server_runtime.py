@@ -576,6 +576,26 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(errors.getvalue(), '')
         self.assertFalse(list(self.root.glob('*.log')))
 
+    def test_errors_are_reported_by_kind_never_by_their_text(self):
+        """Bug B3: the admin command and the Windows service wrote the whole exception text, paths included."""
+        import argparse
+        import inspect
+        import lifetime_server_service
+        error = FileNotFoundError(2, 'No such file or directory', 'C:\\Users\\someone\\secret-place')
+        self.assertEqual(server.error_kind(error), 'FileNotFoundError (ENOENT)')
+        self.assertEqual(server.error_kind(RuntimeError('192.0.2.7 secret')), 'RuntimeError')
+        arguments = argparse.Namespace(arguments='{}', operation='whoami', directory=str(self.root), admin_port=1, field=None)
+        for raised, shown in ((error, 'FileNotFoundError (ENOENT)'), (ValueError('Administrative request failed (HTTP 500)'), 'HTTP 500'),
+                              (json.JSONDecodeError('secret-typed-text', 'doc', 0), 'JSONDecodeError')):
+            errors = io.StringIO()
+            with patch.object(AdminClient, 'call', side_effect=raised), contextlib.redirect_stderr(errors):
+                self.assertEqual(server._admin(arguments), 1)
+            self.assertIn(shown, errors.getvalue())
+            self.assertNotIn('secret', errors.getvalue())
+        source = inspect.getsource(lifetime_server_service)
+        self.assertIn("LogErrorMsg(f'Lifetime Server could not start: {error_kind(error)}')", source)
+        self.assertNotIn('}: {error}', source)
+
     def test_slow_handshakes_count_towards_global_32_and_stop_closes_them(self):
         public = self.runtime._servers[0]
         sockets = []

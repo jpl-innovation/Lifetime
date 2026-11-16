@@ -82,7 +82,7 @@ def service_class():
     """Import pywin32 only when explicitly running the service adapter."""
     import win32service
     import win32serviceutil
-    from lifetime_server import ServerRuntime
+    from lifetime_server import ServerRuntime, error_kind
 
     class LifetimeServerService(win32serviceutil.ServiceFramework):
         _svc_name_ = 'LifetimeServer'
@@ -107,7 +107,8 @@ def service_class():
                 runtime = ServerRuntime(**_configuration())
                 runtime.start()
             except Exception as error:   # say why in the Windows event log instead of a bare "stopped"
-                servicemanager.LogErrorMsg(f'Lifetime Server could not start: {type(error).__name__}: {error}')
+                # The kind of error only, as everywhere else: its text can carry paths and addresses.
+                servicemanager.LogErrorMsg(f'Lifetime Server could not start: {error_kind(error)}')
                 raise
             try:
                 self._stopped.wait()
