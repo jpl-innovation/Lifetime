@@ -2,7 +2,7 @@
 # Run explicitly from an elevated PowerShell prompt; installs only the server edition.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$Address,
+    [string]$Address,
     [string]$HostAddress = '0.0.0.0',
     [ValidateRange(1, 65535)][int]$Port = 8443,
     [ValidateRange(1, 65535)][int]$AdminPort = 8444,
@@ -19,6 +19,20 @@ Set-StrictMode -Version Latest
 if ($env:OS -ne 'Windows_NT') { throw 'This installer requires Windows.' }
 $administrator = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $administrator.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Open PowerShell as Administrator.' }
+# Without -Mode, the ready-made server program in the package is used, so no Python is needed. The Python modes stay
+# available by naming them.
+if (-not $PSBoundParameters.ContainsKey('Mode') -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'LifetimeServerRuntime.exe') -PathType Leaf)) {
+    $Mode = 'PackagedTask'
+}
+# Without -Address (the double-click install), use this server's own IPv4 address: computers can reach it whether or
+# not their network can resolve the server's name. Prefer the address of the network with a default gateway.
+if (-not $Address) {
+    $ips = @(Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway } | ForEach-Object { $_.IPv4Address } | ForEach-Object { $_.IPAddress })
+    $ips += @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | ForEach-Object { $_.IPAddress })
+    if (-not $ips) { throw "Could not find this server's network address. Pass it with -Address https://NAME-OR-IP:$Port." }
+    $Address = "https://$($ips[0]):$Port"
+    Write-Host "Server address: $Address"
+}
 $uri = $null
 if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https' -or
     $uri.Port -ne $Port -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne '/') {
@@ -205,6 +219,9 @@ if (Get-NetFirewallRule -Name 'LifetimeServer-HTTPS' -ErrorAction SilentlyContin
 }
 if ($Start) {
     if ($Mode -eq 'SourceService') { Start-Service -Name LifetimeServer } else { Start-ScheduledTask -TaskPath '\Lifetime\' -TaskName Server }
+}
+if (@(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq 'Public' })) {
+    Write-Warning "A network of this server is set to Public, where Windows lets no computer reach port $Port. If computers cannot find the server, set it to Private: Set-NetConnectionProfile -InterfaceAlias <name> -NetworkCategory Private"
 }
 Write-Host "Installed $Mode. Data: $DataDirectory. Dashboard loopback port: $AdminPort."
 Write-Host "TCP $Port is allowed from LocalSubnet on Domain and Private networks only (not on Public networks). Use -Start or start the registered service/task explicitly."

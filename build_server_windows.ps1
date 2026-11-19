@@ -58,7 +58,8 @@ try {
         Copy-Item -LiteralPath $_.FullName -Destination $output
     }
     foreach ($name in @('install_server_windows.ps1', 'uninstall_server_windows.ps1', 'restart_server_windows.ps1',
-                        'install_agent_windows.ps1', 'uninstall_agent_windows.ps1', 'requirements-server.txt')) {
+                        'install_agent_windows.ps1', 'uninstall_agent_windows.ps1', 'requirements-server.txt',
+                        'Install Lifetime Server.cmd')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $output
     }
     New-Item -ItemType Directory -Path (Join-Path $output 'assets'), (Join-Path $output 'docs') | Out-Null

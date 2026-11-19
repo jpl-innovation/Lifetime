@@ -300,6 +300,30 @@ class LinuxAgentPathTests(unittest.TestCase):
 
 
 class LanFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(connection, '_route_ipv4', return_value=[]))
+
+    def test_linux_host_name_on_loopback_still_finds_the_network(self):
+        # Debian and Ubuntu map the host name to 127.0.1.1 in /etc/hosts: the route's address is the network.
+        loopback = [(socket.AF_INET, 1, 6, '', ('127.0.1.1', 0))]
+        with patch.object(connection.socket, 'getaddrinfo', return_value=loopback), \
+                patch.object(connection, '_route_ipv4', return_value=['192.0.2.40', '224.0.0.251']):
+            self.assertEqual(connection.local_ipv4(), ['192.0.2.40'])
+        with patch.object(connection.socket, 'getaddrinfo', side_effect=socket.gaierror('no name')), \
+                patch.object(connection, '_route_ipv4', return_value=['192.0.2.40']):
+            self.assertEqual(connection.local_ipv4(), ['192.0.2.40'])
+        probed = []
+        def connect(endpoint, timeout):
+            probed.append(endpoint[0])
+            raise OSError('closed')
+        with patch.object(connection.socket, 'getaddrinfo', return_value=loopback), \
+                patch.object(connection, '_route_ipv4', return_value=['192.0.2.40']), \
+                patch.object(connection.socket, 'create_connection', side_effect=connect):
+            with self.assertRaises(ValueError):
+                connection.find_server(connection.issue('0' * 64))
+        self.assertEqual(len(probed), 254)
+        self.assertTrue(all(host.startswith('192.0.2.') for host in probed))
+
     def test_fake_sockets_scan_ceiling_and_reject_nonmatching_certificates(self):
         import hashlib
         from unittest.mock import MagicMock

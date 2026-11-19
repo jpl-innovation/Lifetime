@@ -1061,6 +1061,19 @@ class ServerRuntime:
             with contextlib.suppress(Exception):
                 self._renew_certificate()
 
+    def _lan_names(self):
+        """The server's own LAN IPv4 addresses, also named in its certificate: a computer that finds the server by
+        address (the search, or a discovery answer) can then use it even where the configured name does not
+        resolve. None for a server bound to loopback."""
+        try:
+            if ipaddress.ip_address(self.host).is_loopback:
+                return []
+        except ValueError:
+            if self.host.lower() == 'localhost':
+                return []
+        from lifetime_connection import local_ipv4
+        return local_ipv4(named=False)      # the default route's address: stable, so no renewal at every start
+
     def _renew_certificate(self):
         """Issue a new certificate from the same key 30 days before expiry, or when the names changed.
 
@@ -1075,6 +1088,7 @@ class ServerRuntime:
                 old = source.read(tls.MAX_CERTIFICATE_BYTES + 1)
             info = tls.certificate_info(old.decode('ascii'))
             names = tls.server_names([self._hostname, *self._store.server_names()['names']])
+            names += [ip for ip in self._lan_names() if ip not in names][:tls.MAX_NAMES + 1 - len(names)]
             now = self.clock()
             self.certificate.update(expires=info['expires'].isoformat(), names=info['names'], key=info['key'])
             if info['expires'] - now > tls.RENEW_BEFORE and set(info['names']) == set(names):

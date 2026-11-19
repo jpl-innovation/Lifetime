@@ -1334,7 +1334,7 @@ CONNECT_VI = {
     'Type that code below.': 'Nhập mã đó vào ô bên dưới.',
     'On the server': 'Trên máy chủ',
     'Then, on this computer': 'Sau đó, trên máy này',
-    'Type the code below.': 'Nhập mã vào ô bên dưới.',
+    'Type the code below. 0 or O, either works.': 'Nhập mã vào ô bên dưới. Số 0 hay chữ O đều được.',
     'First, on the server': 'Trước tiên, trên máy chủ',
     'Press Add device to get a code.': 'Nhấn Thêm thiết bị để lấy mã.',
     'Next you choose what to share. You can change it or disconnect any time.': 'Tiếp theo, bạn chọn nội dung chia sẻ. Bạn có thể đổi hoặc ngắt kết nối bất cứ lúc nào.',

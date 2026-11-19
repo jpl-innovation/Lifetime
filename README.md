@@ -70,8 +70,8 @@ python -m pip install PyQt6
 ### Lifetime Server (Windows Server)
 
 1. Download **Lifetime-Server-Windows.zip** and unzip it on the server.
-2. Follow [server operations](docs/SERVER_OPERATIONS.md) to install the service and open the firewall port you choose.
-3. Open **Lifetime Server**, click **Add device**, and connect computers as described above.
+2. Double-click **Install Lifetime Server.cmd** and approve the administrator prompt. No Python is needed: it installs the ready-made server program, uses this server's own IP address (for example `https://192.168.1.10:8443`), opens port 8443 to the local network and starts the server. To choose the name, port or mode yourself, see [server operations](docs/SERVER_OPERATIONS.md).
+3. Open **Lifetime Server** from the Start menu, click **Add device**, and connect computers as described above. If computers cannot find the server, check that the server's network is set to **Private** in Windows (Windows blocks port 8443 on a Public network); the installer warns when it is not.
 
 ### Lifetime Server for Linux (any distribution, headless)
 
@@ -80,9 +80,11 @@ The server runs on any Linux server with glibc 2.28 or newer, with no desktop an
 ```sh
 tar -xzf Lifetime-Server-Linux-x86_64.tar.gz
 cd Lifetime-Server-Linux-x86_64
-sudo ./install_server_linux.sh --address https://server.school.lan:8443 --admin "$USER"
+sudo ./install_server_linux.sh --admin "$USER"
 sudo /opt/lifetime-server/LifetimeServerRuntime admin --directory /var/lib/lifetime-server --admin-port 8444 --operation invitation
 ```
+
+Without `--address` the server uses its own IP address (for example `https://192.168.1.10:8443`), which every computer on the network can reach; give `--address https://server.school.lan:8443` only if that name resolves on every computer. Then allow the two ports the installer prints, from your local network only: 8443/tcp (connections) and 5353/udp (so computers find the server by themselves).
 
 It installs to `/opt/lifetime-server`, keeps its data in `/var/lib/lifetime-server` (0700, system account `lifetime`) and runs as a systemd service that restarts on failure; without systemd it installs an OpenRC or SysV init script instead. The installer prints the firewall rule for `ufw` or `firewalld` (port 8443 from your local network only; the administration port 8444 stays on 127.0.0.1 and must never be opened). `root` and members of the `lifetime-admin` group are Admin; other Unix users and groups get Operator, Auditor or Viewer roles, exactly like Windows accounts on a Windows server: add the user to the `lifetime-console` group (which only lets them reach the admin socket and grants nothing by itself), then assign a role with `set_role`. Windows and Linux computers connect to a Linux server exactly as to a Windows one.
 

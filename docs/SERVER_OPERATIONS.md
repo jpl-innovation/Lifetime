@@ -28,14 +28,18 @@ Get-FileHash .\LifetimeServerRuntime.exe -Algorithm SHA256
 
 ## Install and start
 
-Extract the package outside the intended install directory. From an elevated PowerShell prompt, set the HTTPS origin to the actual LAN DNS name or IP that clients will use. The port in `-Address` must match `-Port`; public HTTPS defaults to 8443 and loopback administration defaults to 8444.
+Extract the package outside the intended install directory. The simplest install is to double-click **Install Lifetime Server.cmd**: it asks for administrator approval and runs `install_server_windows.ps1 -Start` with the defaults below (no Python, this server's own IP address).
+
+From an elevated PowerShell prompt you can choose instead. `-Address` is the HTTPS origin clients use: a LAN DNS name only if it resolves on every computer, otherwise the IP; without `-Address` the installer uses the IPv4 address of the network with a default gateway. The port in `-Address` must match `-Port`; public HTTPS defaults to 8443 and loopback administration defaults to 8444.
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\install_server_windows.ps1 -Address https://lifetime-host.example:8443 -Mode SourceTask
+.\install_server_windows.ps1 -Address https://lifetime-host.example:8443 -Start
 ```
 
-Modes are `SourceService` (default, Windows service wrapper), `SourceTask` (Python runtime as a SYSTEM startup scheduled task), and `PackagedTask` (packaged runtime executable as a SYSTEM startup task). Source modes create a dedicated virtual environment and install `requirements-server.txt` plus PyQt6; pass a machine-wide interpreter with `-Python` if `python` does not resolve outside user profiles. `PackagedTask` requires `LifetimeServerRuntime.exe`. Installation refuses an existing registration: stop and uninstall it before upgrading. Add `-Start` to start the selected registration immediately.
+The server's certificate always also names the server's own IPv4 address (the one its default route uses), so a computer that finds the server on the network can use it even where the configured name does not resolve. If that address changes, the certificate is renewed with the same key: connected computers carry on, and connection codes made before the change must be made again.
+
+Modes are `PackagedTask` (the default when the package has `LifetimeServerRuntime.exe`: the ready-made runtime as a SYSTEM startup task, no Python needed), `SourceService` (Windows service wrapper; the default without the ready-made runtime), and `SourceTask` (Python runtime as a SYSTEM startup scheduled task). Source modes create a dedicated virtual environment and install `requirements-server.txt` plus PyQt6; pass a machine-wide interpreter with `-Python` if `python` does not resolve outside user profiles. `PackagedTask` requires `LifetimeServerRuntime.exe`. Installation refuses an existing registration: stop and uninstall it before upgrading. Add `-Start` to start the selected registration immediately.
 
 How `SourceService` runs: the service program is the machine-wide `python.exe` itself, started with `-E -s` on `lifetime_server_service.py --service-host <install>\.venv`; the script then loads the environment's packages. (pywin32's default host and a venv's `python.exe`, which is only a launcher for a child process, both fail to start as a SYSTEM service.) The installer runs `lifetime_server_service.py --self-check` first, so a broken environment stops the install with its real error, prints the registered service program, and sets Windows to restart the service after a crash (10 s, 60 s, then every 5 minutes). Start-up errors are written to the Windows Application event log.
 

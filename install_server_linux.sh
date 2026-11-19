@@ -15,7 +15,7 @@ usage() {
 Usage: sudo ./install_server_linux.sh [--address https://NAME:8443] [--host 0.0.0.0] [--port 8443]
                                       [--admin-port 8444] [--init auto|systemd|openrc|sysv|none] [--no-start]
                                       [--admin USER]
-  --address     the address computers use to reach this server (required on first install)
+  --address     the address computers use to reach this server (default: this server's own IP address)
   --init        service manager; auto picks systemd, then OpenRC, then a SysV script
   --admin USER  also add USER to the lifetime-admin and lifetime-console groups (Admin in the dashboard)
 EOF
@@ -94,7 +94,13 @@ install -d -m 0755 -o root -g root "$config_dir"
 
 # ---- settings ----
 if [[ ! -f "$config" ]]; then
-    [[ -n "$address" ]] || fail 'first install: give --address https://NAME:8443 (the name computers use for this server).'
+    if [[ -z "$address" ]]; then
+        # No --address: this server's own IPv4 address, which every computer on the network can reach.
+        ip_address="$(ip -o -f inet addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')"
+        [[ -n "$ip_address" ]] || fail 'first install: give --address https://NAME:8443 (the name computers use for this server).'
+        address="https://$ip_address:${port:-8443}"
+        printf 'Server address: %s\n' "$address"
+    fi
     install -m 0640 -o root -g lifetime "$source_dir/linux/server.conf" "$config"
 fi
 set_value() {   # KEY VALUE: replace the line in server.conf
@@ -188,9 +194,11 @@ printf '\nLifetime Server is installed (%s). Data: %s. Settings: %s.\n' "$init" 
 printf 'Computers connect to %s. Allow port %s from your local network only, for example:\n' "$LIFETIME_ADDRESS" "$LIFETIME_PORT"
 if command -v ufw >/dev/null; then
     printf '  sudo ufw allow from %s to any port %s proto tcp\n' "$subnet" "$LIFETIME_PORT"
+    printf '  sudo ufw allow from %s to any port 5353 proto udp    # so computers can find the server on their own\n' "$subnet"
 fi
 if command -v firewall-cmd >/dev/null; then
     printf "  sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=%s port port=%s protocol=tcp accept' && sudo firewall-cmd --reload\n" "$subnet" "$LIFETIME_PORT"
+    printf '  sudo firewall-cmd --permanent --add-service=mdns && sudo firewall-cmd --reload    # so computers can find the server on their own\n'
 fi
 printf 'Never open port %s: administration stays on this server.\n' "$LIFETIME_ADMIN_PORT"
 printf 'Administer: sudo %s/LifetimeServerRuntime admin --directory %s --admin-port %s --operation invitation\n' "$program" "$data" "$LIFETIME_ADMIN_PORT"

@@ -81,12 +81,16 @@ def server_state(status, t, now=None):
 
 
 def locate_server(value):
-    from lifetime_connection import PREFIX, parse, normalize, bootstrap, find_server
+    from lifetime_connection import PREFIX, parse, normalize, bootstrap, find_server, named_origin
     from lifetime_discovery import discover
     if value.strip().startswith(PREFIX):
         origin, code = parse(value)
-        return bootstrap(origin, code)
-    code = normalize(value)
+        try:
+            return bootstrap(origin, code)
+        except (OSError, ValueError):
+            pass        # the line's address may not resolve on this network: look for the server by its code
+    else:
+        code = normalize(value)
     try:
         candidates = discover()
     except OSError:
@@ -95,7 +99,14 @@ def locate_server(value):
         try:
             return bootstrap(server['address'], code)
         except (OSError, ValueError):
-            continue
+            pass
+        # The announced name may not resolve here; the address the answer came from does.
+        if server.get('source'):
+            try:
+                return named_origin(bootstrap(f"https://{server['source']}:{server['port']}", code),
+                                    server['source'], server['port'], code)
+            except (OSError, ValueError):
+                pass
     return find_server(code)
 
 
@@ -443,7 +454,7 @@ class ConnectPage(QWidget):
         # The tutorial is captioned onto the drawing: each end says what to do at that computer.
         ends = QHBoxLayout()
         # The drawing puts this computer on the left, but the order of work is server first, so the words say so.
-        for heading, detail, side in (('Then, on this computer', 'Type the code below.', Qt.AlignmentFlag.AlignLeft),
+        for heading, detail, side in (('Then, on this computer', 'Type the code below. 0 or O, either works.', Qt.AlignmentFlag.AlignLeft),
                                       ('First, on the server', 'Press Add device to get a code.', Qt.AlignmentFlag.AlignRight)):
             end = QVBoxLayout()
             end.setSpacing(0)

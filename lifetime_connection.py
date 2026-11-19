@@ -178,16 +178,42 @@ def _same_ip(value, found):
         return False
 
 
+def _route_ipv4():
+    """The IPv4 addresses this computer would send from (a UDP connect sends nothing)."""
+    found = []
+    for target in (('8.8.8.8', 53), ('224.0.0.251', 5353)):     # the default route, else the LAN multicast route
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect(target)
+                found.append(probe.getsockname()[0])
+        except OSError:
+            pass
+    return found
+
+
+def local_ipv4(named=True):
+    """This computer's LAN IPv4 addresses. Debian and Ubuntu resolve the host name to 127.0.1.1, so the name
+    alone finds no network there: the addresses the routes use are asked for as well. ``named=False`` gives the
+    route addresses only (a host name also lists virtual adapters whose addresses change at every start)."""
+    import ipaddress
+    try:
+        named = [item[4][0] for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)] if named else []
+    except OSError:
+        named = []
+    result = []
+    for value in named + _route_ipv4():
+        ip = ipaddress.IPv4Address(value)
+        if not (ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast) and value not in result:
+            result.append(value)
+    return result
+
+
 def find_server(code):
     """Bounded LAN fallback. Only bootstrap's commitment match is trusted."""
     import ipaddress
     from concurrent.futures import ThreadPoolExecutor, as_completed
     code = normalize(code)
-    networks = set()
-    for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-        ip = ipaddress.IPv4Address(item[4][0])
-        if not ip.is_loopback and not ip.is_link_local and not ip.is_unspecified:
-            networks.add(ipaddress.IPv4Network(str(ip) + '/24', strict=False))
+    networks = {ipaddress.IPv4Network(ip + '/24', strict=False) for ip in local_ipv4()}
     # ponytail: search only each local IPv4 /24, port 8443, at most 64 threads.
     def probe(host):
         try:

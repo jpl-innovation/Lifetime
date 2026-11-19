@@ -364,6 +364,22 @@ class ConnectTests(unittest.TestCase):
         with patch('lifetime_discovery.discover', return_value=[]), patch('lifetime_connection.find_server', return_value='fallback') as fallback:
             self.assertEqual(locate_server(self.code), 'fallback')
             fallback.assert_called_once_with(self.code)
+        # The announced name does not resolve here: the address the answer came from is used, through named_origin.
+        found = [dict(address='https://unknown-name:8443', source='192.0.2.7', port=8443)]
+        with patch('lifetime_discovery.discover', return_value=found), \
+                patch('lifetime_connection.bootstrap', side_effect=[OSError('no such name'), 'bundle']) as bootstrap, \
+                patch('lifetime_connection.named_origin', return_value='named') as named, \
+                patch('lifetime_connection.find_server') as fallback:
+            self.assertEqual(locate_server(self.code), 'named')
+            self.assertEqual(bootstrap.call_args.args[0], 'https://192.0.2.7:8443')
+            named.assert_called_once_with('bundle', '192.0.2.7', 8443, self.code)
+            fallback.assert_not_called()
+        # A connection line whose address does not resolve here falls back to the search by code.
+        with patch('lifetime_connection.bootstrap', side_effect=OSError('no such name')), \
+                patch('lifetime_discovery.discover', return_value=[]), \
+                patch('lifetime_connection.find_server', return_value='fallback') as fallback:
+            self.assertEqual(locate_server(connection_line('https://unknown-name:8443', self.code)), 'fallback')
+            fallback.assert_called_once_with(self.code)
 
     def test_crossfade_can_be_interrupted_and_reduce_motion_has_no_effect(self):
         self.page.show()
