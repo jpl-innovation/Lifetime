@@ -20,7 +20,7 @@ Devices lists every computer. The selected one shows its group, status, power bu
 
 Energy shows what the fleet's awake time costs in kWh and money, per computer and per group.
 
-Screenshots use demo data and show the next release (1.2.0).
+Screenshots use demo data and show release 1.2.0.
 
 
 ## Choose your edition
@@ -54,7 +54,7 @@ Every release also contains **SHA256SUMS.txt**. To check a download, run `sha256
 
 ### Windows 10 / 11 (no Python needed)
 
-1. Download **Lifetime-Windows.zip** and unzip it.
+1. Download **Lifetime-Windows.zip**. Before unzipping, right-click it, choose **Properties**, tick **Unblock** and click **OK** (otherwise Smart App Control blocks **Install Lifetime.cmd** itself). Then unzip it.
 2. Double-click **Install Lifetime.cmd**.
 3. Approve the Windows prompt (see "Why admin?" below) and open **Lifetime** from the Start menu.
 

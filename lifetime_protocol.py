@@ -7,7 +7,7 @@ import uuid
 from lifetime_identity import FIELDS as IDENTITY_FIELDS, normalize as normalize_identity
 
 VERSION = 1
-CLIENT_VERSION = '1.2.0'
+CLIENT_VERSION = '1.2.1'
 MAX_BYTES = 1024 * 1024
 MAX_RECORDS = 100
 

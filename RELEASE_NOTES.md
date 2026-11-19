@@ -1,3 +1,44 @@
+## Lifetime 1.2.1
+
+Fixes for connecting computers to a server, and a Windows Server install that needs no Python. Made by JPL Innovation.
+
+### Download
+
+- **Windows 10/11:** `Lifetime-Windows.zip` -> right-click it, **Properties**, tick **Unblock**, **OK** -> unzip ->
+  double-click **Install Lifetime.cmd**
+- **Linux (glibc 2.28 or newer, x86_64):** `Lifetime-Linux-x86_64.AppImage`, or `Lifetime-Linux-x86_64.tar.gz` ->
+  unpack -> `bash install_linux.sh`
+- **Lifetime Server for Windows:** `Lifetime-Server-Windows.zip` -> unzip -> double-click **Install Lifetime Server.cmd**
+- **Lifetime Server for Linux:** `Lifetime-Server-Linux-x86_64.tar.gz` or `-aarch64.tar.gz` -> unpack ->
+  `sudo ./install_server_linux.sh --admin "$USER"`, then allow 8443/tcp and 5353/udp from your local network
+
+Check your download against `SHA256SUMS.txt`. The 1.2.0 user guides (PDF) still apply.
+
+### What is fixed
+
+- **Computers can find a Linux server.** On Ubuntu and Debian a computer's name points to 127.0.1.1, so a Linux
+  computer's search for the server had no network to look in. It now uses the computer's real network address.
+- **A server whose name other computers cannot look up can still be used.** The server's certificate now also names
+  its own IP address, a server found on the network is used at the address it answered from, and a connection line
+  whose name does not resolve falls back to searching the network by code. If the server's IP address changes, its
+  certificate is renewed with the same key: connected computers carry on, and codes made before the change must be
+  made again.
+- **Windows Server without Python:** double-click **Install Lifetime Server.cmd**. It installs the ready-made server
+  program, uses the server's own IP address and starts the server. It warns when Windows has the network set to
+  Public, where port 8443 is blocked. Choose `-Mode SourceService` to keep the Python service.
+- **Linux server:** `--address` is no longer needed (the server's own IP is used); the firewall hint also allows
+  5353/udp so computers find the server by themselves.
+- **Connection codes:** the Connect page says that 0 or O both work (they always did; I and L count as 1).
+- **Smart App Control:** the download steps now say to unblock the zip before unzipping, because Smart App Control
+  blocks a downloaded **Install Lifetime.cmd** itself.
+
+**Upgrading a server:** on Windows, uninstall the old registration first (`uninstall_server_windows.ps1`; data is
+kept), then install. On Linux, run the new `install_server_linux.sh` over the old one. Make new connection codes after
+upgrading.
+
+**How this release was tested:** the full automated test suite on Windows Server 2022 and 2025 and Ubuntu with Python
+3.11 and 3.12, and the Linux packages in containers. The network fixes have not yet been tried between real computers.
+
 ## Lifetime 1.2.0
 
 Track how long your computers have really been awake, excluding sleep and hibernation, on Windows and now on Linux,
