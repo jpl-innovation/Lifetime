@@ -216,11 +216,38 @@ def _first_live_event():
         return None
 
 
+_ARCHIVES = {}     # path -> (size, modified, since, [(record, time, event)]): an archive never changes once written
+
+
+def _read_archive(path, since):
+    """[(record number, time, event)] of one archived log, read once while its size and date stay the same."""
+    info = os.stat(path)
+    key = (info.st_size, info.st_mtime_ns, since)
+    cached = _ARCHIVES.get(str(path))
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    result = subprocess.run(['wevtutil', 'qe', str(path), '/lf:true', f'/q:{power_query(since)}',
+                             '/f:xml', '/e:Events', '/uni:true'], capture_output=True, timeout=120)
+    if result.returncode:
+        message = result.stderr.decode('utf-16' if result.stderr.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8', errors='replace')
+        raise PermissionError(message) if result.returncode == 5 or 'denied' in message.lower() else OSError(message)
+    rows = []
+    for event in ET.fromstring(result.stdout):
+        system = event.find('{*}System')
+        rows.append((int(system.findtext('{*}EventRecordID') or len(rows)),
+                     _timestamp(system.find('{*}TimeCreated').get('SystemTime')), event))
+    rows.sort(key=lambda row: row[0])
+    _ARCHIVES[str(path)] = (key, rows)
+    return rows
+
+
 def archive_events(since=None, before=None, folder=None):
     """Power events from archived System logs (Archive-System-*.evtx, kept when IT sets the log to archive when full).
 
-    Returns (events in record order, info). Events at or after ``before`` (the live log's first event) are left to
-    the live log, and duplicate record numbers are read once, so copies never double a boot. Missing archives or
+    Returns (events, info). Order: archive by archive (their names carry the date they were saved), then by record
+    number inside each, because record numbers can start again after the log is cleared. Events at or after
+    ``before`` (the live log's first event) are left to the live log, and an event seen in two files is read once,
+    so copies never double a boot. Each archive is read once and kept while it is unchanged. Missing archives or
     denied access are reported in ``info['archive_note']``, never raised."""
     folder = Path(folder or Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'winevt' / 'Logs')
     try:
@@ -229,32 +256,23 @@ def archive_events(since=None, before=None, folder=None):
         return [], dict(archives=0, archive_note='denied')
     except OSError:
         return [], dict(archives=0, archive_note='none')
-    found, read, denied, failed = {}, 0, False, False
+    events, seen, read, denied, failed = [], set(), 0, False, False
     for name in names:
         try:
-            result = subprocess.run(['wevtutil', 'qe', str(folder / name), '/lf:true', f'/q:{power_query(since)}',
-                                     '/f:xml', '/e:Events', '/uni:true'], capture_output=True, timeout=120)
-        except (OSError, subprocess.SubprocessError):
+            rows = _read_archive(folder / name, since)
+        except PermissionError:
+            denied = failed = True
+            continue
+        except (OSError, subprocess.SubprocessError, ET.ParseError, AttributeError, TypeError, ValueError):
             failed = True
             continue
-        if result.returncode:
-            message = result.stderr.decode('utf-16' if result.stderr.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8', errors='replace')
-            denied = denied or result.returncode == 5 or 'denied' in message.lower()
-            failed = True
-            continue
-        try:
-            root = ET.fromstring(result.stdout)
-            for event in root:
-                system = event.find('{*}System')
-                stamp = _timestamp(system.find('{*}TimeCreated').get('SystemTime'))
-                if before is None or stamp < before:
-                    found[int(system.findtext('{*}EventRecordID') or len(found))] = event
-        except (ET.ParseError, AttributeError, TypeError, ValueError):
-            failed = True
-            continue
+        for record, stamp, event in rows:
+            if (before is None or stamp < before) and (record, stamp) not in seen:
+                seen.add((record, stamp))
+                events.append(event)
         read += 1
     note = 'read' if read else 'denied' if denied else 'error' if failed else 'none'
-    return [found[key] for key in sorted(found)], dict(archives=read, archive_note=note)
+    return events, dict(archives=read, archive_note=note)
 
 
 def _query_system(extras=None, query=None, before=()):

@@ -399,6 +399,27 @@ class DeeperImportTests(unittest.TestCase):
         self.assertEqual(len(boots), 2)
         self.assertTrue(all(b['clean'] for b in boots))
 
+    def test_archives_are_read_once_and_ordered_by_file_when_record_numbers_restart(self):
+        folder = Path(tempfile.mkdtemp())
+        for name in ('Archive-System-2026-01-01.evtx', 'Archive-System-2026-03-01.evtx'):
+            (folder / name).write_bytes(b'x')
+        start = lambda when, record: self.record('Microsoft-Windows-Kernel-General', 12, when, record)
+        stop = lambda when, record: self.record('Microsoft-Windows-Kernel-General', 13, when, record)
+        outputs = {'Archive-System-2026-01-01.evtx': (0, '<Events>' + start('2026-01-02T08:00:00Z', 100) + stop('2026-01-02T18:00:00Z', 101) + '</Events>'),
+                   # the log was cleared in between: numbering starts again
+                   'Archive-System-2026-03-01.evtx': (0, '<Events>' + start('2026-03-02T08:00:00Z', 5) + stop('2026-03-02T09:00:00Z', 6) + '</Events>')}
+        with patch.object(windows.subprocess, 'run', side_effect=self.fake_wevtutil(outputs)) as run:
+            events, info = windows.archive_events(folder=folder)
+            self.assertEqual([int(e.find('{*}System/{*}EventRecordID').text) for e in events], [100, 101, 5, 6])
+            again, _ = windows.archive_events(folder=folder)
+            self.assertEqual(run.call_count, 2)                    # unchanged archives are not read again
+            (folder / 'Archive-System-2026-03-01.evtx').write_bytes(b'changed')
+            windows.archive_events(folder=folder)
+            self.assertEqual(run.call_count, 3)
+        self.assertEqual(len(again), 4)
+        boots, _ = windows._parse_events(iter(events))
+        self.assertEqual([b['clean'] for b in boots], [True, True])
+
     def test_archives_absent_or_denied_never_fail(self):
         empty = Path(tempfile.mkdtemp())
         self.assertEqual(windows.archive_events(folder=empty), ([], dict(archives=0, archive_note='none')))
