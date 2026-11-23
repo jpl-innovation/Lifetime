@@ -17,7 +17,7 @@ $packageTarget = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'package'))
 if ($packageTarget -ne [IO.Path]::GetFullPath((Join-Path (Get-Location).Path 'package'))) { throw 'Run this build from its repository directory.' }
 Remove-Item -LiteralPath $packageTarget -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path package | Out-Null
-Copy-Item dist\Lifetime.exe, dist\LifetimeTracker.exe, dist\LifetimeImport.exe, dist\LifetimeAgent.exe, install_agent_windows.ps1, uninstall_agent_windows.ps1, install_windows_exe.ps1, install_windows_common.ps1, `
+Copy-Item dist\Lifetime.exe, dist\LifetimeTracker.exe, dist\LifetimeImport.exe, dist\LifetimeAgent.exe, install_agent_windows.ps1, uninstall_agent_windows.ps1, uninstall_windows.ps1, install_windows_exe.ps1, install_windows_common.ps1, `
     install_windows.ps1, install_windows_auto.ps1, 'Install Lifetime.cmd' package\ -Force
 # The Python sources too: when Smart App Control blocks the unsigned .exe files, the installer falls back to these.
 Copy-Item lifetime_*.py package\ -Force

@@ -44,7 +44,7 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $Written = @($InstallDir)      # exactly what this run created or replaced; nothing else is touched afterwards
 if ($ExePackage) {
     $Names = @('Lifetime.exe', 'LifetimeTracker.exe', 'LifetimeImport.exe', 'LifetimeAgent.exe',
-               'install_agent_windows.ps1', 'uninstall_agent_windows.ps1')
+               'install_agent_windows.ps1', 'uninstall_agent_windows.ps1', 'uninstall_windows.ps1')
     # Installing over an earlier version: Windows cannot replace a program while it runs, so close this
     # installation's own programs first (never another copy elsewhere). The ledger is saved by atomic replacement,
     # so nothing recorded is lost; the tracker is started again below when it starts at login.
@@ -60,7 +60,7 @@ if ($ExePackage) {
                'lifetime_settings.py', 'lifetime_setup.py', 'lifetime_import.py', 'lifetime_import_windows.py',
                'lifetime_charts.py', 'lifetime_daily.py', 'lifetime_i18n.py', 'lifetime_i18n_qt.py',
                'lifetime_reports.py', 'lifetime_technician.py', 'lifetime_ledger.py', 'lifetime_identity.py', 'lifetime_theme.py',
-               'lifetime_tasks.py', 'lifetime_company.py', 'lifetime_connect.py', 'lifetime_agent.py', 'lifetime_live.py', 'lifetime_reveal.py', 'lifetime_glass.py', 'lifetime_widgets_dashboard.py', 'lifetime_insights.py', 'lifetime_insights_gui.py', 'lifetime_ws.py', 'lifetime_ws_client.py', 'lifetime_client.py', 'lifetime_protocol.py', 'lifetime_tls.py', 'lifetime_permissions.py', 'lifetime_connection.py', 'lifetime_discovery.py', 'lifetime_updates.py')
+               'lifetime_tasks.py', 'lifetime_company.py', 'lifetime_connect.py', 'lifetime_agent.py', 'lifetime_live.py', 'lifetime_reveal.py', 'lifetime_glass.py', 'lifetime_widgets_dashboard.py', 'lifetime_insights.py', 'lifetime_insights_gui.py', 'lifetime_ws.py', 'lifetime_ws_client.py', 'lifetime_client.py', 'lifetime_protocol.py', 'lifetime_tls.py', 'lifetime_permissions.py', 'lifetime_connection.py', 'lifetime_discovery.py', 'lifetime_updates.py', 'uninstall_windows.ps1')
 }
 foreach ($Name in $Names) {
     $Source = Join-Path $PSScriptRoot $Name
@@ -92,6 +92,7 @@ if ($ExePackage) {
     $Tracker = Join-Path $InstallDir 'lifetime_tracker.py'
     $TaskAction = New-ScheduledTaskAction -Execute $OriginalPython -Argument "`"$Tracker`" --run" -WorkingDirectory $InstallDir
 }
+try { $Sid = ([Security.Principal.NTAccount]::new($OriginalUser)).Translate([Security.Principal.SecurityIdentifier]).Value } catch { $Sid = $null }
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $OriginalUser
 $Principal = New-ScheduledTaskPrincipal -UserId $OriginalUser -LogonType Interactive -RunLevel Limited
 $TaskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -102,7 +103,6 @@ try {
     if ($Admin) {
         # Alternate admin credentials must not leave the original user unable
         # to enable, disable or replace their own task from Settings.
-        $Sid = ([Security.Principal.NTAccount]::new($OriginalUser)).Translate([Security.Principal.SecurityIdentifier]).Value
         $Scheduler = New-Object -ComObject Schedule.Service
         $Scheduler.Connect()
         $Registered = $Scheduler.GetFolder('\').GetTask('Lifetime Tracker')
@@ -136,6 +136,22 @@ if ($ExePackage) {
 $Shortcut.WorkingDirectory = $InstallDir
 $Shortcut.Description = 'Total computer awake time'
 $Shortcut.Save()
+# Windows "Installed apps" entry, pointing to the uninstaller. Written to the signed-in user's own registry (HKEY_USERS
+# by their SID) because HKCU is the approving administrator's when another account approved this installer.
+try {
+    if (-not $Sid) { throw 'The account could not be identified.' }
+    $Entry = "Registry::HKEY_USERS\$Sid\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lifetime"
+    $Uninstaller = Join-Path $InstallDir 'uninstall_windows.ps1'
+    $Version = Select-String -LiteralPath (Join-Path $PSScriptRoot 'lifetime_reports.py') -Pattern "^VERSION = '([0-9A-Za-z.+-]+)'" |
+        Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value }
+    New-Item -Path $Entry -Force | Out-Null
+    $Values = [ordered]@{ DisplayName = 'Lifetime'; DisplayVersion = [string]$Version; Publisher = 'JPL Innovation'
+        DisplayIcon = $(if ($ExePackage) { $Gui } else { Join-Path $InstallDir 'assets\lifetime.ico' })
+        InstallLocation = $InstallDir
+        UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Uninstaller`" -Pause" }
+    foreach ($Name in $Values.Keys) { New-ItemProperty -Path $Entry -Name $Name -Value $Values[$Name] -PropertyType String -Force | Out-Null }
+    foreach ($Name in @('NoModify', 'NoRepair')) { New-ItemProperty -Path $Entry -Name $Name -Value 1 -PropertyType DWord -Force | Out-Null }
+} catch { Write-Host "Lifetime is not listed in Installed apps. To uninstall it, run uninstall_windows.ps1 in $InstallDir." }
 if ($Admin) {
     $Owner = [Security.Principal.NTAccount]::new($OriginalUser)
     # Hand back only the folder, the files written above and the shortcut. Walking the whole folder while elevated

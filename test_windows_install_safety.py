@@ -211,5 +211,98 @@ class InstallerScriptTests(unittest.TestCase):
                 (root / 'link').rmdir()
 
 
+class UninstallerTests(unittest.TestCase):
+    """uninstall_windows.ps1 removes the per-user install and, unless asked, never the awake-time history."""
+    text = (PROJECT / 'uninstall_windows.ps1').read_text(encoding='utf-8').replace('\r\n', '\n')
+    install = (PROJECT / 'install_windows_common.ps1').read_text(encoding='utf-8').replace('\r\n', '\n')
+
+    def function(self, name):
+        return re.search(r'function ' + name + r'\b.*?\n}\n', self.text, re.S).group(0)
+
+    def test_links_are_refused_and_this_installation_is_closed_before_anything_is_removed(self):
+        self.assertLess(self.text.index('Assert-NotLinked $InstallDir'), self.text.index('Stop-Process'))
+        self.assertLess(self.text.index('Assert-NotLinked $InstallDir'), self.text.index('Unregister-ScheduledTask'))
+        # The same filter as the installer: only programs in this installation's folder, never another copy.
+        for text in (self.text, self.install):
+            self.assertIn('[IO.Path]::GetDirectoryName($_.Path) -eq $InstallDir', text)
+        self.assertLess(self.text.index('Stop-Process'), self.text.index('Remove-Folder $InstallDir'))
+        # The folders are removed only by Remove-Folder, after its link checks.
+        remove = self.function('Remove-Folder')
+        self.assertLess(remove.index('Assert-NotLinked $Path'), remove.index('Remove-Item'))
+        self.assertLess(remove.index('-Attributes ReparsePoint'), remove.index('Remove-Item'))
+        self.assertEqual(re.findall(r'Remove-Item -LiteralPath (\$\w+) -Recurse', self.text), ['$Path', '$Entry'])
+        # The task and the tray entry only when they run this installation.
+        task = self.text[self.text.index('$Task = Get-ScheduledTask'):self.text.index('Unregister-ScheduledTask')]
+        self.assertIn('Test-Ours $_.Execute', task)
+        self.assertIn('if (Test-Ours $Value) { Remove-ItemProperty', self.text)
+
+    def test_the_history_is_deleted_only_with_remove_data_and_the_machine_agent_is_explained(self):
+        self.assertEqual(self.text.count('Remove-Folder $DataDir'), 1)
+        removal = self.text.index('Remove-Folder $DataDir')
+        self.assertLess(self.text.index('if ($RemoveData) {\n'), removal)
+        self.assertLess(removal, self.text.index('} elseif (Test-Path -LiteralPath $DataDir)'))
+        self.assertIn('if ($RemoveData) { Assert-NotLinked $DataDir }', self.text)
+        self.assertIn("$DataDir = Join-Path $env:APPDATA 'Lifetime'", self.text)
+        self.assertIn("$InstallDir = Join-Path $env:LOCALAPPDATA 'Lifetime'", self.text)
+        self.assertIn('uninstall_agent_windows.ps1 from an elevated PowerShell', self.text)
+        self.assertNotIn('RunAs', self.text)       # a per-user uninstall needs no administrator
+
+    def test_the_installer_ships_it_and_lists_lifetime_in_installed_apps_for_the_signed_in_user(self):
+        self.assertEqual(self.install.count(", 'uninstall_windows.ps1')"), 2)       # the .exe and the Python version
+        self.assertIn('uninstall_windows.ps1', (PROJECT / 'build_windows.ps1').read_text(encoding='utf-8'))
+        entry = self.install[self.install.index('# Windows "Installed apps" entry'):self.install.index('if ($Admin) {\n    $Owner')]
+        # HKCU would be the approving administrator's registry: the entry goes to the signed-in user's hive.
+        self.assertIn('"Registry::HKEY_USERS\\$Sid\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Lifetime"', entry)
+        self.assertNotIn('HKCU:', self.install)
+        self.assertIn('UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Uninstaller`" -Pause"', entry)
+        self.assertIn("$Uninstaller = Join-Path $InstallDir 'uninstall_windows.ps1'", entry)
+        self.assertIn("Publisher = 'JPL Innovation'", entry)
+        self.assertLess(self.install.index('$Sid = '), self.install.index('$Registered.SetSecurityDescriptor'))
+
+    @WINDOWS
+    def test_the_folder_removal_refuses_links_and_leaves_their_targets_alone(self):
+        script = "$ErrorActionPreference='Stop'; " + self.function('Assert-NotLinked') + self.function('Remove-Folder')
+        quote = connect._ps_quote
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            elsewhere = root / 'elsewhere'
+            elsewhere.mkdir()
+            (elsewhere / 'keep.txt').write_text('history')
+            plain = root / 'plain'
+            (plain / 'assets').mkdir(parents=True)
+            (plain / 'assets' / 'lifetime.ico').write_text('x')
+            result = powershell(script + '; Remove-Folder ' + quote(plain))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(plain.exists())
+            self.assertEqual(powershell(script + '; Remove-Folder ' + quote(root / 'missing')).returncode, 0)
+            holding = root / 'holding'
+            holding.mkdir()
+            (holding / 'file.txt').write_text('x')
+            junction(holding / 'link', elsewhere)
+            linked = root / 'linked'
+            junction(linked, elsewhere)
+            try:
+                for path in (holding, linked):
+                    result = powershell(script + '; Remove-Folder ' + quote(path))
+                    self.assertNotEqual(result.returncode, 0, path)
+                    self.assertIn('link or junction', result.stderr)
+                    self.assertTrue((elsewhere / 'keep.txt').exists())
+                self.assertTrue((holding / 'file.txt').exists())        # refused before anything was removed
+            finally:
+                (holding / 'link').rmdir()
+                linked.rmdir()
+
+    @WINDOWS
+    def test_only_this_installations_folder_counts_as_ours(self):
+        script = "$InstallDir = 'C:\\Users\\A\\AppData\\Local\\Lifetime'; " + self.function('Test-Ours')
+        cases = {'"C:\\Users\\A\\AppData\\Local\\Lifetime\\LifetimeTracker.exe" --run': True,
+                 'pythonw.exe "c:\\users\\a\\appdata\\local\\lifetime\\lifetime_gui.py" --tray': True,
+                 'C:\\Users\\A\\AppData\\Local\\Lifetime2\\LifetimeTracker.exe': False,
+                 'C:\\Other\\Lifetime.exe': False, '': False}
+        for text, ours in cases.items():
+            result = powershell(script + '; if (Test-Ours ' + connect._ps_quote(text) + ') { "yes" } else { "no" }')
+            self.assertEqual(result.stdout.strip(), 'yes' if ours else 'no', (text, result.stderr))
+
+
 if __name__ == '__main__':
     unittest.main()
