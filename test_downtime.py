@@ -473,5 +473,79 @@ class DeeperImportTests(unittest.TestCase):
         self.assertEqual(result['days']['2026-11-03']['unexpected_stops'], 1)      # the crash record
 
 
+class SendingTests(unittest.TestCase):
+    """Client side only: what a connected computer adds to history, and when."""
+    NOW = dt.datetime.now().timestamp()
+
+    def state(self, history=True, days=3):
+        today = dt.date.today()
+        ledger = tracker.new_ledger()
+        ledger['daily'] = {(today - dt.timedelta(days=i)).isoformat(): 3600.0 for i in range(1, days + 1)}
+        ledger['downtime_daily'] = {(today - dt.timedelta(days=i)).isoformat(): entry(asleep_s=3600, off_s=3600, unknown_s=1000, restarts=1)
+                                    for i in range(1, days + 1)}
+        return dict(policy=dict(history=history, resources=False), ledger=ledger)
+
+    @staticmethod
+    def message():
+        return dict(version=1, device_id='d', policy_version=1, policy=dict(history=True, resources=False), records=[],
+                    history=dict(daily={}, imported_daily={}, first_seen=None, first_seen_source='unknown',
+                                 recording_started=None, daily_estimated=False))
+
+    def test_only_for_a_server_that_advertises_downtime_and_only_with_history_sharing(self):
+        from lifetime_client import add_downtime
+        import lifetime_protocol as protocol
+        message = self.message()
+        self.assertIs(add_downtime(message, self.state(), ['history.detail', 'health.detail']), message)
+        self.assertIs(add_downtime(message, self.state(), []), message)
+        self.assertIs(add_downtime(message, self.state(history=False), ['downtime']), message)
+        without_history = {k: v for k, v in message.items() if k != 'history'}
+        self.assertIs(add_downtime(without_history, self.state(), ['downtime']), without_history)
+        sent = add_downtime(message, self.state(), ['downtime', 'history.detail'])
+        days = sent['history']['downtime_daily']
+        self.assertEqual(len(days), 3)
+        self.assertEqual(downtime.problems(days), [])
+        self.assertTrue(all(set(day) == set(downtime.FIELDS) for day in days.values()))
+        # unknown is re-settled against the day's awake time before sending: 24 h minus 1 h awake, 1 h asleep, 1 h off
+        self.assertEqual(next(iter(days.values()))['unknown_s'], 86400 - 3 * 3600)
+        self.assertNotIn('downtime_daily', message['history'])         # the original message is unchanged
+        # An old server never gets it, even through the existing optional-part filter.
+        self.assertNotIn('downtime_daily', protocol.without_extended(add_downtime(message, self.state(), []))['history'])
+
+    def test_stays_under_the_transport_limit_by_dropping_oldest_days(self):
+        from lifetime_client import add_downtime
+        import lifetime_protocol as protocol
+        message = self.message()
+        message['history']['padding'] = 'x' * (protocol.MAX_BYTES - 200000)
+        sent = add_downtime(message, self.state(days=3600), ['downtime'])
+        days = sent['history']['downtime_daily']
+        self.assertLess(len(days), 3600)
+        self.assertLessEqual(len(protocol.canonical(sent)), protocol.MAX_BYTES)
+        self.assertEqual(max(days), (dt.date.today() - dt.timedelta(days=1)).isoformat())   # newest days are kept
+
+    def test_machine_agent_keeps_downtime_in_its_own_ledger_without_breaking_its_outbox(self):
+        import lifetime_agent as agent
+        import lifetime_protocol as protocol
+        root = Path(tempfile.mkdtemp()) / 'machine'
+        with patch.object(agent, 'protect_root'):
+            machine = agent.MachineAgent.initialize(root)
+        self.addCleanup(machine.close)
+        machine.set_policy(dict(history=True, resources=False))
+        found = ([boot('2026-11-18T08:00', '2026-11-18T20:00', sleeps=[('2026-11-18T12:00', '2026-11-18T13:00')]),
+                  boot('2026-11-19T08:00', '2026-11-20T12:00')], {}, dict(log='windows-log'), at('2026-11-20T12:00'))
+        machine.power_reader = lambda since: found
+        stamp = lambda tick: (dt.datetime(2026, 11, 20, 5, tzinfo=UTC) + dt.timedelta(seconds=tick)).isoformat()
+        machine.sample(100, 'boot-a', stamp(100))
+        machine._power_job.result(timeout=5)
+        machine.sample(130, 'boot-a', stamp(130))
+        ledger = machine.ledger()
+        self.assertEqual(ledger['downtime_daily']['2026-11-18']['asleep_s'], 3600)
+        self.assertNotIn('downtime_daily', machine.batch()['history'])      # the outbox format is unchanged (validated)
+        protocol.validate_sync(machine.batch())
+        machine.set_policy(dict(history=False, resources=False))
+        self.assertNotIn('downtime_daily', machine.ledger())
+        self.assertNotIn('downtime_sources', machine.ledger())
+        self.assertIsNone(agent.MachineAgent.power_reader)       # off unless the reporting loop runs
+
+
 if __name__ == '__main__':
     unittest.main()
