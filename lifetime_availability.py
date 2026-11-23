@@ -33,24 +33,51 @@ def _merge(intervals):
 
 
 def _intersect(first, second):
-    """Both merged and sorted. ponytail: O(n*m), fine for one computer's month; sweep if it ever shows up."""
-    return [(max(a, c), min(b, d)) for a, b in first for c, d in second if max(a, c) < min(b, d)]
+    """Both merged and sorted: one sweep, O(n+m) (a fleet's years of presence, not just one computer's month)."""
+    result, i, j = [], 0, 0
+    while i < len(first) and j < len(second):
+        start, end = max(first[i][0], second[j][0]), min(first[i][1], second[j][1])
+        if start < end:
+            result.append((start, end))
+        if first[i][1] < second[j][1]:
+            i += 1
+        else:
+            j += 1
+    return result
 
 
 def _subtract(first, second):
-    result = []
+    """``first`` minus ``second``, both merged and sorted: one sweep."""
+    result, j = [], 0
     for start, end in first:
-        for cut_start, cut_end in second:
-            if cut_end <= start or cut_start >= end:
-                continue
-            if cut_start > start:
-                result.append((start, cut_start))
-            start = max(start, cut_end)
+        while j < len(second) and second[j][1] <= start:
+            j += 1
+        k = j
+        while k < len(second) and second[k][0] < end:
+            if second[k][0] > start:
+                result.append((start, second[k][0]))
+            start = max(start, second[k][1])
             if start >= end:
                 break
+            k += 1
         if start < end:
             result.append((start, end))
     return result
+
+
+def _spread(intervals, edges):
+    """Seconds of sorted, non-overlapping ``intervals`` inside each [edges[i], edges[i+1]) (edges ascending)."""
+    totals, k = [0.0] * (len(edges) - 1), 0
+    for start, end in intervals:
+        while k < len(totals) and edges[k + 1] <= start:
+            k += 1
+        m = k
+        while m < len(totals) and edges[m] < end:
+            low, high = max(start, edges[m]), min(end, edges[m + 1])
+            if low < high:
+                totals[m] += (high - low).total_seconds()
+            m += 1
+    return totals
 
 
 def _seconds(intervals):
@@ -128,25 +155,57 @@ def summarise(totals, floor=DEFAULT_FLOOR):
                 status=status, coverage_floor=floor)
 
 
+def outages(counted, offline):
+    """(number, longest seconds) of outages: one merged offline interval that overlaps expected-online (counted) time
+    is one outage, and its length is the expected-online time it covers. Unknown time is never an outage."""
+    lengths, j = [], 0
+    for start, end in offline:
+        while j < len(counted) and counted[j][1] <= start:
+            j += 1
+        k, seconds = j, 0.0
+        while k < len(counted) and counted[k][0] < end:
+            seconds += (min(end, counted[k][1]) - max(start, counted[k][0])).total_seconds()
+            k += 1
+        if seconds > 0:
+            lengths.append(seconds)
+    return len(lengths), round(max(lengths, default=0))
+
+
 def device_availability(presence, schedule, laptop, maintenance, first_day, last_day, zone, now, floor=DEFAULT_FLOOR,
-                        daily=True, since=None):
+                        daily=True, since=None, spans=None):
     """One computer over local days first_day..last_day (inclusive) in ``zone``. ``presence``: (state, start, end)
     with UTC datetimes, ``maintenance``: UTC (start, end) pairs that apply to it. Time after ``now`` is not counted,
-    nor time before ``since`` (for "everything kept": from the first record, not from that day's midnight)."""
+    nor time before ``since`` (for "everything kept": from the first record, not from that day's midnight).
+    The same seconds as ``classify`` per day, in one sweep over the whole period. With ``spans`` (consecutive
+    inclusive (first, last) dates covering the period, lifetime_uptime.buckets) the seconds of each span are
+    ``spans_s`` [[good, bad, unknown, excluded]] instead of per day, without building a day at a time."""
     start, end = local_midnight(first_day, zone), min(local_midnight(last_day + dt.timedelta(days=1), zone), now)
     start = max(start, since) if since else start
     windows = schedule_windows(schedule, laptop, start, end, zone) if start < end else []
     states, cuts = normalize(presence, now), _merge(maintenance)
-    days, totals, day = [], dict.fromkeys(FIELDS, 0.0), first_day
-    while day <= last_day:
-        part = classify(windows, states, cuts, max(start, local_midnight(day, zone)),
-                        min(end, local_midnight(day + dt.timedelta(days=1), zone)))
+    starts = [first for first, _ in spans] if spans else [first_day + dt.timedelta(days=i) for i in range((last_day - first_day).days + 1)]
+    count = len(starts)
+    edges = [min(max(local_midnight(day, zone), start), max(start, end))
+             for day in (*starts, last_day + dt.timedelta(days=1))]
+    scheduled = _intersect(windows, [(start, end)]) if start < end else []
+    counted = _subtract(scheduled, cuts)
+    good, bad = _spread(_intersect(counted, states['online']), edges), _spread(_intersect(counted, states['offline']), edges)
+    expected, excluded = _spread(counted, edges), _spread(_intersect(scheduled, cuts), edges)
+    days, totals = [], dict.fromkeys(FIELDS, 0.0)
+    for index in range(count):
+        part = dict(good_s=good[index], bad_s=bad[index], unknown_s=max(0.0, expected[index] - good[index] - bad[index]),
+                    excluded_s=excluded[index])
         for key in FIELDS:
             totals[key] += part[key]
-        if daily:
-            days.append(dict(date=day.isoformat(), **{key: round(value) for key, value in part.items()}))
-        day += dt.timedelta(days=1)
-    return dict(summarise(totals, floor), daily=days)
+        if spans:
+            days.append([part[key] for key in FIELDS])
+        elif daily:
+            days.append(dict(date=starts[index].isoformat(), **{key: round(value) for key, value in part.items()}))
+    number, longest = outages(counted, states['offline'])
+    result = dict(summarise(totals, floor), daily=[] if spans else days, outages=number, longest_outage_s=longest)
+    if spans:
+        result['spans_s'] = days
+    return result
 
 
 def combine(results, floor=DEFAULT_FLOOR):

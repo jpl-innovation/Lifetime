@@ -34,6 +34,7 @@ from lifetime_tls import encode_bundle
 from lifetime_connection import CHECK_WORDS, check_lines, log_tail, report
 from lifetime_server_insights import InsightsUI
 from lifetime_server_alerts import AlertsUI
+from lifetime_server_uptime import UptimeUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, GroupField, DeviceDetailsDialog, GroupsDialog, local_expiry, reduced_motion, table_action
 from lifetime_reveal import RollLabel, fade_in, later, warm_pages
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, problems, byte_text, Skeleton,
@@ -45,6 +46,10 @@ from lifetime_widgets_dashboard import VISUAL_ROLE, CapacityBar, EmptyState, Eve
 from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
+RETAIN_CONFIRM = ('Delete everything recorded before this date permanently? This removes, from before the date: usage '
+                  'records, daily awake and off-time totals, readings, monitoring history, resolved incidents, sent '
+                  'alerts, maintenance windows and daily readings. It keeps each computer\'s latest totals (with their '
+                  'original time), open incidents and everything from the date on. This cannot be undone.')
 THEME_KEYS = ('auto', 'light', 'dark')
 # Why a computer's last report failed (its own category, or what the server saw), for the device detail.
 PROBLEM_TEXT = {'certificate': 'Server certificate not trusted', 'expired': 'Certificate out of date or wrong clock',
@@ -344,6 +349,7 @@ class ServerWindow(QMainWindow):
         self._kpi_alerts = set()
         self._open_after_load = None
         self.access_ui = AccessUI(self)      # what the signed-in Windows account's role may do
+        self.uptime = UptimeUI(self)        # date ranges, uptime and downtime, fleet uptime bars, detail retention
         self._make_overview()
         self._make_devices()
         self.alerts = AlertsUI(self)        # the Incidents page, the header alert badge and the alert settings
@@ -376,7 +382,7 @@ class ServerWindow(QMainWindow):
         self.fleet_search.textChanged.connect(self._fleet_filters_changed)
         self.fleet_group.currentIndexChanged.connect(self._fleet_filters_changed)
         self.fleet_date.dateChanged.connect(self._fleet_filters_changed)
-        self.chart_range.currentIndexChanged.connect(self._fleet_filters_changed)
+        self.fleet_range.changed.connect(self._fleet_filters_changed)
         self.fleet_table.horizontalHeader().sortIndicatorChanged.connect(self._fleet_filters_changed)
         self.table.horizontalHeader().sortIndicatorChanged.connect(self._device_sort_changed)
         self.search.textChanged.connect(self._filters_changed)
@@ -574,14 +580,14 @@ class ServerWindow(QMainWindow):
         title = self.label('Daily awake hours')
         title.setObjectName('sectionTitle')
         chart_header.addWidget(title, 1)
-        self.chart_range = QComboBox()
-        self.chart_range.addItem('', 7)
-        self.chart_range.addItem('', 30)
-        self.chart_range.setAccessibleName(self.t('Chart range'))
-        chart_header.addWidget(self.chart_range)
+        self.fleet_range = self.uptime.range_control('7d')      # the period of the fleet totals (lifetime_server_uptime)
+        chart_header.addWidget(self.fleet_range)
         chart_layout.addLayout(chart_header)
         self.daily_chart = DailyChart()
         chart_layout.addWidget(self.daily_chart)
+        self.fleet_range_total = QLabel()
+        self.fleet_range_total.setWordWrap(True)
+        chart_layout.addWidget(self.fleet_range_total)
         note = self.label("Known daily contributions only · each computer's local dates")
         note.setObjectName('muted')
         chart_layout.addWidget(note)
@@ -622,6 +628,7 @@ class ServerWindow(QMainWindow):
         left.addWidget(self.state_strip)
         left.addWidget(self.chart_panel)
         left.addWidget(self.fleet_panel)
+        left.addWidget(self.uptime.fleet_bars_panel())       # one row of daily availability bars per computer
         left.addStretch()
         right = QVBoxLayout(self.overview_right)
         right.setContentsMargins(0, 0, 0, 0)
@@ -890,12 +897,9 @@ class ServerWindow(QMainWindow):
         daily_title = self.label('Awake time per day')
         daily_title.setStyleSheet('font-size:18px; font-weight:600;')
         daily_header.addWidget(daily_title, 1)
-        self.daily_range = QComboBox()
-        self.daily_range.addItem(self.t('14 days'), 14)
-        self.daily_range.addItem(self.t('30 days'), 30)
-        self.daily_range.setAccessibleName(self.t('Awake time per day'))
-        self.daily_range.currentIndexChanged.connect(lambda: self._render_daily(self._detail) if self._detail else None)
-        daily_header.addWidget(self.daily_range)
+        self.detail_range = self.uptime.range_control('30d')     # this computer's period (lifetime_server_uptime)
+        self.detail_range.changed.connect(lambda: self._render_daily(self._detail) if self._detail else None)
+        daily_header.addWidget(self.detail_range)
         detail_layout.addLayout(daily_header)
         self.device_daily = Plot('daily', 'h')      # the desktop's Overview bars, for this computer
         self.device_daily.setFixedHeight(170)
@@ -905,6 +909,7 @@ class ServerWindow(QMainWindow):
         self.daily_summary.setObjectName('muted')
         self.daily_summary.setWordWrap(True)
         detail_layout.addWidget(self.daily_summary)
+        self.uptime.device_section(detail_layout)     # uptime and downtime for the same period
         # The desktop's own Activity and Health pages, fed with what this computer reported.
         self.hardware_detail = HardwarePanel(remote=True)
         detail_layout.addWidget(self.hardware_detail)
@@ -1654,6 +1659,7 @@ class ServerWindow(QMainWindow):
         self.retention_boundary.setWordWrap(True)
         form.addRow(self.retention_boundary)
         self.retention_date = QDateEdit(QDate.currentDate())
+        self.retention_date.setMaximumDate(QDate.currentDate())     # the server refuses a boundary in the future
         self.retention_date.setMinimumWidth(190)
         self.retention_date.setCalendarPopup(True)
         self.retention_date.setDisplayFormat('d MMM yyyy')
@@ -1664,6 +1670,7 @@ class ServerWindow(QMainWindow):
         retention_row.addWidget(self.retain_button)
         retention_row.addStretch()
         form.addRow(self.label('Delete records before (UTC)'), retention_row)
+        self.uptime.retention_rows(form)
         self.admin_layout.addWidget(retention)
         about, about_layout = self._section('About')
         credit = QHBoxLayout()
@@ -1888,6 +1895,7 @@ class ServerWindow(QMainWindow):
             self.tabs.setTabText(index, self.t(key))
         self.alerts.retranslate()
         self.insights.retranslate()
+        self.uptime.retranslate()
         self.access_ui.retranslate()
         for index, key in enumerate(('All statuses', 'Pending approval', 'Approved', 'Denied', 'Disconnected', 'Connected', 'Offline', 'Unavailable')):
             self.status_filter.setItemText(index, self.t(key))
@@ -1898,8 +1906,6 @@ class ServerWindow(QMainWindow):
         self.fleet_table.setHorizontalHeaderLabels([self.t(key) for key in ('Device', 'Group', 'Status', 'Awake today', 'Last seen')])
         # The duration column is right-aligned, so its heading must be too.
         self.fleet_table.horizontalHeaderItem(3).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        for index, key in enumerate(('Last 7 days', 'Last 30 days')):
-            self.chart_range.setItemText(index, self.t(key))
         self.invitation_table.setHorizontalHeaderLabels([self.t(key) for key in ('Invitation', 'Expires', 'Uses left', 'Wrong guesses', 'Status', 'Actions')])
         self.admin_pending.setHorizontalHeaderLabels([self.t('Device'), self.t('Awaiting approval'), '', ''])
         self.server_log.setAccessibleName(self.t('Server log'))
@@ -2078,6 +2084,8 @@ class ServerWindow(QMainWindow):
         self._configuration_busy = True
         if not self._submit(lambda: client.call('configuration'), self._configuration_finished):
             self._configuration_busy = False
+        else:
+            self.uptime.load_retention()
 
     def _configuration_finished(self, result, success):
         self._configuration_busy = False
@@ -2420,23 +2428,8 @@ class ServerWindow(QMainWindow):
         self._fit_detail_text()
 
     def _render_daily(self, device):
-        """Awake hours per local day from the history the computer already reports; missing days stay empty."""
-        allowed = (device.get('policy') or {}).get('history') is True
-        daily = ((device.get('history') or {}).get('daily') or {}) if allowed else {}
-        today = dt.date.today()
-        days = [today - dt.timedelta(days=i) for i in reversed(range(self.daily_range.currentData() or 14))]
-        values = [daily[d.isoformat()] / 3600 if isinstance(daily.get(d.isoformat()), (int, float)) else None for d in days]
-        recorded = [(v, d) for v, d in zip(values, days) if v is not None]
-        message = '' if recorded else self.t('No awake time recorded yet' if allowed else 'History is off on this computer')
-        self.device_daily.set_data([d.isoformat() for d in days], values, dates=days, message=message)
-        if recorded:
-            longest, day = max(recorded, key=lambda pair: pair[0])
-            average = sum(v for v, _ in recorded) / len(recorded)
-            self.daily_summary.setText(self.t('Average {average} a day · longest day {longest} on {day}',
-                                              average=self.t('{hours} h', hours=f'{average:.1f}'),
-                                              longest=self.t('{hours} h', hours=f'{longest:.1f}'),
-                                              day=self._date(day.isoformat(), year=False)))
-        self.daily_summary.setVisible(bool(recorded))
+        """Awake hours per local day for the chosen period; missing days stay empty."""
+        self.uptime.render_awake(device)
 
     def _render_remote(self, device):
         """Rebuild the inputs the desktop pages read from its local ledger and probes."""
@@ -2700,7 +2693,8 @@ class ServerWindow(QMainWindow):
             self._mutate('set_configuration', dict(reporting_interval=self.interval.value()), self.interval_button)
 
     def apply_retention(self):
-        if self._confirm('Delete older records permanently? Latest totals remain, with their original timestamps.'):
+        self.retention_date.setMaximumDate(QDate.currentDate())
+        if self._confirm(RETAIN_CONFIRM):
             before = self.retention_date.date().toString('yyyy-MM-dd') + 'T00:00:00+00:00'
             self._mutate('retain', dict(before=before), self.retain_button)
 
@@ -2886,14 +2880,14 @@ class ServerWindow(QMainWindow):
             return
         self._roll_to_today()
         header = self.fleet_table.horizontalHeader()
-        arguments = dict(day=self.fleet_date.date().toString('yyyy-MM-dd'), days=self.chart_range.currentData(),
+        arguments = dict(day=self.fleet_date.date().toString('yyyy-MM-dd'), **self.uptime.fleet_arguments(),
                          limit=6, offset=self._fleet_offset, search=self.fleet_search.text(),
                          group=self.fleet_group.currentData() or '',
                          sort=('name', 'group', 'status', 'today', 'last')[max(0, header.sortIndicatorSection())],
                          descending=header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder)
         revision, client = self._fleet_revision, self.client
         self._fleet_busy = True
-        if not self._submit(lambda: client.call('fleet', **arguments),
+        if not self._submit(lambda: self.uptime.call_fleet(client, arguments),
                             lambda result, ok: self._fleet_finished(result, ok, revision)):
             self._fleet_busy = False
 
@@ -2903,6 +2897,8 @@ class ServerWindow(QMainWindow):
         if success and revision == self._fleet_revision:
             self._fleet_result = result
             self._render_fleet(result)
+        elif revision == self._fleet_revision:
+            self.uptime.fleet_failed()       # no figures from another period under this period's name
         if self._fleet_again or revision != self._fleet_revision:
             self._fleet_again = False
             self._load_fleet()
@@ -2993,8 +2989,7 @@ class ServerWindow(QMainWindow):
         self.fleet_page_number.setText(str(self._fleet_offset // 6 + 1))
         self.fleet_page_label.setText(self.t('Showing {start} to {end} of {total} computers',
             start=self._fleet_offset + 1 if result['rows'] else 0, end=self._fleet_offset + len(result['rows']), total=result['matching']))
-        self.daily_chart.day_label = lambda day: self._date(day, year=False)
-        self.daily_chart.set_samples(result['daily'], self.t('No dated reports yet'), self.t('h'))
+        self.uptime.render_fleet_chart(result)
         self.updated_label.setText(self.t('Updated {time}', time=self._clock_text(result['updated_at'])))
         self._render_fleet_events(result['recent_events'])
 

@@ -2481,3 +2481,113 @@ _UPTIME_VI = {
 for _key, _text in _UPTIME_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
+
+
+# --- 1.3.0 server uptime ---
+_SERVER_UPTIME_VI = {
+    'days': 'ngày',
+    'Keep detailed records for': 'Giữ dữ liệu chi tiết trong',
+    'Online and offline history, incident timelines and sent alerts older than this are removed automatically. Daily awake and off-time totals and incident summaries are kept until you delete records before a date.':
+        'Lịch sử trực tuyến/ngoại tuyến, diễn biến sự cố và cảnh báo đã gửi cũ hơn mốc này được tự động xóa. Tổng thời gian thức và thời gian tắt theo ngày cùng bản tóm tắt sự cố được giữ lại cho đến khi bạn xóa dữ liệu trước một ngày.',
+    'This month': 'Tháng này',
+    'Last month': 'Tháng trước',
+    'This year': 'Năm nay',
+    'Last 12 months': '12 tháng qua',
+    'Last 5 years': '5 năm qua',
+    'Custom': 'Tùy chọn',
+    'Period': 'Khoảng thời gian',
+    'To': 'Đến',
+    '{first} to {last}': '{first} đến {last}',
+    'Week of {day}': 'Tuần từ {day}',
+    'No awake time recorded in this period': 'Không ghi nhận thời gian thức trong khoảng này',
+    'Average per recorded day · {known} of {days} days recorded':
+        'Trung bình mỗi ngày có ghi nhận · {known} trên {days} ngày có ghi nhận',
+    '{known} of {days} days recorded': '{known} trên {days} ngày có ghi nhận',
+    'Bars show the average per recorded day of each week':
+        'Mỗi cột là trung bình mỗi ngày có ghi nhận của một tuần',
+    'Bars show the average per recorded day of each month':
+        'Mỗi cột là trung bình mỗi ngày có ghi nhận của một tháng',
+    '{period}: {hours} awake on {count} computers': '{period}: {hours} thời gian thức trên {count} máy',
+    '{period}: no awake time reported': '{period}: chưa có máy nào báo thời gian thức',
+    'Energy, {period} (kWh)': 'Điện năng, {period} (kWh)',
+    'Top consumers, {period}': 'Máy tiêu thụ nhiều nhất, {period}',
+    'By group, {period}': 'Theo nhóm, {period}',
+    'Uptime & downtime': 'Thời gian hoạt động & ngừng',
+    'Asleep': 'Ngủ',
+    '{count} bars; hover a bar for its numbers': '{count} cột; di chuột lên một cột để xem số liệu',
+    'Restarts {restarts} · unexpected stops {stops}': 'Khởi động lại {restarts} · dừng bất thường {stops}',
+    'Restarts {restarts} · clean shutdowns {shutdowns} · unexpected stops {stops}':
+        'Khởi động lại {restarts} · tắt máy bình thường {shutdowns} · dừng bất thường {stops}',
+    'Awake {share} % of the known time': 'Thức {share} % thời gian đã biết',
+    '{hours} awake per unexpected stop': '{hours} thức cho mỗi lần dừng bất thường',
+    'This computer does not report sleep and off time (Lifetime before 1.3): only awake time is known and the rest is Unknown.':
+        'Máy này không báo thời gian ngủ và tắt (Lifetime trước 1.3): chỉ biết thời gian thức, phần còn lại là Chưa xác định.',
+    'Sleep and off time reported for {known} of {days} days.':
+        'Thời gian ngủ và tắt được báo cho {known} trên {days} ngày.',
+    'Data from {date} ({source})': 'Dữ liệu từ {date} ({source})',
+    'recorded by Lifetime since {date}': 'Lifetime ghi nhận từ {date}',
+    'Windows installation date': 'ngày cài đặt Windows',
+    'system file dates': 'ngày của tệp hệ thống',
+    'when Lifetime started recording': 'lúc Lifetime bắt đầu ghi nhận',
+    'the Windows event log': 'nhật ký sự kiện Windows',
+    'unknown source': 'nguồn chưa xác định',
+    'Availability in expected hours: loading…': 'Mức sẵn sàng trong giờ dự kiến: đang tải…',
+    'Availability in expected hours: not available': 'Mức sẵn sàng trong giờ dự kiến: không có',
+    'Availability in expected hours: insufficient evidence (observed {value}, coverage {coverage})':
+        'Mức sẵn sàng trong giờ dự kiến: chưa đủ bằng chứng (quan sát {value}, độ phủ {coverage})',
+    'Availability in expected hours: {value} (coverage {coverage})':
+        'Mức sẵn sàng trong giờ dự kiến: {value} (độ phủ {coverage})',
+    'no outages': 'không có lần mất kết nối',
+    '{count} outages, longest {longest}': '{count} lần mất kết nối, lâu nhất {longest}',
+    'Good (99 % or more)': 'Tốt (từ 99 %)',
+    'Partial (75 to 99 %)': 'Một phần (75 đến 99 %)',
+    'Down (under 75 %)': 'Ngừng (dưới 75 %)',
+    'Not expected online': 'Không dự kiến trực tuyến',
+    '{count} computers, worst first; hover a bar for its numbers':
+        '{count} máy, kém nhất trước; di chuột lên một cột để xem số liệu',
+    'Available {percent} of the observed expected hours': 'Sẵn sàng {percent} số giờ dự kiến đã quan sát',
+    'Online {online} · offline {offline} · unknown {unknown}':
+        'Trực tuyến {online} · ngoại tuyến {offline} · chưa xác định {unknown}',
+    'Uptime by computer': 'Thời gian hoạt động theo máy',
+    'Show more computers': 'Hiện thêm máy',
+    'Uptime bars are unavailable.': 'Không lấy được biểu đồ thời gian hoạt động.',
+    'Availability in expected hours per day, worst first. A bar is unknown when monitoring saw less than {floor} % of the expected time.':
+        'Mức sẵn sàng trong giờ dự kiến theo ngày, kém nhất trước. Một cột là chưa xác định khi giám sát thấy ít hơn {floor} % thời gian dự kiến.',
+    'Availability in expected hours per week, worst first. A bar is unknown when monitoring saw less than {floor} % of the expected time.':
+        'Mức sẵn sàng trong giờ dự kiến theo tuần, kém nhất trước. Một cột là chưa xác định khi giám sát thấy ít hơn {floor} % thời gian dự kiến.',
+    'Availability in expected hours per month, worst first. A bar is unknown when monitoring saw less than {floor} % of the expected time.':
+        'Mức sẵn sàng trong giờ dự kiến theo tháng, kém nhất trước. Một cột là chưa xác định khi giám sát thấy ít hơn {floor} % thời gian dự kiến.',
+    'Showing {shown} of {total} computers': 'Đang hiện {shown} trên {total} máy',
+    'Uptime & downtime: awake time comes from each computer’s record; asleep, off and unknown time and the restarts and stops only from computers with Lifetime 1.3 or later that share their history (older ones count as unknown, never as zero). Each figure is shown with the previous period of the same length.':
+        'Thời gian hoạt động & ngừng: thời gian thức lấy từ bản ghi của từng máy; thời gian ngủ, tắt, chưa xác định cùng số lần khởi động lại và dừng chỉ có từ các máy dùng Lifetime 1.3 trở lên có chia sẻ lịch sử (máy cũ hơn được tính là chưa xác định, không bao giờ là 0). Mỗi số liệu được so với khoảng thời gian liền trước có cùng độ dài.',
+    'Uptime & downtime: comparison with the previous period needs a chosen period, not all history.':
+        'Thời gian hoạt động & ngừng: để so với khoảng thời gian trước cần chọn một khoảng thời gian, không phải toàn bộ lịch sử.',
+    '{first} to {last}, compared with {previous_first} to {previous_last}':
+        '{first} đến {last}, so với {previous_first} đến {previous_last}',
+    '{current} (previous period: {previous})': '{current} (khoảng trước: {previous})',
+    'Awake (hours)': 'Thức (giờ)',
+    'Asleep (hours)': 'Ngủ (giờ)',
+    'Off (hours)': 'Tắt (giờ)',
+    'Unknown (hours)': 'Chưa xác định (giờ)',
+    'Restarts': 'Khởi động lại',
+    'Clean shutdowns': 'Tắt máy bình thường',
+    'Unexpected stops': 'Dừng bất thường',
+    'Computers that report sleep and off time': 'Số máy báo thời gian ngủ và tắt',
+    'Availability in expected hours': 'Mức sẵn sàng trong giờ dự kiến',
+    'Outages in expected hours': 'Số lần mất kết nối trong giờ dự kiến',
+    'Longest outage (hours)': 'Lần mất kết nối lâu nhất (giờ)',
+    'Sleep and off time: loading…': 'Thời gian ngủ và tắt: đang tải…',
+    "Delete everything recorded before this date permanently? This removes, from before the date: usage records, daily awake and off-time totals, readings, monitoring history, resolved incidents, sent alerts, maintenance windows and daily readings. It keeps each computer's latest totals (with their original time), open incidents and everything from the date on. This cannot be undone.":
+        'Xóa vĩnh viễn mọi dữ liệu ghi nhận trước ngày này? Việc này xóa, trước ngày đó: bản ghi sử dụng, tổng thời gian thức và thời gian tắt theo ngày, số liệu đo, lịch sử giám sát, sự cố đã xử lý, cảnh báo đã gửi, khung bảo trì và số liệu đo hằng ngày. Giữ lại tổng mới nhất của từng máy (với thời điểm gốc), các sự cố đang mở và mọi dữ liệu từ ngày đó trở đi. Không thể hoàn tác.',
+    'Fleet totals for this period are not available.':
+        'Không có tổng của cả hệ thống cho khoảng thời gian này.',
+    '{period}: not available': '{period}: không có',
+    'Energy figures for this period are not available.':
+        'Không có số liệu điện năng cho khoảng thời gian này.',
+    'Uptime & downtime: the previous period would start before 1971, so there is nothing to compare with.':
+        'Thời gian hoạt động & ngừng: khoảng thời gian trước sẽ bắt đầu trước năm 1971 nên không có gì để so sánh.',
+}
+for _key, _text in _SERVER_UPTIME_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

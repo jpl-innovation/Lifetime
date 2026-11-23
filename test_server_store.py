@@ -697,11 +697,151 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.ingest(newer['device_id'], secret,
                          message(newer['device_id'], [record(observed=old)]))['retired'], [1])
 
+    def test_downtime_is_stored_with_history_retained_and_checked_in_backups(self):
+        allowed = {'history': True, 'resources': False}
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        off = dict(asleep_s=25200, off_s=3600, unknown_s=0, restarts=1, shutdowns=1, unexpected_stops=0)
+        history = {'daily': {'2026-11-06': 60, '2026-11-07': 20},
+                   'downtime_daily': {'2026-11-06': off, '2026-11-07': dict(off, restarts=0)}}
+        self.store.ingest(device, credential, message(device, policy=allowed, history=history))
+        self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], history['downtime_daily'])
+        # An older computer never sends it: nothing is invented for it.
+        old, old_secret = self.pair(policy=allowed)
+        self.store.ingest(old['device_id'], old_secret, message(old['device_id'], policy=allowed,
+                                                                history={'daily': {'2026-11-07': 20}}))
+        self.assertEqual(self.store.uptime_days(old['device_id'], '2026-11-01', '2026-11-07')['downtime_daily'], {})
+        # "Delete records before" removes it like every other dated history.
+        self.store.retain('2026-11-07T00:00:00Z')
+        self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], {'2026-11-07': dict(off, restarts=0)})
+        valid = self.root / 'downtime.sqlite'
+        self.store.backup(valid)
+        self.store.restore(valid)
+        self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], {'2026-11-07': dict(off, restarts=0)})
+        bad = self.root / 'bad-downtime.sqlite'
+        bad.write_bytes(valid.read_bytes())
+        db = sqlite3.connect(bad)
+        broken = dict(history, downtime_daily={'2026-11-07': dict(off, off_s=-5)})
+        db.execute('UPDATE devices SET history=? WHERE device_id=?', (json.dumps(broken), device))
+        db.commit()
+        db.close()
+        with self.assertRaises(StoreError):
+            self.store.restore(bad)
+
+    def test_fleet_totals_for_any_period(self):
+        allowed = {'history': True, 'resources': False}
+        for days in ({'2026-11-06': 60, '2026-11-07': 20, '2021-11-08': 100}, {'2026-11-07': 40}):
+            request, credential = self.pair(policy=allowed)
+            self.store.ingest(request['device_id'], credential,
+                              message(request['device_id'], policy=allowed, history={'daily': days}))
+        result = self.store.fleet(day='2026-11-07', start='2021-11-08', end='2026-11-07')
+        self.assertEqual(len(result['daily']), 1826)
+        self.assertEqual(result['range'], dict(seconds=220, devices=2))
+        self.assertEqual(result['today'], dict(day='2026-11-07', seconds=60, devices=2))
+        self.assertIsNone(result['daily'][1]['seconds'])                 # no report that day: unknown, not zero
+        month = self.store.fleet(day='2026-11-07', start='2026-10-01', end='2026-10-31')
+        self.assertEqual(month['range'], dict(seconds=None, devices=0))
+        self.assertEqual(month['today'], dict(day='2026-11-07', seconds=60, devices=2))     # the date outside the period
+        self.assertEqual(len(self.store.fleet(day='2026-11-07')['daily']), 7)               # the 1.2 call is unchanged
+        for start, end in (('2026-11-08', '2026-11-07'), ('2016-01-01', '2026-11-07'), ('x', '2026-11-07'),
+                           ('2026-11-01', None), (None, '2026-11-01')):
+            with self.subTest(start=start, end=end), self.assertRaises(StoreError):
+                self.store.fleet(start=start, end=end)
+
+    def test_ten_years_of_daily_and_downtime_fit_one_admin_reply(self):
+        """The admin channel answers at most 1 MiB; a computer's detail (as the dashboard asks for it: 24 hours of
+        readings, 100 records) must fit with the largest history a computer may send."""
+        from lifetime_protocol import MAX_BYTES, canonical
+        allowed = {'history': True, 'resources': True}
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        days = [(dt.date(2016, 11, 15) + dt.timedelta(days=i)).isoformat() for i in range(3660)]
+        off = dict(asleep_s=28800, off_s=36000, unknown_s=7200, restarts=12, shutdowns=10, unexpected_stops=3)
+        history = {'daily': {day: 14399.5 for day in days}, 'imported_daily': {day: 1234.5 for day in days},
+                   'downtime_daily': {day: off for day in days},
+                   'dated_hourly': {day: [3599.5] * 24 for day in days[-120:]}, 'hourly': [3599.5] * 24,
+                   'sessions': [dict(start='2026-11-07T08:00:00+07:00', seconds=3600.5, imported=True)] * 100,
+                   'first_seen': '2016-11-15T08:00:00+07:00', 'first_seen_source': 'os-install-date',
+                   'recording_started': '2026-11-01T08:00:00+07:00', 'boots': 5000,
+                   'current_session_seconds': 3600.5, 'longest_session_seconds': 86400.5}
+        self.store.ingest(device, credential, message(device, policy=allowed, history=history,
+                                                      records=[record(seq) for seq in range(1, 101)]))
+        # One reading every 30 s for a week (more than the store keeps), with long decimals.
+        rows = [(device, (NOW - dt.timedelta(seconds=30 * i)).isoformat(), 12.123456789, 45.123456789, 33.3, 88.8,
+                 12.25, 55.5) for i in range(7 * 2880)]
+        self.store._db.executemany('INSERT INTO performance_samples VALUES (?,?,?,?,?,?,?,?)', rows)
+        for hours in (24, 168):
+            detail = self.store.get_device(device, limit=100, hours=hours)
+            self.assertLess(len(canonical(detail)), MAX_BYTES * 0.85, hours)
+            self.assertLessEqual(len(detail['performance_history']), 400)       # thinned evenly, newest kept
+            self.assertEqual(detail['performance_history'][-1]['observed_at'], NOW.isoformat())
+        # The off-time breakdown is not in the detail: only where it starts and ends; the days come per period.
+        self.assertNotIn('downtime_daily', detail['history'])
+        self.assertEqual(detail['downtime'], dict(first=days[0], last=days[-1], days=3660))
+        part = self.store.uptime_days(device, days[-7], days[-1])
+        self.assertEqual((len(part['daily']), len(part['downtime_daily']), part['history']), (7, 7, True))
+        self.assertEqual(len(canonical(self.store.uptime_days(device, days[0], days[-1]))) < MAX_BYTES * 0.85, True)
+
+    def test_a_sync_without_the_extended_parts_keeps_the_last_good_ones(self):
+        """A 1.3 computer that falls back to the older format for a while (after a refused sync) must not wipe the
+        off-time days or the activity detail the server already has; a new valid set replaces them."""
+        allowed = {'history': True, 'resources': False}
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        off = dict(asleep_s=28800, off_s=0, unknown_s=0, restarts=0, shutdowns=0, unexpected_stops=0)
+        full = {'daily': {'2026-11-05': 3600, '2026-11-06': 3600}, 'hourly': [0] * 24, 'boots': 3,
+                'downtime_daily': {'2026-11-05': off, '2026-11-06': off}}
+        self.store.ingest(device, credential, message(device, policy=allowed, history=full))
+        # The fallback format: daily totals only. Day 6 now has 18 h awake, which no longer fits with 8 h asleep.
+        self.store.ingest(device, credential, message(device, policy=allowed, records=[record(2)],
+                                                      history={'daily': {'2026-11-05': 3600, '2026-11-06': 64800}}))
+        kept = self.store.get_device(device)
+        self.assertEqual((kept['history']['hourly'], kept['history']['boots']), ([0] * 24, 3))
+        self.assertEqual(kept['history']['daily']['2026-11-06'], 64800)
+        self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], {'2026-11-05': off})
+        backup = self.root / 'kept.sqlite'
+        self.store.backup(backup)          # what is kept still passes the protocol checks of a backup
+        newer = dict(off, asleep_s=3600)
+        self.store.ingest(device, credential, message(device, policy=allowed, records=[record(3)],
+                                                      history=dict(full, downtime_daily={'2026-11-06': newer})))
+        self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], {'2026-11-06': newer})
+        self.store.restore(backup)
+
+    def test_delete_before_refuses_a_date_in_the_future(self):
+        request, credential = self.pair()
+        self.store.ingest(request['device_id'], credential, message(request['device_id']))
+        for future in ('2026-11-08T00:00:00+00:00', '2026-11-07T12:00:01+00:00'):
+            with self.subTest(future=future), self.assertRaises(StoreError):
+                self.store.retain(future)
+        self.assertIsNone(self.store.get_configuration()['retained_before'])
+        self.assertEqual(self.store.get_device(request['device_id'])['record_count'], 1)
+        self.store.retain('2026-11-07T00:00:00+00:00')        # today's midnight is allowed
+
+    def test_uptime_days_follow_consent_and_bounds(self):
+        allowed = {'history': True, 'resources': False}
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        off = dict(asleep_s=3600, off_s=0, unknown_s=0, restarts=0, shutdowns=0, unexpected_stops=0)
+        self.store.ingest(device, credential, message(device, policy=allowed, history={
+            'daily': {'2026-11-05': 60, '2026-11-06': 70}, 'downtime_daily': {'2026-11-06': off}}))
+        self.assertEqual(self.store.uptime_days(device, '2026-11-06', '2026-11-07'),
+                         dict(device_id=device, start='2026-11-06', end='2026-11-07', history=True,
+                              daily={'2026-11-06': 70}, downtime_daily={'2026-11-06': off}))
+        old, secret = self.pair(policy=allowed)
+        self.store.ingest(old['device_id'], secret, message(old['device_id'], policy=allowed, history={'daily': {'2026-11-06': 5}}))
+        self.assertIsNone(self.store.get_device(old['device_id'])['downtime'])
+        hidden, key = self.pair()
+        self.assertEqual(self.store.uptime_days(hidden['device_id'], '2026-11-06', '2026-11-07')['history'], False)
+        for start, end in (('2026-11-08', '2026-11-07'), ('2016-01-01', '2026-11-07'), ('x', '2026-11-07')):
+            with self.subTest(start=start), self.assertRaises(StoreError):
+                self.store.uptime_days(device, start, end)
+
     def test_retention_keeps_latest_stock_but_does_not_invent_retained_usage(self):
         request, credential = self.pair()
         device = request['device_id']
         self.store.ingest(device, credential, message(device))
-        self.store.retain('2026-11-08T00:00:00Z')
+        with patch.object(storage, '_now', return_value=NOW + dt.timedelta(days=1)):     # a boundary is never in the future
+            self.store.retain('2026-11-08T00:00:00Z')
         info = self.store.get_device(device)
         self.assertEqual(info['record_count'], 0)
         self.assertIsNone(info['retained_usage'])

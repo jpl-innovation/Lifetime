@@ -118,6 +118,94 @@ class GoldenCases(unittest.TestCase):
         self.assertEqual(result['scheduled_s'], 12 * HOUR)
 
 
+def reference(presence, schedule, laptop, maintenance, first, last, zone, now):
+    """The pre-1.3 day-by-day computation with the O(n*m) interval helpers, to check the sweep against."""
+    def intersect(a, b):
+        return [(max(x, z), min(y, w)) for x, y in a for z, w in b if max(x, z) < min(y, w)]
+
+    def subtract(first_list, second):
+        result = []
+        for start, end in first_list:
+            for cut_start, cut_end in second:
+                if cut_end <= start or cut_start >= end:
+                    continue
+                if cut_start > start:
+                    result.append((start, cut_start))
+                start = max(start, cut_end)
+                if start >= end:
+                    break
+            if start < end:
+                result.append((start, end))
+        return result
+
+    def seconds(items):
+        return sum((b - a).total_seconds() for a, b in items)
+    start, end = availability.local_midnight(first, zone), min(availability.local_midnight(last + dt.timedelta(days=1), zone), now)
+    windows = availability.schedule_windows(schedule, laptop, start, end, zone) if start < end else []
+    states, cuts = availability.normalize(presence, now), availability._merge(maintenance)
+    days, day = [], first
+    while day <= last:
+        low, high = max(start, availability.local_midnight(day, zone)), min(end, availability.local_midnight(day + dt.timedelta(days=1), zone))
+        scheduled = intersect(windows, [(low, high)]) if low < high else []
+        counted = subtract(scheduled, cuts)
+        good, bad = seconds(intersect(counted, states['online'])), seconds(intersect(counted, states['offline']))
+        days.append(dict(date=day.isoformat(), good_s=round(good), bad_s=round(bad),
+                         unknown_s=round(max(0.0, seconds(counted) - good - bad)), excluded_s=round(seconds(intersect(scheduled, cuts)))))
+        day += dt.timedelta(days=1)
+    return days
+
+
+class SweepTests(unittest.TestCase):
+    def test_the_sweep_gives_the_same_days_as_the_old_computation(self):
+        import random
+        chance = random.Random(13)
+        business = dict(ALWAYS, kind='business', start='22:00', end='06:00', weekdays=[0, 2, 3, 6], holidays=['2026-11-19'])
+        for case in range(60):
+            moment, presence = at(10, 0), []
+            while moment < at(28, 0):
+                length = dt.timedelta(minutes=chance.randint(1, 3000))
+                presence.append((chance.choice(['online', 'offline', 'unknown']), moment,
+                                 None if chance.random() < .05 else moment + length + dt.timedelta(minutes=chance.randint(-30, 30))))
+                moment += length
+            maintenance = [(at(chance.randint(11, 26), chance.randint(0, 23)),) for _ in range(chance.randint(0, 4))]
+            maintenance = [(start, start + dt.timedelta(hours=chance.randint(1, 50))) for (start,) in maintenance]
+            schedule = chance.choice([ALWAYS, business, dict(business, start='08:00', end='18:00')])
+            zone = chance.choice([UTC, new_york(), None])
+            first = dt.date(2026, 11, chance.randint(9, 14))
+            last = first + dt.timedelta(days=chance.randint(0, 12))
+            now = at(chance.randint(15, 29), chance.randint(0, 23))
+            expected = reference(presence, schedule, False, maintenance, first, last, zone, now)
+            result = availability.device_availability(presence, schedule, False, maintenance, first, last, zone, now)
+            import lifetime_uptime
+            spans = lifetime_uptime.buckets(first, last, 'week')
+            weekly = availability.device_availability(presence, schedule, False, maintenance, first, last, zone, now, spans=spans)
+            by_day = {day['date']: day for day in expected}
+            with self.subTest(case=case, spans=True):
+                self.assertEqual(len(weekly['spans_s']), len(spans))
+                for (low, high), values in zip(spans, weekly['spans_s']):
+                    days = [by_day[(low + dt.timedelta(days=i)).isoformat()] for i in range((high - low).days + 1)]
+                    for key, value in zip(availability.FIELDS, values):
+                        self.assertAlmostEqual(value, sum(day[key] for day in days), delta=len(days))
+                self.assertEqual(weekly['availability'], result['availability'])
+            with self.subTest(case=case):
+                for got, want in zip(result['daily'], expected):
+                    self.assertEqual(got['date'], want['date'])
+                    for key in availability.FIELDS:
+                        self.assertAlmostEqual(got[key], want[key], delta=1)
+
+    def test_outages_count_offline_stretches_inside_expected_hours(self):
+        business = dict(ALWAYS, kind='business', start='08:00', end='18:00', weekdays=[0, 1, 2, 3, 4], holidays=[])
+        presence = [('online', at(16, 0), at(16, 10)), ('offline', at(16, 10), at(16, 11)),      # 1 h in hours
+                    ('online', at(16, 11), at(16, 17)), ('offline', at(16, 17), at(17, 9)),       # overnight: 1 h + 1 h
+                    ('online', at(17, 9), at(17, 20)), ('offline', at(17, 20), at(18, 7)),        # only outside: none
+                    ('unknown', at(18, 7), at(18, 12)), ('online', at(18, 12), None)]             # unknown is never down
+        result = run(presence, schedule=business, last=dt.date(2026, 11, 18), now=at(18, 18))
+        self.assertEqual((result['outages'], result['longest_outage_s']), (2, 2 * HOUR))
+        self.assertEqual(result['bad_s'], 3 * HOUR)
+        quiet = run([('online', at(16, 0), None)], now=at(16, 12))
+        self.assertEqual((quiet['outages'], quiet['longest_outage_s']), (0, 0))
+
+
 class MonitorAvailabilityTests(MonitorCase):
     def test_from_recorded_presence_with_schedule_maintenance_incidents_and_a_fixed_as_of(self):
         self.fleet.add()        # a desktop: expected all day
@@ -153,6 +241,99 @@ class MonitorAvailabilityTests(MonitorCase):
                 self.monitor.availability(**arguments)
         with self.assertRaises(Exception):
             self.monitor.set_coverage_floor(0)
+
+    def test_any_period_up_to_ten_years_with_outages(self):
+        self.fleet.add()
+        self.monitor.set_schedule('device', 'always', key=ID, timezone='UTC')
+        self.monitor.tick()
+        self.clock.advance(hours=1)
+        self.fleet.offline(self.clock.now)
+        self.run_for(90, step=10)
+        self.fleet.online(self.clock.now)
+        self.monitor.tick()
+        self.run_for(30, step=10)
+        ten = self.monitor.availability([ID], start='2016-11-19', end='2026-11-16')['devices'][0]     # 3,650 days
+        self.assertEqual((ten['outages'], ten['longest_outage_s'], ten['bad_s']), (1, 5400, 5400))
+        self.assertEqual(ten['start'], '2016-11-19')
+        with self.assertRaises(Exception):
+            self.monitor.availability([ID], start='2016-01-01', end='2026-11-16')          # over 3,660 days
+        # Local times before 1970 cannot be computed on Windows: refused as a bad request, never a server error.
+        import lifetime_monitor
+        for start, end in (('1969-12-31', '1970-01-05'), ('1970-01-02', '1970-01-02')):
+            with self.assertRaises(lifetime_monitor.MonitorError):
+                self.monitor.availability([ID], start=start, end=end)
+            with self.assertRaises(lifetime_monitor.MonitorError):
+                self.monitor.uptime_bars(start, end)
+        self.assertEqual(self.monitor.availability([ID], start='1971-01-01', end='1971-01-02')['devices'][0]['status'],
+                         'insufficient')
+
+    def test_fleet_bars_compute_outside_the_monitoring_lock(self):
+        """The computation for each computer runs without holding the lock a monitoring pass needs."""
+        from unittest.mock import patch
+        import lifetime_monitor
+        self.fleet.add()
+        self.monitor.tick()
+        held, real = [], availability.device_availability
+
+        def spy(*arguments, **options):
+            held.append(self.monitor._lock._is_owned())
+            return real(*arguments, **options)
+        with patch.object(lifetime_monitor.availability, 'device_availability', side_effect=spy):
+            self.monitor.uptime_bars('2026-11-10', '2026-11-16')
+            self.monitor.availability([ID], start='2026-11-10', end='2026-11-16')
+        self.assertEqual(held, [False, False])
+
+    def test_daily_bars_over_years_come_in_pages_that_fit_one_reply(self):
+        import uuid
+        from lifetime_protocol import MAX_BYTES, canonical
+        for number in range(30):
+            self.fleet.add(str(uuid.UUID(int=100 + number)), name=f'PC-{number:02}')
+        self.monitor.tick()
+        result = self.monitor.uptime_bars('2016-11-26', '2026-11-16', kind='day', limit=50)     # 3,643 daily bars
+        self.assertEqual((result['total'], len(result['buckets'])), (30, 3643))
+        self.assertLessEqual(len(result['rows']), 9)                    # fewer computers per page, never a 413
+        worst = [dict(row, name='x' * 64, bars=[[1440, 1440, 1440]] * 3643) for row in result['rows']]
+        self.assertLess(len(canonical(dict(result, rows=worst))), MAX_BYTES * 0.9)
+        rest = self.monitor.uptime_bars('2016-11-26', '2026-11-16', kind='day', offset=len(result['rows']), limit=50)
+        self.assertNotIn(result['rows'][0]['device_id'], [row['device_id'] for row in rest['rows']])
+
+    def test_fleet_uptime_bars_are_worst_first_bucketed_and_small(self):
+        import uuid
+        from lifetime_protocol import MAX_BYTES, canonical
+        laptop, flaky, steady = (str(uuid.UUID(int=n)) for n in (7, 8, 9))
+        self.fleet.add(laptop, name='Laptop', laptop=True)       # no schedule: never expected online
+        self.fleet.add(flaky, name='Flaky')
+        self.fleet.add(steady, name='Steady')
+        for device_id in (flaky, steady):
+            self.monitor.set_schedule('device', 'always', key=device_id, timezone='UTC')
+        self.monitor.tick()                                       # 09:00 Monday 16 November, all online
+        self.clock.advance(hours=1)
+        self.fleet.offline(self.clock.now, flaky)
+        self.monitor.tick()
+        self.clock.advance(hours=2)
+        self.fleet.online(self.clock.now, flaky)
+        self.monitor.tick()
+        self.clock.advance(hours=1)
+        self.monitor.tick()                                       # 13:00
+        result = self.monitor.uptime_bars('2026-11-15', '2026-11-16', kind='day')
+        self.assertEqual([row['name'] for row in result['rows']], ['Flaky', 'Steady', 'Laptop'])
+        self.assertEqual(result['buckets'], [['2026-11-15', '2026-11-15'], ['2026-11-16', '2026-11-16']])
+        flaky_row = result['rows'][0]
+        self.assertEqual(flaky_row['bars'], [[0, 0, 1440], [120, 120, 540]])     # minutes: good, bad, unknown
+        self.assertEqual((flaky_row['outages'], flaky_row['longest_outage_s']), (1, 7200))
+        self.assertEqual(result['rows'][2]['bars'], [[0, 0, 0], [0, 0, 0]])     # not expected: no bars to colour
+        self.assertEqual(self.monitor.uptime_bars('2025-11-17', '2026-11-16')['buckets'][0], ['2025-11-17', '2025-11-23'])
+        page = self.monitor.uptime_bars('2026-11-15', '2026-11-16', kind='day', offset=1, limit=1)
+        self.assertEqual(([row['name'] for row in page['rows']], page['total']), (['Steady'], 3))
+        for arguments in (dict(start='2026-11-16', end='2026-11-15'), dict(start=None, end=None),
+                          dict(start='2026-11-15', end='2026-11-16', kind='hour'),
+                          dict(start='2026-11-15', end='2026-11-16', limit=101)):
+            with self.subTest(arguments=arguments), self.assertRaises(Exception):
+                self.monitor.uptime_bars(**arguments)
+        # The largest page the dashboard can ask for still fits the 1 MiB admin reply.
+        row = dict(flaky_row, name='x' * 64, bars=[[1440, 1440, 1440]] * 366)
+        self.assertLess(len(canonical(dict(result, rows=[row] * 100, buckets=[['2026-01-01', '2026-01-01']] * 366))),
+                        MAX_BYTES * 0.8)
 
 
 if __name__ == '__main__':

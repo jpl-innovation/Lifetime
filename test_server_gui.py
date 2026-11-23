@@ -105,8 +105,17 @@ class FakeAdmin:
                         groups=sorted({r['group'] for r in rows}), recent_events=[
                             dict(device_id=r['device_id'], name=r['name'], kind='report-received', time=r['last']) for r in rows[:20]],
                         updated_at='2026-11-08T12:00:00Z', date=arguments.get('day'))
-        if operation == 'device':
-            return copy.deepcopy(next(row for row in self.rows if row['device_id'] == arguments['device_id']))
+        if operation == 'device':     # as the store: the off-time days are left out, only where they start and end
+            found = copy.deepcopy(next(row for row in self.rows if row['device_id'] == arguments['device_id']))
+            days = (found.get('history') or {}).pop('downtime_daily', None)
+            found['downtime'] = dict(first=min(days), last=max(days), days=len(days)) if days else None
+            return found
+        if operation == 'uptime_days':
+            row = next(row for row in self.rows if row['device_id'] == arguments['device_id'])
+            history = row.get('history') or {}
+            return dict(device_id=row['device_id'], start=arguments['start'], end=arguments['end'], history=bool(history),
+                        **{field: {day: value for day, value in (history.get(field) or {}).items()
+                                   if arguments['start'] <= day <= arguments['end']} for field in ('daily', 'downtime_daily')})
         if operation == 'overview':
             counts = dict.fromkeys(('total', 'reporting', 'report-overdue', 'pending', 'approved', 'revoked', 'denied', 'unavailable'), 0)
             counts['total'] = len(self.rows)
@@ -220,7 +229,8 @@ class FakeAdmin:
                 self.updates.update(arguments)
             return copy.deepcopy(self.updates)
         if operation == 'insights':
-            return dict(insights.fleet(copy.deepcopy(self.insight_items), self.insight_config, dt.date.today()),
+            period = tuple(dt.date.fromisoformat(arguments[key]) for key in ('start', 'end')) if 'start' in arguments else None
+            return dict(insights.fleet(copy.deepcopy(self.insight_items), self.insight_config, dt.date.today(), None, period),
                         sleep_policies=copy.deepcopy(self.sleep_policies))
         if operation == 'set_sleep_policy':
             self.sleep_policies[arguments['group'].casefold()] = dict(group=arguments['group'], name='LAB\admin',
@@ -233,6 +243,13 @@ class FakeAdmin:
             return copy.deepcopy(self.insight_config)
         if operation == 'set_coverage_floor':
             return dict(coverage_floor=arguments['percent'])
+        if operation == 'uptime_bars':
+            return copy.deepcopy(getattr(self, 'uptime_bars', dict(rows=[], buckets=[], total=0, coverage_floor=80)))
+        if operation == 'availability':
+            return copy.deepcopy(getattr(self, 'availability', dict(devices=[])))
+        if operation in ('detail_retention', 'set_detail_retention'):     # 1.3 "Keep detailed records for"
+            self.detail_days = arguments.get('days', getattr(self, 'detail_days', 400))
+            return dict(days=self.detail_days)
         if operation == 'test_notification':
             return dict(channel=arguments['channel'], status='failed', error='tls')
         if operation in ('set_alert_rule', 'set_schedule', 'delete_schedule', 'add_maintenance', 'delete_maintenance',
@@ -598,13 +615,13 @@ class ServerGuiTests(unittest.TestCase):
         self.wait_idle()
         chart = self.window.device_daily
         self.assertEqual(chart.message, '')
-        self.assertEqual(len(chart.values), 14)
+        self.assertEqual(len(chart.values), 30)
         self.assertEqual(chart.values[-1], 2.0)
         self.assertEqual(chart.values[-4], 10.0)
         self.assertIn('10.0', self.window.daily_summary.text())
-        self.window.daily_range.setCurrentIndex(1)
-        self.assertEqual(len(chart.values), 30)
         self.assertEqual(sum(v is not None for v in chart.values), 2)      # the 40-day-old entry stays out
+        self.window.detail_range.set_key('7d')
+        self.assertEqual(len(chart.values), 7)
 
     def test_identity_editor_validation_and_selected_device_only(self):
         self.load([device(1), device(2)])

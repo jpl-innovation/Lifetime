@@ -31,6 +31,8 @@ class ServerExportTests(unittest.TestCase):
                 return dict(settings=insights.settings(), computers=[dict(
                     device_id=self.source['device_id'], energy={},
                     power=dict(watts=20.0, method='estimated', source='typical-laptop', readings=0))])
+            if operation == 'uptime_days':
+                return dict(downtime_daily={'2026-10-05': dict(asleep_s=7200, off_s=0, unknown_s=0, restarts=1, shutdowns=0, unexpected_stops=0)})
             if operation == 'alert_rules':
                 return [dict(rule='disk_low', threshold=10), dict(rule='offline', threshold=None)]
             return [copy.deepcopy(self.source)] if operation == 'devices' else copy.deepcopy(self.source)
@@ -116,6 +118,8 @@ class ServerExportTests(unittest.TestCase):
         calls = [arguments for operation, arguments in self.requests if operation == 'availability']
         self.assertEqual(calls[0]['as_of'], calls[-1]['as_of'])         # the save measures what was reviewed
         self.assertTrue(first[0]['daily'])
+        self.assertEqual(len(first), 1)         # All: no previous period to compare with
+        self.assertIn(('uptime', 'Uptime & downtime'), [row[:2] for row in self.dialog.reviewed_report['extra_rows']])
         self.assertIn('Observed availability', path.read_text(encoding='utf-8-sig'))
         fleet = ServerExportDialog(self.client, None, groups=['Sales', 'Lab'])
         self.addCleanup(dispose, fleet)
@@ -126,6 +130,27 @@ class ServerExportTests(unittest.TestCase):
         self.wait()
         self.assertIn(('devices', dict(limit=25, offset=0, group='Sales')), self.requests)
         self.assertIn(('report', 'Report scope', 'Group: Sales'), fleet.reviewed_report['extra_rows'])
+
+    def test_a_chosen_period_also_measures_the_previous_one(self):
+        self.dialog.period.set_custom(__import__('datetime').date(2026, 10, 1), __import__('datetime').date(2026, 10, 31))
+        self.dialog.refresh_preview()
+        self.wait()
+        calls = [arguments for operation, arguments in self.requests if operation == 'availability']
+        self.assertEqual([(call['start'], call['end']) for call in calls], [('2026-10-01', '2026-10-31'), ('2026-08-31', '2026-09-30')])
+        self.assertEqual(calls[0]['as_of'], calls[1]['as_of'])
+        rows = {title: value for section, title, value in self.dialog.reviewed_report['extra_rows'] if section == 'uptime'}
+        self.assertEqual(rows['Uptime & downtime'], '2026-10-01 to 2026-10-31, compared with 2026-08-31 to 2026-09-30')
+
+    def test_off_time_days_are_asked_for_the_period_and_the_one_before(self):
+        import datetime as dt
+        self.source['downtime'] = dict(first='2026-10-05', last='2026-10-05', days=1)
+        self.dialog.period.set_custom(dt.date(2026, 10, 1), dt.date(2026, 10, 31))
+        self.dialog.refresh_preview()
+        self.wait()
+        call = [arguments for operation, arguments in self.requests if operation == 'uptime_days'][-1]
+        self.assertEqual((call['start'], call['end']), ('2026-08-31', '2026-10-31'))
+        rows = {title: value for section, title, value in self.dialog.reviewed_report['extra_rows'] if section == 'uptime'}
+        self.assertEqual(rows['Asleep (hours)'], '2.0 (previous period: Not available)')
 
     def test_read_failure_is_visible(self):
         self.client.call = lambda *a, **k: (_ for _ in ()).throw(PermissionError('secret'))

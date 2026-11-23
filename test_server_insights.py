@@ -141,6 +141,33 @@ class AdminTests(unittest.TestCase):
         self.assertEqual((disk['points'], disk['status']), (4, 'expected'))
         self.assertEqual(found[private]['replace'], [])
 
+    def test_runtime_wiring_of_the_1_3_uptime_operations_in_process(self):
+        """The 1.3 operations through the runtime's own dispatch (the HTTP admin tests above need CI on some PCs)."""
+        add_computer(self.runtime._store, dict(history=True, resources=False), history=dict(daily={
+            TODAY.isoformat(): 36000, (TODAY - dt.timedelta(days=400)).isoformat(): 36000}))
+        found = self.runtime._execute('insights', None, dict(start=(TODAY - dt.timedelta(days=1825)).isoformat(),
+                                                              end=TODAY.isoformat()), {})
+        bars = found['fleet']['range']
+        self.assertEqual((bars['kind'], bars['kwh']), ('month', 1.6))       # 2 x 10 h x 80 W (typical desktop)
+        self.assertNotIn('daily', bars)
+        self.assertEqual(sum(value is not None for _, value in bars['series']), 2)
+        self.assertNotIn('range', self.runtime._execute('insights', None, {}, {})['fleet'])
+        for value in (dict(start='x', end=TODAY.isoformat()), dict(start=TODAY.isoformat(), end='2016-01-01')):
+            with self.assertRaises(Exception):
+                self.runtime._execute('insights', None, value, {})
+        self.runtime.monitor.tick()
+        result = self.runtime._execute('uptime_bars', 'monitor.uptime_bars',
+                                       dict(start=(TODAY - dt.timedelta(days=6)).isoformat(), end=TODAY.isoformat()), {})
+        self.assertEqual((result['total'], len(result['buckets'])), (1, 7))
+        self.assertEqual(self.runtime._execute('detail_retention', 'monitor.detail_retention', {}, {}), dict(days=400))
+        with self.runtime.monitor._transaction() as db:
+            db.execute("INSERT INTO presence(device_id,state,reason,start_at,end_at) VALUES ('x','online','x',?,?)",
+                       ((NOW - dt.timedelta(days=30)).isoformat(), (NOW - dt.timedelta(days=29)).isoformat()))
+        self.runtime._execute('retain', 'retain', dict(before=(NOW - dt.timedelta(days=10)).isoformat()), {})
+        self.assertEqual(self.runtime.monitor.presence('x'), [])              # "delete before" reached monitoring
+        fleet = self.runtime._execute('fleet', 'fleet', dict(start=(TODAY - dt.timedelta(days=9)).isoformat(),
+                                                             end=TODAY.isoformat()), {})
+        self.assertEqual(len(fleet['daily']), 10)
 
     def computer(self, control=True, cpu=None, group='Lab'):
         """An approved computer reporting now, in ``group``, with or without remote-power consent."""

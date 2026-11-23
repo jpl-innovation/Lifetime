@@ -287,7 +287,8 @@ _ADMIN = {
     'invitations': ('invitations', (), ('limit', 'offset')),
     'revoke_invitation': ('revoke_invitation', ('invitation_id',), ()),
     'invitation': ('create_invitation', (), ('ttl', 'uses')),
-    'fleet': ('fleet', (), ('day', 'days', 'limit', 'offset', 'search', 'group', 'status', 'sort', 'descending')),
+    'fleet': ('fleet', (), ('day', 'days', 'limit', 'offset', 'search', 'group', 'status', 'sort', 'descending',
+                            'start', 'end')),
     'server_info': (None, (), ()),
     'self_check': (None, (), ()),       # read only: addresses, certificate, discovery, firewall, time
     'pending_enrollments': ('pending_enrollments', (), ('limit', 'offset')),
@@ -318,6 +319,10 @@ _ADMIN = {
     'availability': ('monitor.availability', ('device_ids',), ('start', 'end', 'as_of', 'daily')),
     'set_coverage_floor': ('monitor.set_coverage_floor', ('percent',), ()),
     'coverage_floor': ('monitor.coverage_floor', (), ()),
+    'detail_retention': ('monitor.detail_retention', (), ()),
+    'uptime_bars': ('monitor.uptime_bars', ('start', 'end'), ('kind', 'offset', 'limit', 'as_of')),
+    'uptime_days': ('uptime_days', ('device_id', 'start', 'end'), ()),
+    'set_detail_retention': ('monitor.set_detail_retention', ('days',), ()),
     'checks': ('monitor.checks', (), ()),
     'save_check': ('monitor.save_check', ('check',), ('check_id',)),
     'delete_check': ('monitor.delete_check', ('check_id',), ()),
@@ -339,7 +344,7 @@ _ADMIN = {
     'set_update': ('updates.set_rollout', (), ('percent', 'paused')),
     'rollback_update': ('updates.rollback', (), ()),
     # Energy and lifecycle (lifetime_insights): computed from what each computer shares; settings live in monitoring.
-    'insights': (None, (), ()),
+    'insights': (None, (), ('start', 'end')),
     'set_insight_settings': ('monitor.set_insight_settings', ('values',), ()),
     'set_sleep_policy': (None, ('group', 'enabled'), ()),
 }
@@ -697,7 +702,7 @@ class ServerRuntime:
         if operation == 'self_check':
             return self.self_check()
         if operation == 'insights':
-            return self.insights()
+            return self.insights(**value)
         if operation == 'set_sleep_policy':
             return self.set_sleep_policy(identity, **value)
         if operation in ('backup', 'restore'):
@@ -734,6 +739,8 @@ class ServerRuntime:
         result = getattr(self._store, method)(**value)
         if operation == 'delete':
             self.monitor.forget(value['device_id'])
+        elif operation == 'retain':         # "delete before" removes monitoring's records of that time too
+            self.monitor.retain(value['before'])
         elif operation == 'rename_group':     # its hours, maintenance, sleep policy, wattage and checks move with it
             self.monitor.rename_group(value['group'].strip(), value['new_name'].strip())
         elif operation == 'overview':      # alert badges ride along with the counters
@@ -742,9 +749,18 @@ class ServerRuntime:
             result = dict(result, alerts=self.monitor.device_alerts(value['device_id']))
         return result
 
-    def insights(self, today=None):
+    def insights(self, today=None, start=None, end=None):
         """Energy and cost, after-hours time, per computer, room, group and fleet (lifetime_insights), from what each
-        computer shares, with the groups whose computers are put to sleep after hours."""
+        computer shares, with the groups whose computers are put to sleep after hours. With start and end (ISO dates,
+        both included, at most 3,660 days) every result also has the energy of that period (``range``)."""
+        period = None
+        if start is not None or end is not None:
+            try:
+                period = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+            except (TypeError, ValueError):
+                raise ProtocolError('Invalid period') from None
+            if not 0 <= (period[1] - period[0]).days < 3660:
+                raise ProtocolError('Invalid period')
         items = self._store.insight_inputs()
         schedules, trends = self.monitor.resolved_schedules(items), self.monitor.trends()
         for item in items:
@@ -753,7 +769,13 @@ class ServerRuntime:
         from lifetime_protocol import CLIENT_VERSION
         offered = ((self.updates.summary() or {}).get('current') or {}).get('version') if self.updates else None
         latest = max((v for v in (CLIENT_VERSION, offered) if v), key=lambda v: insights.version_key(v) or ())
-        result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date(), latest)
+        result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date(), latest,
+                                period)
+        if period:      # per-day energy of the fleet, each group and room as day, week or month bars
+            import lifetime_uptime
+            for summary in (result['fleet'], *result['groups'].values(), *result['rooms'].values()):
+                if summary.get('range'):
+                    summary['range'] = lifetime_uptime.series(summary['range'])
         result['sleep_policies'] = {key: dict(group=value['group'], name=value['name'], since=value['since'])
                                     for key, value in self.monitor.sleep_policies().items()}
         return result

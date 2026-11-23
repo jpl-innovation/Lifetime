@@ -20,7 +20,8 @@ import threading
 import time
 import uuid
 
-from lifetime_protocol import ProtocolError, number, validate_identity, validate_problem, validate_sync, validate_performance
+from lifetime_protocol import (DOWNTIME_SECONDS, HISTORY_EXTRA, MAX_DAY_SECONDS, ProtocolError, number, validate_identity,
+                               validate_problem, validate_sync, validate_performance)
 
 SCHEMA_VERSION = 10
 APPLICATION_ID = 0x4C544D45
@@ -38,6 +39,7 @@ LIVE_SILENCE_SECONDS = 30   # a computer that has been reporting live and goes q
 MAX_PAGE = 500
 DELTA_FIELDS = ('awake_seconds', 'measured_seconds', 'imported_seconds')
 MAX_LOG = 500
+MAX_DETAIL_SAMPLES = 400    # readings in one computer's detail reply, thinned evenly (the 1 MiB admin reply limit)
 SAMPLE_TRIM_SECONDS = 3600  # how often week-old performance samples of computers that stopped reporting are removed
 # Server log: what happened, never request bodies, codes or credentials. Refusals carry only a category.
 LOG_KINDS = {'server-started': (None,), 'server-stopped': (None,), 'names-changed': (None,),
@@ -831,7 +833,7 @@ class Store:
                     if category in message and current_policy.get(permission, False) and message['policy'].get(permission, False):
                         value = message[category]
                         if category == 'history':
-                            value = self._retained_history(value, row['retained_before'])
+                            value = self._retained_history(self._kept_history(value, row['history']), row['retained_before'])
                         elif row['retained_before'] and _stamp(_time(value['observed_at'])) < row['retained_before']:
                             continue
                         elif row[category] and _time(value['observed_at']) < _time(json.loads(row[category])['observed_at']):
@@ -929,9 +931,13 @@ class Store:
             result['attention'].append('pending_command')
         if detail:
             result['specs'], result['performance'] = specs or None, perf or None
-            result['performance_history'] = [dict(r) for r in db.execute(
+            samples = [dict(r) for r in db.execute(
                 'SELECT observed_at,cpu_percent,ram_percent,disk_free_percent,battery_percent,power_watts,temperature_c FROM performance_samples WHERE device_id=? AND observed_at>=? ORDER BY observed_at',
                 (row['device_id'], _stamp(_now()-dt.timedelta(hours=hours))))] if policy.get('resources') else []
+            if len(samples) > MAX_DETAIL_SAMPLES:       # evenly thinned, always ending with the newest reading
+                step = len(samples) / MAX_DETAIL_SAMPLES
+                samples = [samples[int(index * step)] for index in range(MAX_DETAIL_SAMPLES - 1)] + [samples[-1]]
+            result['performance_history'] = samples
             result['commands'] = [dict(r) for r in db.execute('SELECT * FROM commands WHERE device_id=? ORDER BY created_at DESC,rowid DESC LIMIT 20', (row['device_id'],))]
             history = json.loads(row['history']) if row['history'] and policy['history'] else {}
             result['today'] = history.get('daily', {}).get(_now().astimezone().date().isoformat())
@@ -955,7 +961,29 @@ class Store:
                                  for record in records[:limit]]
             result['records_truncated'] = len(records) > limit
             result['records_next_seq'] = result['records'][-1]['seq'] if result['records_truncated'] else None
+            # Ten years of off-time days (about 400 KB) would push the reply past the 1 MiB admin limit: the detail
+            # says only which days exist; uptime_days serves the days of a chosen period.
+            downtime = (result['history'] or {}).pop('downtime_daily', None) or {}
+            result['downtime'] = dict(first=min(downtime), last=max(downtime), days=len(downtime)) if downtime else None
         return result
+
+    def uptime_days(self, device_id, start, end):
+        """A computer's awake (history.daily) and off-time (history.downtime_daily) days over start..end (ISO dates,
+        both included, at most 3,660 days), only while it shares its history (``history`` False otherwise)."""
+        try:
+            first, last = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+        except (TypeError, ValueError):
+            raise StoreError('Invalid period') from None
+        if not 0 <= (last - first).days < 3660:
+            raise StoreError('Invalid period')
+        with self._transaction() as db:
+            row = self._device_row(db, device_id)
+            shared = bool(json.loads(row['policy']).get('history') and row['history'])
+            history = json.loads(row['history']) if shared else {}
+        low, high = first.isoformat(), last.isoformat()
+        return dict(device_id=row['device_id'], start=low, end=high, history=shared,
+                    **{field: {day: value for day, value in (history.get(field) or {}).items() if low <= day <= high}
+                       for field in ('daily', 'downtime_daily')})
 
     def list_devices(self, limit=100, offset=0, search='', group='', status='', sort=None, descending=False):
         """Return a stable bounded page, filtering before applying its offset."""
@@ -1138,10 +1166,27 @@ class Store:
         return value
 
     @staticmethod
+    def _kept_history(value, stored):
+        """A history without its extended parts (the older format a computer falls back to for a while) keeps the
+        last good ones already stored until a new valid set arrives. Kept off-time days must still fit with the
+        new daily awake time."""
+        if not stored:
+            return value
+        old, value = json.loads(stored), dict(value)
+        for key in ('downtime_daily', *HISTORY_EXTRA):
+            if key not in value and key in old:
+                value[key] = old[key]
+        if 'downtime_daily' in value and value['downtime_daily'] is old.get('downtime_daily'):
+            daily = value.get('daily') or {}
+            value['downtime_daily'] = {day: off for day, off in old['downtime_daily'].items()
+                                       if sum(off[key] for key in DOWNTIME_SECONDS) + (daily.get(day) or 0) <= MAX_DAY_SECONDS}
+        return value
+
+    @staticmethod
     def _retained_history(value, before):
         result = dict(value)
         if before:
-            for field in ('daily', 'imported_daily', 'dated_hourly'):
+            for field in ('daily', 'imported_daily', 'dated_hourly', 'downtime_daily'):
                 if field in result:
                     result[field] = {day: seconds for day, seconds in result[field].items() if day >= before[:10]}
             if 'sessions' in result:
@@ -1160,6 +1205,8 @@ class Store:
         the floor remain immutable; unseen sequences at/below it are retired.
         The latest stock snapshot remains available with its original timestamp.
         """
+        if _time(before) > _now():
+            raise StoreError('Retention boundary cannot be in the future')
         before = _stamp(_time(before))
         with self._transaction() as db:
             old = db.execute('SELECT retained_before FROM settings WHERE singleton=1').fetchone()[0]
@@ -1457,11 +1504,13 @@ class Store:
             return dict(reporting_interval=reporting_interval, retained_before=boundary)
 
     def fleet(self, day=None, days=7, limit=6, offset=0, search='', group='', status='',
-              sort='name', descending=False):
+              sort='name', descending=False, start=None, end=None):
         """Small dashboard projection. Dated amounts use permitted history only.
 
         Sorting and filtering precede pagination. Missing dates remain unknown,
         including in the aggregate, whose contributor count is explicit.
+        ``daily`` covers the ``days`` up to ``day``, or start..end (ISO dates, both included, at most 3,660 days);
+        ``range`` sums it: awake seconds (None when no computer reported a day of it) and contributing computers.
         """
         _page(limit, offset)
         if (type(days) is not int or days not in (7, 30) or type(descending) is not bool
@@ -1473,15 +1522,26 @@ class Store:
         except (ValueError, TypeError):
             raise StoreError('Invalid fleet date') from None
         dates = [(selected - dt.timedelta(days=i)).isoformat() for i in range(days-1, -1, -1)]
+        if start is not None or end is not None:
+            try:
+                first, last = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+            except (ValueError, TypeError):
+                raise StoreError('Invalid fleet period') from None
+            if not 0 <= (last - first).days < 3660:
+                raise StoreError('Invalid fleet period')
+            dates = [(first + dt.timedelta(days=i)).isoformat() for i in range((last - first).days + 1)]
+        contributors = set()
         daily = {date: dict(day=date, seconds=None, devices=0) for date in dates}
         counts = dict(total=0, enrolled=0, connected=0, overdue=0, pending=0)
         rows, groups, names, events = [], set(), {}, []
+        selected_values = []
         with self._transaction() as db:
             interval = db.execute('SELECT reporting_interval FROM settings WHERE singleton=1').fetchone()[0]
             threshold = max(OVERDUE_SECONDS, interval * 3)
             counts['pending'] = db.execute("SELECT COUNT(*) FROM requests WHERE status='pending'").fetchone()[0]
             groups.update(row[0] for row in db.execute('SELECT name FROM named_groups'))
-            for row in db.execute('SELECT * FROM devices'):
+            for row in db.execute("SELECT *,json_extract(history,'$.daily') AS history_daily,"
+                                  "json_extract(history,'$.recording_started') AS history_started FROM devices"):
                 received = self._last_seen(row)
                 identity, policy = json.loads(row['identity']), json.loads(row['policy'])
                 name = identity.get('display_name') or row['device_id']
@@ -1508,7 +1568,9 @@ class Store:
                                                time=_stamp(min(_now(), went_offline))))
                     else:
                         current = 'unavailable'
-                history = json.loads(row['history']) if row['history'] and policy['history'] else {}
+                # Only the daily totals are read: a long off-time history would triple the parsing on every refresh.
+                history = (dict(daily=json.loads(row['history_daily'] or '{}'), recording_started=row['history_started'])
+                           if row['history'] and policy['history'] else {})
                 dated = history.get('daily', {})
                 if row['retained_before']:
                     dated = {date: seconds for date, seconds in dated.items() if date >= row['retained_before'][:10]}
@@ -1516,6 +1578,8 @@ class Store:
                     if date in dated:
                         daily[date]['seconds'] = (daily[date]['seconds'] or 0) + dated[date]
                         daily[date]['devices'] += 1
+                        contributors.add(row['device_id'])
+                selected_values.append(dated.get(selected.isoformat()))
                 snapshot = json.loads(row['latest_record']) if row['latest_record'] else None
                 item = dict(device_id=row['device_id'], name=name, group=department,
                             status=current, today=dated.get(selected.isoformat()), last=received,
@@ -1542,7 +1606,13 @@ class Store:
         events.sort(key=lambda event: event['time'], reverse=True)
         for event in events[:20]:
             event['name'] = names.get(event['device_id'], '')
-        return dict(counts=counts, daily=list(daily.values()), today=daily[selected.isoformat()],
+        known = [value['seconds'] for value in daily.values() if value['seconds'] is not None]
+        today = daily.get(selected.isoformat())
+        if today is None:       # the chosen date lies outside the chart's period
+            values = [history_day for history_day in selected_values if history_day is not None]
+            today = dict(day=selected.isoformat(), seconds=sum(values) if values else None, devices=len(values))
+        return dict(counts=counts, daily=list(daily.values()), today=today,
+                    range=dict(seconds=sum(known) if known else None, devices=len(contributors)),
                     rows=ordered[offset:offset+limit], matching=len(rows),
                     groups=sorted({group.casefold(): group for group in sorted(groups)}.values(), key=str.casefold),
                     recent_events=events[:20], updated_at=_stamp(_now()), date=selected.isoformat())
@@ -1607,7 +1677,10 @@ class Store:
         detail (health), plus the agent version."""
         result = []
         with self._transaction() as db:
-            for row in db.execute("SELECT * FROM devices WHERE status='approved' ORDER BY created_at,device_id").fetchall():
+            # The awake parts of the history only, not its off-time breakdown (parsed by SQLite, not here).
+            for row in db.execute("""SELECT *,json_extract(history,'$.daily') AS history_daily,
+                    json_extract(history,'$.dated_hourly') AS history_hourly,json_extract(history,'$.first_seen') AS history_seen
+                    FROM devices WHERE status='approved' ORDER BY created_at,device_id""").fetchall():
                 identity, policy = json.loads(row['identity']), json.loads(row['policy'])
                 item = dict(device_id=row['device_id'], name=identity.get('display_name') or row['device_id'],
                             group=identity.get('department', ''), room=identity.get('location', ''),
@@ -1619,9 +1692,8 @@ class Store:
                     totals = latest['totals']
                     item['awake_seconds'] = totals['measured_seconds'] + totals['imported_seconds'] + totals['baseline_seconds']
                 if policy.get('history') and row['history']:
-                    history = json.loads(row['history'])
-                    item['history'] = dict(daily=history.get('daily') or {}, dated_hourly=history.get('dated_hourly') or {},
-                                           first_seen=history.get('first_seen'))
+                    item['history'] = dict(daily=json.loads(row['history_daily'] or '{}'),
+                                           dated_hourly=json.loads(row['history_hourly'] or '{}'), first_seen=row['history_seen'])
                 if policy.get('resources'):
                     readings = json.loads(row['readings']) if row['readings'] else {}
                     item['readings'] = readings or None

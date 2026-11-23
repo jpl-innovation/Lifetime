@@ -117,7 +117,7 @@ def validate_sync(message):
         if not policy['history']:
             raise ProtocolError('History is not permitted')
         history = _object(message['history'], ('daily', 'imported_daily', 'first_seen', 'first_seen_source', 'recording_started', 'daily_estimated',
-                                               *HISTORY_EXTRA))
+                                               'downtime_daily', *HISTORY_EXTRA))
         validate_history_extra(history)
         for field in ('daily', 'imported_daily'):
             days = history.get(field, {})
@@ -138,6 +138,8 @@ def validate_sync(message):
             raise ProtocolError('Invalid estimate flag')
         if history.get('first_seen_source', 'unknown') not in ('os-install-date', 'system-file-date', 'tracking-start', 'imported-log', 'unknown'):
             raise ProtocolError('Invalid provenance')
+        if 'downtime_daily' in history:
+            validate_downtime(history['downtime_daily'], history.get('daily', {}))
     if 'readings' in message:
         if not policy['resources']:
             raise ProtocolError('System readings are not permitted')
@@ -224,6 +226,33 @@ def validate_history_extra(history):
                 raise ProtocolError('Session too long')
 
 
+DOWNTIME_SECONDS = ('asleep_s', 'off_s', 'unknown_s')
+DOWNTIME_COUNTS = ('restarts', 'shutdowns', 'unexpected_stops')
+MAX_DAY_SECONDS = 90000     # a 25-hour DST day plus slack
+
+
+def validate_downtime(days, awake=None):
+    """history.downtime_daily (1.3, capability 'downtime'): {local ISO date: the six non-negative integers}, at most
+    3,660 days. Asleep, off and unknown, plus that day's awake seconds from ``awake`` (history.daily), fit in one day.
+    Every refusal starts with "Invalid downtime history", so a refused sync says which part was wrong."""
+    try:
+        if not isinstance(days, dict) or len(days) > 3660:
+            raise ProtocolError('not an object of at most 3,660 days')
+        for day, value in days.items():
+            _day(day)
+            _object(value, DOWNTIME_SECONDS + DOWNTIME_COUNTS, DOWNTIME_SECONDS + DOWNTIME_COUNTS)
+            for key in DOWNTIME_COUNTS:
+                if number(value[key], True) > 10000:
+                    raise ProtocolError('count out of range')
+            spent = sum(number(value[key], True) for key in DOWNTIME_SECONDS)
+            awake_seconds = (awake or {}).get(day, 0)
+            if spent + (awake_seconds if isinstance(awake_seconds, (int, float)) else 0) > MAX_DAY_SECONDS:
+                raise ProtocolError('a day exceeds 90,000 s')
+    except ProtocolError as error:
+        raise ProtocolError(f'Invalid downtime history: {error}') from None
+    return days
+
+
 def validate_health_detail(detail):
     """Stability, battery and sleep series (1.2) in the shapes the desktop Health page consumes."""
     _object(detail, ('stability', 'battery', 'sleep'))
@@ -294,7 +323,8 @@ def validate_health_detail(detail):
 # "Lifetime-Accept: capabilities", so an older computer never sees an unknown reply field.
 # A server that sends no list accepts the 1.1 format only.
 # 'update' is not a sync part: it says the server answers POST /v1/update (staged agent updates, lifetime_updates).
-CAPABILITIES = ('history.detail', 'health.detail', 'hardware', 'problem', 'update')
+# 'downtime' (1.3): history.downtime_daily, the off-time breakdown per day (validate_downtime).
+CAPABILITIES = ('history.detail', 'health.detail', 'hardware', 'problem', 'update', 'downtime')
 
 
 def validate_capabilities(value):
@@ -309,6 +339,8 @@ def without_extended(message, capabilities=()):
     result = dict(message)
     if 'history.detail' not in capabilities and 'history' in result:
         result['history'] = {k: v for k, v in result['history'].items() if k not in HISTORY_EXTRA}
+    if 'downtime' not in capabilities and 'downtime_daily' in result.get('history', {}):
+        result['history'] = {k: v for k, v in result['history'].items() if k != 'downtime_daily'}
     if 'health.detail' not in capabilities:
         if 'health' in result:
             result['health'] = {k: v for k, v in result['health'].items() if k != 'detail'}

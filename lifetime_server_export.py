@@ -6,9 +6,11 @@ from pathlib import Path
 from PyQt6.QtWidgets import QComboBox, QFileDialog, QMessageBox
 
 from lifetime_reports import ensure_report_font, write_csv, write_pdf
+import lifetime_uptime as uptime
 from lifetime_server_reports import device_report, fleet_report
+from lifetime_server_uptime import RangeControl
 from lifetime_tasks import Tasks
-from lifetime_technician import ExportDialog, iso_date
+from lifetime_technician import ExportDialog
 
 
 class ServerExportDialog(ExportDialog):
@@ -33,13 +35,17 @@ class ServerExportDialog(ExportDialog):
         self.scope.setVisible(self.device_ids is None and bool(groups))
         self.form.insertWidget(1, self.scope)
         self.scope.currentIndexChanged.connect(self.invalidate_preview)
+        # Any period (1.3): the shared range control replaces the desktop form's All / Custom dates. All is all
+        # available history, as before.
+        self.range_select.hide()
+        self.dates.hide()
+        self.period = RangeControl(self.t, default='all')
+        self.form.insertWidget(self.form.indexOf(self.range_select), self.period)
+        self.period.changed.connect(self.invalidate_preview)
 
     def options(self):
-        start = end = None
-        if self.range_select.currentData():
-            start, end = iso_date(self.start_date.text().strip()), iso_date(self.end_date.text().strip())
-            if not start or not end or start > end:
-                raise ValueError('Start date must be on or before end date.')
+        period = self.period.period()
+        start, end = (period[0].isoformat(), period[1].isoformat()) if period else (None, None)
         self._as_of = self._as_of or dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
         return dict(start=start, end=end, language=self.language, as_of=self._as_of,
                     group=self.scope.currentData() if self.device_ids is None else None,
@@ -62,13 +68,31 @@ class ServerExportDialog(ExportDialog):
                 if offset >= 10000:
                     raise ValueError('Fleet selection exceeds the supported limit')
         devices = [self.client.call('device', device_id=identifier, limit=1) for identifier in ids]
+        # The off-time days are not in a computer's detail (reply size): ask for the report's period and the one before.
+        today = dt.datetime.fromisoformat(as_of).astimezone().date()
+        earlier = (uptime.previous_period(*(dt.date.fromisoformat(options[key]) for key in ('start', 'end')))
+                   if options['start'] else None)
+        if earlier and earlier[0] < uptime.EARLIEST:      # nothing to compare with before 1971
+            earlier = None
+        low = (earlier[0] if earlier else dt.date.fromisoformat(options['start']) if options['start']
+               else today - dt.timedelta(days=uptime.MAX_DAYS - 1))
+        high = dt.date.fromisoformat(options['end']) if options['start'] else today
+        low = max(low, high - dt.timedelta(days=uptime.MAX_DAYS - 1))
+        for device in devices:
+            if device.get('downtime') and device.get('history'):
+                device['history']['downtime_daily'] = self.client.call(
+                    'uptime_days', device_id=device['device_id'], start=low.isoformat(), end=high.isoformat())['downtime_daily']
         single = self.device_ids is not None and len(devices) == 1
-        measured = []
+        measured, previous = [], []
         for index in range(0, len(ids), 100):
             arguments = dict(device_ids=list(ids[index:index + 100]), as_of=as_of, daily=single)
             if options['start']:
                 arguments.update(start=options['start'], end=options['end'])
             measured += self.client.call('availability', **arguments)['devices']
+            if earlier:     # the previous period of the same length, for "compared with the previous period"
+                previous += self.client.call('availability', **dict(arguments, daily=False, start=earlier[0].isoformat(),
+                                                                    end=earlier[1].isoformat()))['devices']
+        compared = dict(current=measured, previous=previous if earlier else None, as_of=as_of)
         thresholds = {rule['rule']: rule.get('threshold') for rule in self.client.call('alert_rules')}
         try:
             found = self.client.call('insights')
@@ -78,8 +102,9 @@ class ServerExportDialog(ExportDialog):
                                computers={c['device_id']: c for c in found['computers']})
         if single:
             return device_report(devices[0], availability=measured[0] if measured else None, thresholds=thresholds,
-                                 insights=energy, **options)
-        return fleet_report(devices, availability=measured, thresholds=thresholds, group=group, insights=energy, **options)
+                                 insights=energy, uptime=compared, **options)
+        return fleet_report(devices, availability=measured, thresholds=thresholds, group=group, insights=energy,
+                            uptime=compared, **options)
 
     # When a computer last reported changes with every sync, so a connected computer would make every save
     # "different from the review" and the file could never be written. The saved report still carries the

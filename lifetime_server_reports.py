@@ -8,6 +8,7 @@ import datetime as dt
 
 import lifetime_availability as availability
 import lifetime_insights as insights
+import lifetime_uptime
 from lifetime_identity import FIELDS, LABELS
 from lifetime_protocol import CLIENT_VERSION
 from lifetime_reports import build_report, tr, LABELS as REPORT_LABELS
@@ -242,11 +243,108 @@ def footer(zone, language):
         version=CLIENT_VERSION, zone=zone, source=tr(SOURCE, language))
 
 
+UPTIME_NOTE = ('Uptime & downtime: awake time comes from each computer’s record; asleep, off and unknown time and the '
+               'restarts and stops only from computers with Lifetime 1.3 or later that share their history (older ones '
+               'count as unknown, never as zero). Each figure is shown with the previous period of the same length.')
+UPTIME_NO_COMPARISON = 'Uptime & downtime: comparison with the previous period needs a chosen period, not all history.'
+UPTIME_TOO_EARLY = 'Uptime & downtime: the previous period would start before 1971, so there is nothing to compare with.'
+
+
+def _history(device):
+    return (device.get('history') or {}) if (device.get('policy') or {}).get('history') else {}
+
+
+def _uptime_figures(devices, first, last, measured, as_of):
+    """Sums for a computer, a group or the fleet over first..last: awake, asleep, off and unknown seconds, the counts,
+    how many computers describe their off time, and availability with outages from the monitoring results."""
+    now = dt.datetime.fromisoformat(as_of).astimezone() if as_of else None
+    totals = [lifetime_uptime.total(lifetime_uptime.day_breakdown(_history(device), first, last, now)) for device in devices]
+    result = {}
+    for key in (*lifetime_uptime.PARTS, *lifetime_uptime.COUNTS):
+        values = [item[key] for item in totals if item[key] is not None]
+        result[key] = sum(values) if values else None
+    result['reporting'] = sum(bool(item['reported']) for item in totals)
+    found = [item for item in measured or () if item]
+    result['availability'] = availability.combine(found, found[0]['coverage_floor']) if found else None
+    result['outages'] = sum(item.get('outages') or 0 for item in found) if found else None
+    result['longest_outage_s'] = max((item.get('longest_outage_s') or 0 for item in found), default=None) if found else None
+    return result
+
+
+def _hours(seconds):
+    return None if seconds is None else f'{seconds / 3600:.1f}'
+
+
+def uptime_rows(devices, start, end, current, previous, as_of, language):
+    """The "Uptime & downtime" section: the period's figures, each with the previous period of the same length.
+    ``current``/``previous``: the admin availability results of these computers for each period (None: unknown)."""
+    if start:
+        first, last = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+    else:       # all available history: from the first dated record, without a comparison
+        dated = [day for device in devices for field in ('daily', 'downtime_daily') for day in _history(device).get(field) or {}]
+        last = (dt.datetime.fromisoformat(as_of).astimezone().date() if as_of else dt.date.today())
+        first = min(min(dated, default=last.isoformat()), last.isoformat())
+        first = max(dt.date.fromisoformat(first), last - dt.timedelta(days=lifetime_uptime.MAX_DAYS - 1))
+    now = _uptime_figures(devices, first, last, current, as_of)
+    earlier = lifetime_uptime.previous_period(first, last)
+    compare = bool(start) and earlier[0] >= lifetime_uptime.EARLIEST
+    before = _uptime_figures(devices, *earlier, previous, as_of) if compare else None
+    heading = (tr('{first} to {last}, compared with {previous_first} to {previous_last}', language).format(
+        first=first.isoformat(), last=last.isoformat(), previous_first=earlier[0].isoformat(),
+        previous_last=earlier[1].isoformat()) if compare else
+        tr('{first} to {last}', language).format(first=first.isoformat(), last=last.isoformat()))
+    rows = [('uptime', 'Uptime & downtime', heading)]
+
+    def value(current_value, previous_value):
+        shown = tr('Not available', language) if current_value is None else str(current_value)
+        if before is None:
+            return shown
+        return tr('{current} (previous period: {previous})', language).format(
+            current=shown, previous=tr('Not available', language) if previous_value is None else previous_value)
+
+    def percent(result):
+        return None if result is None else availability_text(result, language)
+    for key, title in (('awake_s', 'Awake (hours)'), ('asleep_s', 'Asleep (hours)'), ('off_s', 'Off (hours)'),
+                       ('unknown_s', 'Unknown (hours)')):
+        rows.append(('uptime', title, value(_hours(now[key]), before and _hours(before[key]))))
+    for key, title in (('restarts', 'Restarts'), ('shutdowns', 'Clean shutdowns'), ('unexpected_stops', 'Unexpected stops')):
+        rows.append(('uptime', title, value(now[key], before and before[key])))
+    rows.append(('uptime', 'Computers that report sleep and off time', value(
+        f"{now['reporting']} / {len(devices)}", before and f"{before['reporting']} / {len(devices)}")))
+    rows.append(('uptime', 'Availability in expected hours', value(percent(now['availability']),
+                                                                     before and percent(before['availability']))))
+    rows.append(('uptime', 'Outages in expected hours', value(now['outages'], before and before['outages'])))
+    rows.append(('uptime', 'Longest outage (hours)', value(_hours(now['longest_outage_s']),
+                                                             before and _hours(before['longest_outage_s']))))
+    return rows
+
+
+def add_uptime(report, devices, start, end, current, previous, as_of, language, per_computer=False):
+    rows = uptime_rows(devices, start, end, current, previous, as_of, language)
+    if per_computer and len(devices) > 1:
+        now = {item['device_id']: item for item in current or ()}
+        old = {item['device_id']: item for item in previous or ()}
+        for device in devices:
+            name = (device.get('identity') or {}).get('display_name') or device['device_id']
+            figures = uptime_rows([device], start, end, [now.get(device['device_id'])], [old.get(device['device_id'])],
+                                  as_of, language)
+            rows.append(('uptime-by-computer', 'Computer', name))
+            rows.extend(('uptime-by-computer', *row[1:]) for row in figures[1:] if row[1] in ('Awake (hours)', 'Unexpected stops',
+                                                                   'Availability in expected hours'))
+    report['extra_rows'] = [*report.get('extra_rows', ()), *rows]
+    too_early = bool(start) and lifetime_uptime.previous_period(*(
+        dt.date.fromisoformat(day) for day in (start, end)))[0] < lifetime_uptime.EARLIEST
+    report['notes'] = [*report['notes'], UPTIME_TOO_EARLY if too_early else UPTIME_NOTE if start else UPTIME_NO_COMPARISON]
+
+
 def device_report(device, start=None, end=None, selected_identity=(), system_fields=(), language='en',
-                  availability=None, thresholds=None, insights=None):
+                  availability=None, thresholds=None, insights=None, uptime=None):
     """Use dated client snapshots only with current permission; never report host OS. ``availability``: this
-    computer's entry from the admin availability call (None leaves the report as awake time only)."""
+    computer's entry from the admin availability call (None leaves the report as awake time only). ``uptime``:
+    dict(current=[availability results], previous=[...], as_of) adds the "Uptime & downtime" section."""
     report = _device_report(device, start, end, selected_identity, system_fields, language)
+    if uptime is not None:
+        add_uptime(report, [device], start, end, uptime['current'], uptime['previous'], uptime['as_of'], language)
     if availability is not None or thresholds is not None:
         add_monitoring(report, device, availability, thresholds, language)
         if availability and availability.get('daily'):
@@ -317,9 +415,10 @@ def _device_report(device, start=None, end=None, selected_identity=(), system_fi
 
 
 def fleet_report(devices, start=None, end=None, selected_identity=(), system_fields=(), language='en',
-                 availability=None, thresholds=None, group=None, insights=None):
+                 availability=None, thresholds=None, group=None, insights=None, uptime=None):
     """Sum one contribution per UUID. Unknown devices remain explicitly missing. ``availability``: the admin
-    availability results (a list) for these computers; ``group`` names a group report."""
+    availability results (a list) for these computers; ``group`` names a group report; ``uptime`` as for
+    device_report, summed over these computers with a few figures per computer."""
     seen = set()
     reports = []
     for device in devices:
@@ -376,6 +475,9 @@ def fleet_report(devices, start=None, end=None, selected_identity=(), system_fie
         report['extra_rows'][0] = ('report', 'Report scope', tr('Group: {name}', language).format(name=group or tr('No group', language)))
     if insights is not None:
         _fleet_energy(report, devices, reports, insights, language)
+    if uptime is not None:
+        add_uptime(report, devices, start, end, uptime['current'], uptime['previous'], uptime['as_of'], language,
+                   per_computer=True)
     if availability is None and thresholds is None:
         return report
     _fleet_monitoring(report, devices, reports, availability or [], thresholds, language)

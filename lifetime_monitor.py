@@ -6,8 +6,10 @@ it only through that object. It reads the server store through ``Store.monitor_s
 only the readings each computer's policy allows) and never writes there.
 
 Server downtime is UNKNOWN, never DOWN and never zero: at start the open presence intervals are closed at the last
-heartbeat and an "unknown (server-down)" interval covers the gap. History is bounded by age (RETENTION_DAYS) and by
-size (QUOTA_BYTES), checked every hour.
+heartbeat and an "unknown (server-down)" interval covers the gap. Detailed history (presence intervals, incident
+timelines, deliveries) is bounded by age ("Keep detailed records for", RETENTION_DAYS by default) and by size
+(QUOTA_BYTES), checked every hour. Incidents themselves (the summaries) are kept until "delete before" (retain) removes
+them; the computers' daily totals live in server.sqlite and are never trimmed here.
 """
 import contextlib
 import datetime as dt
@@ -26,10 +28,12 @@ import lifetime_availability as availability
 import lifetime_checks as checks
 import lifetime_insights as insights
 import lifetime_notify as notify
+import lifetime_uptime as uptime
 
 SCHEMA_VERSION = 3
 APPLICATION_ID = 0x4C544D4E     # "LTMN"
-RETENTION_DAYS = 180
+RETENTION_DAYS = 400         # "Keep detailed records for" until an administrator changes it
+DETAIL_DAYS_RANGE = (30, 3660)
 QUOTA_BYTES = 64 * 1024 * 1024
 MAX_DELIVERIES = 5000
 HOUSEKEEPING_SECONDS = 3600
@@ -104,6 +108,8 @@ MIGRATIONS = [
     ),
 ]
 TREND_DAYS = 730        # forecasts look back up to two years; one small row per computer and day
+MAX_BAR_CELLS = 36000   # bars in one uptime_bars page (about 600 KB at worst, under the 1 MiB admin reply)
+SUMMARY_DAYS = 3660     # resolved incident summaries are kept this long at most (or until "delete before")
 
 
 class MonitorError(ValueError):
@@ -290,10 +296,11 @@ class Monitor:
         self.server_name, self.transport = server_name, transport or notify.Transport()
         self.status = {}
         self._delivering = threading.Lock()
-        self.quota, self.retention = quota, dt.timedelta(days=retention_days)
+        self.quota, self.retention_days = quota, retention_days
         self.started_at = None
         self.checker, self.blocked_ports = None, set()
         self._housekeeping_at = None
+        self._bars_cache = None      # (request, rows): the last fleet uptime bars, reused while paging
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(path), timeout=15, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -1126,6 +1133,20 @@ class Monitor:
         with self._lock:
             return {device['device_id']: self._schedule_for(self._db, device) for device in devices}
 
+    def _period(self, start, end):
+        """(first, last) dates of an inclusive period of at most MAX_DAYS, or (None, None) when both are None."""
+        if (start is None) != (end is None):
+            raise MonitorError('Choose both dates')
+        try:
+            first, last = (dt.date.fromisoformat(start), dt.date.fromisoformat(end)) if start else (None, None)
+        except (TypeError, ValueError):
+            raise MonitorError('Expected dates as YYYY-MM-DD') from None
+        if first and not dt.timedelta(0) <= last - first < dt.timedelta(days=uptime.MAX_DAYS):
+            raise MonitorError('A period runs forwards and lasts at most 3660 days')
+        if first and first < uptime.EARLIEST:
+            raise MonitorError('A period starts on 1 January 1971 or later')
+        return first, last
+
     def availability(self, device_ids, start=None, end=None, as_of=None, daily=False):
         """Per computer over local dates start..end (inclusive, the computer's calendar), or over everything
         monitoring has kept when both are None. ``as_of`` fixes "now" so a reviewed report can be saved unchanged.
@@ -1133,56 +1154,88 @@ class Monitor:
         if (not isinstance(device_ids, list) or not 1 <= len(device_ids) <= 100
                 or any(not isinstance(item, str) or len(item) > 64 for item in device_ids)):
             raise MonitorError('Choose 1 to 100 computers')
-        if (start is None) != (end is None) or type(daily) is not bool:
-            raise MonitorError('Choose both dates')
-        try:
-            first, last = (dt.date.fromisoformat(start), dt.date.fromisoformat(end)) if start else (None, None)
-        except (TypeError, ValueError):
-            raise MonitorError('Expected dates as YYYY-MM-DD') from None
-        if first and not dt.timedelta(0) <= last - first <= dt.timedelta(days=400):
-            raise MonitorError('A period runs forwards and lasts at most 400 days')
+        if type(daily) is not bool:
+            raise MonitorError('Invalid daily flag')
+        first, last = self._period(start, end)
         now = min(_time(as_of), self.clock()) if as_of is not None else self.clock()
         floor = self.coverage_floor()
         wanted = set(device_ids)
         devices = [item for item in (self.store.monitor_snapshot() if self.store is not None else [])
                    if item['device_id'] in wanted]
-        offset = now.astimezone().strftime('%z')
-        results = []
+        results = [self._device_availability(device, first, last, now, floor, daily) for device in devices]
+        return dict(as_of=_stamp(now), coverage_floor=floor, devices=results)
+
+    def _device_availability(self, device, first, last, now, floor, daily, spans=None):
+        """One computer's availability: its schedule, presence, maintenance and incidents are read under the lock,
+        the computation runs outside it, so a whole-fleet request never holds up a monitoring pass for long."""
         with self._lock:
             db = self._db
+            schedule = self._schedule_for(db, device)
+            zone, zone_ok = schedule_zone(schedule)
+            local = (lambda moment: moment.astimezone(zone)) if zone else (lambda moment: moment.astimezone())
+            since = None
+            if first:
+                begin, finish = first, last
+            else:
+                oldest = db.execute('SELECT MIN(start_at) FROM presence WHERE device_id=?', (device['device_id'],)).fetchone()[0]
+                since = _time(oldest) if oldest else now
+                begin, finish = local(since).date(), local(now).date()
+            low = availability.local_midnight(begin, zone)
+            high = availability.local_midnight(finish + dt.timedelta(days=1), zone)
+            presence = [(row['state'], _time(row['start_at']), row['end_at'] and _time(row['end_at']))
+                        for row in db.execute('''SELECT state,start_at,end_at FROM presence WHERE device_id=?
+                            AND start_at<? AND (end_at IS NULL OR end_at>?)''', (device['device_id'], _stamp(high), _stamp(low)))]
+            windows = [(_time(row['start_at']), _time(row['end_at'])) for row in db.execute(
+                '''SELECT start_at,end_at FROM maintenance WHERE start_at<? AND end_at>? AND (scope='all'
+                   OR (scope='group' AND key=?) OR (scope='device' AND key=?))''',
+                (_stamp(high), _stamp(low), (device.get('group') or '').casefold(), device['device_id']))]
+            incidents = [dict(row) for row in db.execute(
+                '''SELECT rule,state,started_at,opened_at,resolved_at,value FROM incidents WHERE device_id=?
+                   AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
+                   ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
+        result = availability.device_availability(presence, schedule, device.get('laptop'), windows, begin, finish,
+                                                  zone, now, floor, daily, since, spans)
+        name = schedule['timezone'] if zone_ok else 'local'
+        offset = now.astimezone().strftime('%z')
+        return dict(result, device_id=device['device_id'], name=device.get('name', ''),
+                    group=device.get('group', ''), start=begin.isoformat(), end=finish.isoformat(),
+                    timezone=f'local (UTC{offset[:3]}:{offset[3:]})' if name == 'local' else name,
+                    zone_source=schedule['scope'], zone_ok=zone_ok, schedule=schedule['kind'],
+                    laptop=device.get('laptop'), incidents=incidents)
+
+    def uptime_bars(self, start, end, kind=None, offset=0, limit=50, as_of=None):
+        """Every monitored computer's availability over start..end in day, week or month bars (lifetime_uptime.buckets;
+        by default as many as keep a chart readable), worst first: lowest availability, then too little evidence, then
+        not expected online. Each bar is [good, bad, unknown] minutes of expected-online time, so the reply for 100
+        computers x 366 days stays small. The computation is reused while the same range is paged within a minute."""
+        first, last = self._period(start, end)
+        if (first is None or kind not in (None, 'day', 'week', 'month') or type(offset) is not int or offset < 0
+                or type(limit) is not int or not 1 <= limit <= 100):
+            raise MonitorError('Invalid uptime bars request')
+        now = min(_time(as_of), self.clock()) if as_of is not None else self.clock()
+        floor = self.coverage_floor()
+        spans = uptime.buckets(first, last, kind)
+        key = (first, last, kind, floor, _stamp(now)[:16])
+        if self._bars_cache and self._bars_cache[0] == key:
+            rows = self._bars_cache[1]
+        else:
+            devices = self.store.monitor_snapshot() if self.store is not None else []
+            rows = []
             for device in devices:
-                schedule = self._schedule_for(db, device)
-                zone, zone_ok = schedule_zone(schedule)
-                local = (lambda moment: moment.astimezone(zone)) if zone else (lambda moment: moment.astimezone())
-                since = None
-                if first:
-                    begin, finish = first, last
-                else:
-                    oldest = db.execute('SELECT MIN(start_at) FROM presence WHERE device_id=?', (device['device_id'],)).fetchone()[0]
-                    since = _time(oldest) if oldest else now
-                    begin, finish = local(since).date(), local(now).date()
-                low = availability.local_midnight(begin, zone)
-                high = availability.local_midnight(finish + dt.timedelta(days=1), zone)
-                presence = [(row['state'], _time(row['start_at']), row['end_at'] and _time(row['end_at']))
-                            for row in db.execute('''SELECT state,start_at,end_at FROM presence WHERE device_id=?
-                                AND start_at<? AND (end_at IS NULL OR end_at>?)''', (device['device_id'], _stamp(high), _stamp(low)))]
-                windows = [(_time(row['start_at']), _time(row['end_at'])) for row in db.execute(
-                    '''SELECT start_at,end_at FROM maintenance WHERE start_at<? AND end_at>? AND (scope='all'
-                       OR (scope='group' AND key=?) OR (scope='device' AND key=?))''',
-                    (_stamp(high), _stamp(low), (device.get('group') or '').casefold(), device['device_id']))]
-                incidents = [dict(row) for row in db.execute(
-                    '''SELECT rule,state,started_at,opened_at,resolved_at,value FROM incidents WHERE device_id=?
-                       AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
-                       ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
-                result = availability.device_availability(presence, schedule, device.get('laptop'), windows, begin, finish,
-                                                          zone, now, floor, daily, since)
-                name = schedule['timezone'] if zone_ok else 'local'
-                results.append(dict(result, device_id=device['device_id'], name=device.get('name', ''),
-                                    group=device.get('group', ''), start=begin.isoformat(), end=finish.isoformat(),
-                                    timezone=f'local (UTC{offset[:3]}:{offset[3:]})' if name == 'local' else name,
-                                    zone_source=schedule['scope'], zone_ok=zone_ok, schedule=schedule['kind'],
-                                    laptop=device.get('laptop'), incidents=incidents))
-        return dict(as_of=_stamp(now), coverage_floor=floor, devices=results)
+                found = self._device_availability(device, first, last, now, floor, False, spans)
+                bars = [[round(good / 60), round(bad / 60), round(unknown / 60)] for good, bad, unknown, _ in found['spans_s']]
+                rows.append(dict(device_id=device['device_id'], name=device.get('name', ''),
+                                 group=device.get('group', ''), availability=found['availability'],
+                                 coverage=found['coverage'], status=found['status'], outages=found['outages'],
+                                 longest_outage_s=found['longest_outage_s'], bars=bars))
+            order = {'ok': 0, 'insufficient': 1, 'not-scheduled': 2}
+            rows.sort(key=lambda row: (order[row['status']], 101 if row['availability'] is None else row['availability'],
+                                       row['name'].casefold(), row['device_id']))
+            self._bars_cache = (key, rows)
+        limit = min(limit, max(1, MAX_BAR_CELLS // len(spans)))     # long daily bars: fewer computers per page
+        return dict(as_of=_stamp(now), coverage_floor=floor, start=first.isoformat(), end=last.isoformat(),
+                    buckets=[[a.isoformat(), b.isoformat()] for a, b in spans], total=len(rows),
+                    rows=rows[offset:offset + limit])
 
     def presence(self, device_id, limit=100):
         if type(limit) is not int or not 1 <= limit <= 500:
@@ -1259,6 +1312,10 @@ class Monitor:
                 _schedule(json.loads(row['value']))
             for row in snapshot.execute('SELECT value FROM settings'):
                 json.loads(row['value'])
+            # An out-of-range "Keep detailed records for" is not restored: the default applies instead.
+            saved = snapshot.execute("SELECT value FROM settings WHERE key='detail_days'").fetchone()
+            if saved and Monitor._valid_days(saved['value']) is None:
+                snapshot.execute("DELETE FROM settings WHERE key='detail_days'")
             return snapshot
         except BaseException as error:
             snapshot.close()
@@ -1301,27 +1358,77 @@ class Monitor:
             pages = self._db.execute('PRAGMA page_count').fetchone()[0] - self._db.execute('PRAGMA freelist_count').fetchone()[0]
             return pages * self._db.execute('PRAGMA page_size').fetchone()[0]
 
+    @staticmethod
+    def _valid_days(value):
+        """A saved "Keep detailed records for" as whole days in range, else None (never trust a restored value)."""
+        if isinstance(value, str) and value.isascii() and value.isdigit() and DETAIL_DAYS_RANGE[0] <= int(value) <= DETAIL_DAYS_RANGE[1]:
+            return int(value)
+        return None
+
+    def _detail_days(self, db):
+        return self._valid_days(self._setting(db, 'detail_days')) or self.retention_days
+
+    def detail_retention(self):
+        """How many days detailed monitoring records are kept ("Keep detailed records for")."""
+        with self._lock:
+            return dict(days=self._detail_days(self._db))
+
+    def set_detail_retention(self, days):
+        if type(days) is not int or not DETAIL_DAYS_RANGE[0] <= days <= DETAIL_DAYS_RANGE[1]:
+            raise MonitorError('Keep detailed records for 30 to 3660 days')
+        with self._transaction() as db:
+            self._setting(db, 'detail_days', str(days))
+            self._housekeeping_at = None        # applied at the next pass, not an hour later
+        return dict(days=days)
+
+    def retain(self, before):
+        """"Delete records before" reaches monitoring too: presence, incidents (with their timelines), deliveries,
+        maintenance windows and daily readings that ended before the boundary. An interval crossing it is cut there."""
+        if _time(before) > self.clock():
+            raise MonitorError('The boundary cannot be in the future')
+        boundary = _stamp(_time(before))
+        with self._transaction() as db:
+            db.execute('DELETE FROM presence WHERE end_at IS NOT NULL AND end_at<=?', (boundary,))
+            db.execute('UPDATE presence SET start_at=? WHERE start_at<?', (boundary, boundary))
+            db.execute("DELETE FROM incidents WHERE state='resolved' AND resolved_at<?", (boundary,))
+            db.execute("DELETE FROM deliveries WHERE status IN ('sent','failed') AND updated_at<?", (boundary,))
+            db.execute('DELETE FROM maintenance WHERE end_at<?', (boundary,))
+            db.execute('DELETE FROM trends WHERE day<?', (boundary[:10],))
+        return dict(before=boundary)
+
     def _housekeeping(self, db, now):
-        """Age limit first, then the size quota: oldest closed history goes first, active incidents never."""
-        cutoff = _stamp(now - self.retention)
+        """Age limit first, then the size quota: oldest closed detail goes first. Incident summaries stay (only their
+        timelines go) for up to ten years unless the size quota needs their room before recent presence; active
+        incidents and their timelines are never touched."""
+        cutoff = _stamp(now - dt.timedelta(days=self._detail_days(db)))
         db.execute('DELETE FROM presence WHERE end_at IS NOT NULL AND end_at<?', (cutoff,))
-        db.execute("DELETE FROM incidents WHERE state='resolved' AND resolved_at<?", (cutoff,))
+        db.execute("DELETE FROM timeline WHERE incident_id IN (SELECT id FROM incidents WHERE state='resolved' "
+                   "AND resolved_at<?)", (cutoff,))
         db.execute("DELETE FROM deliveries WHERE status IN ('sent','failed') AND updated_at<?", (cutoff,))
         db.execute('DELETE FROM deliveries WHERE id <= (SELECT MAX(id)-? FROM deliveries)', (MAX_DELIVERIES,))
         db.execute('DELETE FROM maintenance WHERE end_at<?', (cutoff,))
         db.execute('DELETE FROM trends WHERE day<?', ((now.astimezone().date() - dt.timedelta(days=TREND_DAYS)).isoformat(),))
-        for _ in range(20):
-            used = (db.execute('PRAGMA page_count').fetchone()[0] - db.execute('PRAGMA freelist_count').fetchone()[0]) \
-                * db.execute('PRAGMA page_size').fetchone()[0]
-            if used <= self.quota:
+        # Incident summaries are kept for ten years at most (their timelines go with them).
+        db.execute("DELETE FROM incidents WHERE state='resolved' AND resolved_at<?",
+                   (_stamp(now - dt.timedelta(days=SUMMARY_DAYS)),))
+
+        def used():
+            pages = db.execute('PRAGMA page_count').fetchone()[0] - db.execute('PRAGMA freelist_count').fetchone()[0]
+            return pages * db.execute('PRAGMA page_size').fetchone()[0]
+        # Over the size quota, the oldest of the first kind that has any goes, a quarter at a time: sent alerts, then
+        # resolved incidents' timelines, then the oldest resolved incident summaries, and recent presence only last.
+        for _ in range(80):
+            if used() <= self.quota:
                 break
-            removed = 0
-            for table, closed, order in (('presence', 'end_at IS NOT NULL', 'end_at'),
+            for table, closed, order in (('deliveries', "status IN ('sent','failed')", 'updated_at'),
+                                         ('timeline', "incident_id IN (SELECT id FROM incidents WHERE state='resolved')", 'time'),
                                          ('incidents', "state='resolved'", 'resolved_at'),
-                                         ('deliveries', "status IN ('sent','failed')", 'updated_at')):
+                                         ('presence', 'end_at IS NOT NULL', 'end_at')):
                 count = db.execute(f'SELECT COUNT(*) FROM {table} WHERE {closed}').fetchone()[0]     # nosec B608: fixed tuple
-                removed += db.execute(f'DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {closed} '   # nosec B608
-                                      f'ORDER BY {order} LIMIT ?)', (max(1, count // 4),)).rowcount
-            if not removed:
+                if count:
+                    db.execute(f'DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {closed} '   # nosec B608
+                               f'ORDER BY {order} LIMIT ?)', (max(1, count // 4),))
+                    break
+            else:
                 break
         db.execute('PRAGMA incremental_vacuum').fetchall()     # each step frees a page: run them all
