@@ -349,6 +349,10 @@ def windows_power(since=None):
     Returns (boots, extras, info); raises ValueError when the log cannot be read."""
     def read(archived):
         extras = new_extras()
+        try:
+            extras['boot_time'] = _native_boot_time()       # checks the running boot's logged start
+        except (OSError, ValueError, AttributeError):
+            pass
         return _query_system(extras, power_query(since), archived, timeout=60)[0], extras
     try:
         (boots, extras), info = _with_archives(read, since)

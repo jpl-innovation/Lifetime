@@ -19,8 +19,7 @@ MAX_COUNT = 10000        # restarts, shutdowns or unexpected stops in one day (t
 RESTART_GAP = 600        # a clean stop followed by a start this soon is a restart (locale-free rule)
 FAST_STARTUP_GAP = 120   # a shutdown request followed this soon by hibernation is Windows Fast Startup's "shut down"
 STOP_WINDOW = 900        # Kernel-Power 41 / EventLog 6008 are written within minutes of the next start
-UNTRUSTED_GAP = 45 * 86400   # a boot whose own first sign of life is this long after its start has a wrong start
-                             # time (a reset clock, fixed later by the network): its start is not used
+BOOT_TIME_SLACK = 600    # seconds the logged start of the running boot may differ from the system's own boot time
 EVENT_KINDS = ('start', 'shutdown', 'restart', 'sleep', 'wake', 'unexpected')
 STOP_FIRST = ('unexpected', 'shutdown', 'restart', 'sleep', 'wake', 'start')    # order of events at the same instant
 
@@ -117,11 +116,23 @@ def _near(items, stamp, before, after):
     return min(found, key=lambda pair: pair[0])[1] if found else None
 
 
-def _trusted(boot):
-    first_sign = min([stamp for stamp, _ in boot.get('events', [])] + [boot['end']])
-    if first_sign - boot['start'] > UNTRUSTED_GAP:
-        return dict(boot, start=first_sign, untrusted=True)
-    return boot
+def _trusted(boots, boot_time=None):
+    """Boots, in the order they were logged, with a start that other evidence contradicts marked ``untrusted``.
+
+    A start is wrong (a reset clock, fixed later by the network) when it is earlier than the end of a boot logged
+    before it, or, for the running boot, when it disagrees with the system's own boot time. Then the start is not
+    used: the boot begins at its first sign of life and the time before it stays unknown. A long boot with no
+    events is not evidence of anything: servers run for months."""
+    result, previous_end = [], None
+    for index, boot in enumerate(boots):
+        if index == len(boots) - 1 and boot_time is not None and abs(boot['start'] - boot_time) > BOOT_TIME_SLACK                 and boot['end'] >= boot_time and (previous_end is None or boot_time >= previous_end):
+            boot = dict(boot, start=boot_time)          # the running boot: the system knows when it started
+        elif previous_end is not None and boot['start'] < previous_end:
+            first_sign = min([stamp for stamp, _ in boot.get('events', []) if stamp >= previous_end] + [boot['end']])
+            boot = dict(boot, start=max(previous_end, first_sign), untrusted=True)
+        result.append(boot)
+        previous_end = boot['end'] if previous_end is None else max(previous_end, boot['end'])
+    return result
 
 
 def from_boots(boots, extras=None, now=None, tz=None):
@@ -129,7 +140,8 @@ def from_boots(boots, extras=None, now=None, tz=None):
 
     ``extras``: ``requests`` [(time, {'kind': 'restart'|'shutdown'|None, 'by': str, 'reason': str})] from Windows
     event 1074; ``stops`` [time] of Kernel-Power 41 / EventLog 6008 (or a Linux crash record), one per incident;
-    ``wakes`` [(time, wake source text)]. Returns dict(start, end, days, events), where ``days`` hold float seconds
+    ``wakes`` [(time, wake source text)]; ``boot_time``: when the running boot really started (Windows asks the
+    system), used if the logged start disagrees. ``boots`` come in the order they were logged. Returns dict(start, end, days, events), where ``days`` hold float seconds
     and counts, and ``start`` is the earliest instant the evidence speaks for (the first boot's start).
     A gap after an end that was not clean is left unknown: no evidence says when the computer stopped.
     """
@@ -137,7 +149,7 @@ def from_boots(boots, extras=None, now=None, tz=None):
     requests = sorted(extras.get('requests', []), key=lambda item: item[0])
     stops = sorted(extras.get('stops', []))
     wakes = sorted(extras.get('wakes', []), key=lambda item: item[0])
-    boots = sorted((_trusted(boot) for boot in boots), key=lambda b: b['start'])
+    boots = sorted(_trusted(list(boots), extras.get('boot_time')), key=lambda b: b['start'])
     days, events = {}, []
 
     def bucket(day):

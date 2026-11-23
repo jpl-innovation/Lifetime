@@ -843,17 +843,21 @@ class WrongClockTests(unittest.TestCase):
     def test_a_reset_clock_boot_does_not_replace_saved_days(self):
         saved = {'2026-03-02': entry(asleep_s=30000, off_s=20000, restarts=1, shutdowns=2)}
         ledger = dict(daily={'2026-03-02': 36400}, downtime_daily=dict(saved), downtime_sources=dict(log_from='2026-01-01'))
-        boots = [dict(start=at('2018-01-01T00:00'), end=at('2026-09-10T18:00'), events=[], clean=True),
+        # In the order logged: a normal boot, then one whose start was logged with the clock reset to 2018.
+        boots = [dict(start=at('2026-09-01T08:00'), end=at('2026-09-09T18:00'), events=[], clean=True),
+                 dict(start=at('2018-01-01T00:00'), end=at('2026-09-10T18:00'), events=[], clean=True),
                  dict(start=at('2026-09-11T08:00'), end=at('2026-11-20T12:00'), events=[], clean=False)]
         now = at('2026-11-20T12:00')
         result = downtime.from_boots(boots, {}, now, TZ)
         downtime.apply(ledger, result, downtime.sources_for(result, 'windows-log', now=now, tz=TZ), now, TZ)
         self.assertEqual(ledger['downtime_daily']['2026-03-02'], saved['2026-03-02'])
-        self.assertEqual(min(k for k in ledger['downtime_daily'] if k > '2026-03-02'), '2026-09-10')
+        self.assertEqual(min(k for k in ledger['downtime_daily'] if k > '2026-03-02'), '2026-09-01')
         self.assertFalse(any('2018' <= k < '2026' for k in ledger['downtime_daily']))
         self.assertEqual(ledger['downtime_sources']['log_from'], '2026-01-01')
-        self.assertEqual(downtime.sources_for(result, 'windows-log', now=now, tz=TZ)['log_from'], '2026-09-10')
+        self.assertEqual(downtime.sources_for(result, 'windows-log', now=now, tz=TZ)['log_from'], '2026-09-01')
         self.assertEqual(result['days']['2026-09-10']['shutdowns'], 1)       # its clean shutdown still counts
+        self.assertEqual(result['days']['2026-09-09']['off_s'], 0)          # when it really started is unknown
+        self.assertEqual(result['days']['2026-09-10']['off_s'], 6*H)
 
     def test_a_long_boot_with_no_sleep_is_not_turned_into_off_time(self):
         boots = [boot('2026-08-01T08:00', '2026-08-01T18:00'),
@@ -861,8 +865,26 @@ class WrongClockTests(unittest.TestCase):
                  boot('2026-10-02T08:00', '2026-10-02T09:00')]
         result = downtime.from_boots(boots, {}, tz=TZ)
         off = sum(day['off_s'] for day in result['days'].values())
-        self.assertEqual(off, 14*H)                              # only the night after the long boot is known to be off
+        self.assertEqual(off, 28*H)                              # both nights: a long boot is not a wrong clock
         self.assertEqual(sum(day['shutdowns'] for day in result['days'].values()), 2)
+
+    def test_a_server_running_for_months_keeps_its_start(self):
+        now = at('2026-11-20T12:00')
+        boots = [dict(start=at('2026-09-01T08:00'), end=at('2026-09-25T18:00'), events=[], clean=True),
+                 dict(start=at('2026-09-28T08:00'), end=now, events=[], clean=False)]      # up 53 days, no sleep
+        result = downtime.from_boots(boots, dict(boot_time=at('2026-09-28T08:01')), now, TZ)
+        self.assertEqual([e['kind'] for e in result['events']], ['start', 'shutdown', 'start'])
+        self.assertEqual(result['days']['2026-09-26']['off_s'], 24*H)
+        self.assertEqual(downtime.longest_spans(result['events'], at('2026-09-01T00:00'), now)['awake'], now - at('2026-09-28T08:00'))
+
+    def test_the_running_boot_takes_the_system_boot_time_when_its_logged_start_is_wrong(self):
+        now = at('2026-11-20T12:00')
+        boots = [dict(start=at('2026-11-10T08:00'), end=at('2026-11-10T18:00'), events=[], clean=True),
+                 dict(start=at('2018-01-01T00:00'), end=now, events=[], clean=False)]
+        result = downtime.from_boots(boots, dict(boot_time=at('2026-11-11T08:00')), now, TZ)
+        self.assertEqual(result['days']['2026-11-10']['off_s'], 6*H)
+        self.assertEqual(result['days']['2026-11-11']['off_s'], 8*H)
+        self.assertEqual(result['start'], at('2026-11-10T08:00'))
 
     def test_a_day_with_nothing_new_keeps_what_was_seen(self):
         ledger = dict(daily={}, downtime_daily={'2026-11-18': entry(off_s=8*H, unknown_s=16*H, shutdowns=1)})
