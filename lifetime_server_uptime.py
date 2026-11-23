@@ -647,7 +647,9 @@ class UptimeUI:
                 for start, end in uptime.buckets(first, last, kind):
                     part = [by_day.get((start + i * uptime.DAY).isoformat()) for i in range((end - start).days + 1)]
                     known = [sample for sample in part if sample and sample['seconds'] is not None]
-                    grouped.append(dict(day=start.isoformat(), seconds=sum(x['seconds'] for x in known) if known else None,
+                    # The fleet's awake time per recorded day of the week or month, as one computer's chart shows it.
+                    grouped.append(dict(day=start.isoformat(),
+                                        seconds=sum(x['seconds'] for x in known) / len(known) if known else None,
                                         devices=max((x['devices'] for x in known), default=0)))
                 samples = grouped
         w.daily_chart.day_label = lambda day, kind=kind: self.bucket_text(dt.date.fromisoformat(day), kind)

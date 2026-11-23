@@ -104,6 +104,7 @@ class UptimeGuiTests(_Base):
         chart = self.window.daily_chart
         self.assertLess(len(chart.samples), 60)                 # weeks, not 365 bars
         self.assertTrue(all(sample['seconds'] is not None for sample in chart.samples))
+        self.assertEqual({sample['seconds'] for sample in chart.samples}, {3600})     # per recorded day, like one computer
         self.assertIn('122 h 00 m awake on 3 computers', self.window.fleet_range_total.text())
         ui = self.window.insights
         self.api.insight_items = [dict(device_id='a', name='Lab PC', group='Lab', kind='desktop',
