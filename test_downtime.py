@@ -903,5 +903,32 @@ class TimeLimitTests(unittest.TestCase):
                 imp.command(['journalctl', '--list-boots'])
             self.assertIsInstance(tracker.read_power(None, lambda since: imp.command(['journalctl'])), ValueError)
 
+
+class OutboxSizeTests(unittest.TestCase):
+    """Review finding 9: with 10 years of daily totals, one history copy per outbox row filled 16 MB in ~85 records."""
+    def test_only_the_newest_row_keeps_a_history_snapshot_and_no_record_is_lost(self):
+        import lifetime_agent as agent
+        import lifetime_protocol as protocol
+        root = Path(tempfile.mkdtemp()) / 'machine'
+        with patch.object(agent, 'protect_root'):
+            machine = agent.MachineAgent.initialize(root, max_bytes=2 * 1024 * 1024)
+        self.addCleanup(machine.close)
+        machine.set_policy(dict(history=True, resources=False))
+        today = dt.date(2026, 11, 20)
+        with machine._transaction() as state:
+            state['ledger']['daily'] = {(today - dt.timedelta(days=i)).isoformat(): 3600.0 for i in range(1, 3660)}
+        for i in range(60):
+            stamp = (dt.datetime(2026, 11, 20, 5, tzinfo=UTC) + dt.timedelta(seconds=30 * i)).isoformat()
+            machine.sample(100 + 30 * i, 'boot-a', stamp)
+        rows = machine._db.execute('SELECT seq, history IS NOT NULL FROM outbox ORDER BY seq').fetchall()
+        self.assertEqual(len(rows), 60)                                  # every record kept (2 MB outbox)
+        self.assertEqual([seq for seq, has in rows if has], [rows[-1][0]])
+        self.assertEqual(machine._load()['dropped'], 0)
+        message = machine.batch()
+        protocol.validate_sync(message)
+        self.assertEqual(len(message['records']), 60)
+        self.assertEqual(len(message['history']['daily']), 3660)         # the newest snapshot travels with the batch
+
+
 if __name__ == '__main__':
     unittest.main()

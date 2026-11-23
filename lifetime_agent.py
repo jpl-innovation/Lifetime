@@ -516,6 +516,11 @@ class MachineAgent:
         columns = [protocol.canonical(v).decode() if v is not None else None
                    for v in (record, history, readings)]
         size = sum(len(v.encode()) for v in columns if v is not None)
+        if history is not None:
+            # A history snapshot is cumulative and a batch sends only its newest row's, so older rows' copies are
+            # never sent: keep one. With 10 years of daily totals a copy per row filled the outbox after ~85 records.
+            self._db.execute('UPDATE outbox SET history=NULL, size=length(CAST(record AS BLOB))+'
+                             'coalesce(length(CAST(readings AS BLOB)),0) WHERE history IS NOT NULL')
         self._db.execute('INSERT INTO outbox VALUES (?,?,?,?,?)', (seq, *columns, size))
         state['next_seq'] = protocol.number(seq+1, True)
         count, total = self._db.execute('SELECT count(*),coalesce(sum(size),0) FROM outbox').fetchone()
