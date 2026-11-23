@@ -267,6 +267,39 @@ class DetailRetentionTests(MonitorCase):
                                              'JOIN incidents i ON i.id = t.incident_id')}
         self.assertEqual(kept, {'resolved' + stamp(cutoff + dt.timedelta(seconds=1)), 'open'})
 
+    def test_the_size_quota_removes_old_incident_summaries_before_recent_presence(self):
+        monitor = self.open(quota=2 * 1024 * 1024)
+        now = self.clock.now
+        with monitor._transaction() as db:
+            for device in range(10):        # 30 days of recent presence for 10 computers
+                moment = now - dt.timedelta(days=30)
+                while moment < now - dt.timedelta(hours=1):
+                    db.execute("INSERT INTO presence(device_id,state,reason,start_at,end_at) VALUES (?,'online','x',?,?)",
+                               (f'pc{device}', stamp(moment), stamp(moment + dt.timedelta(minutes=30))))
+                    moment += dt.timedelta(minutes=30)
+            for number in range(20000):    # years of resolved incident summaries
+                moment = now - dt.timedelta(days=3 * 365) + dt.timedelta(minutes=70 * number)
+                db.execute("""INSERT INTO incidents(device_id,rule,cause,state,started_at,resolved_at,updated_at,
+                    device_name,group_name) VALUES (?,'offline',?,'resolved',?,?,?,?,'Group')""",
+                           (f'pc{number % 10}', f'c{number}', stamp(moment), stamp(moment), stamp(moment), f'Name {number}'))
+            db.execute("""INSERT INTO incidents(device_id,rule,cause,state,started_at,updated_at)
+                VALUES ('pc0','offline','open','open',?,?)""", (stamp(now - dt.timedelta(days=2000)),) * 2)
+            db.execute("""INSERT INTO incidents(device_id,rule,cause,state,started_at,resolved_at,updated_at)
+                VALUES ('pc0','offline','ancient','resolved',?,?,?)""", (stamp(now - dt.timedelta(days=4000)),) * 3)
+        presence = monitor._db.execute('SELECT COUNT(*) FROM presence').fetchone()[0]
+        with monitor._transaction() as db:
+            monitor._housekeeping(db, now)
+        db = monitor._db
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM presence').fetchone()[0], presence)     # recent history stays
+        left = db.execute("SELECT COUNT(*) FROM incidents WHERE state='resolved'").fetchone()[0]
+        self.assertLess(left, 20000)
+        self.assertGreater(left, 0)
+        self.assertEqual(db.execute("SELECT MIN(resolved_at) FROM incidents WHERE state='resolved'").fetchone()[0] >
+                         stamp(now - dt.timedelta(days=3 * 365)), True)                    # the oldest went first
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM incidents WHERE state='open'").fetchone()[0], 1)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM incidents WHERE cause='ancient'").fetchone()[0], 0)  # > 10 years
+        self.assertLessEqual(monitor.size(), monitor.quota)
+
     def test_the_setting_moves_the_boundary_and_is_bounded(self):
         for bad in (29, 3661, '400', 400.0, True, None):
             with self.subTest(bad=bad), self.assertRaises(monitoring.MonitorError):
@@ -311,7 +344,9 @@ class DetailRetentionTests(MonitorCase):
         monitor.set_detail_retention(30)
         self.clock.advance(days=4000)
         monitor.tick()
-        self.assertEqual(store.get_device(request['device_id'])['history'], history)
+        self.assertEqual(store.get_device(request['device_id'])['history']['daily'], history['daily'])
+        self.assertEqual(store.uptime_days(request['device_id'], '2016-01-01', '2016-01-31')['downtime_daily'],
+                         history['downtime_daily'])
         self.assertEqual(store.get_device(request['device_id'])['record_count'], 1)     # the awake-time records too
 
 

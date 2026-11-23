@@ -108,6 +108,7 @@ MIGRATIONS = [
     ),
 ]
 TREND_DAYS = 730        # forecasts look back up to two years; one small row per computer and day
+SUMMARY_DAYS = 3660     # resolved incident summaries are kept this long at most (or until "delete before")
 
 
 class MonitorError(ValueError):
@@ -1375,7 +1376,8 @@ class Monitor:
 
     def _housekeeping(self, db, now):
         """Age limit first, then the size quota: oldest closed detail goes first. Incident summaries stay (only their
-        timelines go), active incidents and their timelines are never touched."""
+        timelines go) for up to ten years unless the size quota needs their room before recent presence; active
+        incidents and their timelines are never touched."""
         days = int(self._setting(db, 'detail_days') or self.retention_days)
         cutoff = _stamp(now - dt.timedelta(days=days))
         db.execute('DELETE FROM presence WHERE end_at IS NOT NULL AND end_at<?', (cutoff,))
@@ -1385,17 +1387,27 @@ class Monitor:
         db.execute('DELETE FROM deliveries WHERE id <= (SELECT MAX(id)-? FROM deliveries)', (MAX_DELIVERIES,))
         db.execute('DELETE FROM maintenance WHERE end_at<?', (cutoff,))
         db.execute('DELETE FROM trends WHERE day<?', ((now.astimezone().date() - dt.timedelta(days=TREND_DAYS)).isoformat(),))
-        for _ in range(20):
-            used = (db.execute('PRAGMA page_count').fetchone()[0] - db.execute('PRAGMA freelist_count').fetchone()[0])                 * db.execute('PRAGMA page_size').fetchone()[0]
-            if used <= self.quota:
+        # Incident summaries are kept for ten years at most (their timelines go with them).
+        db.execute("DELETE FROM incidents WHERE state='resolved' AND resolved_at<?",
+                   (_stamp(now - dt.timedelta(days=SUMMARY_DAYS)),))
+
+        def used():
+            pages = db.execute('PRAGMA page_count').fetchone()[0] - db.execute('PRAGMA freelist_count').fetchone()[0]
+            return pages * db.execute('PRAGMA page_size').fetchone()[0]
+        # Over the size quota, the oldest of the first kind that has any goes, a quarter at a time: sent alerts, then
+        # resolved incidents' timelines, then the oldest resolved incident summaries, and recent presence only last.
+        for _ in range(80):
+            if used() <= self.quota:
                 break
-            removed = 0
-            for table, closed, order in (('presence', 'end_at IS NOT NULL', 'end_at'),
+            for table, closed, order in (('deliveries', "status IN ('sent','failed')", 'updated_at'),
                                          ('timeline', "incident_id IN (SELECT id FROM incidents WHERE state='resolved')", 'time'),
-                                         ('deliveries', "status IN ('sent','failed')", 'updated_at')):
+                                         ('incidents', "state='resolved'", 'resolved_at'),
+                                         ('presence', 'end_at IS NOT NULL', 'end_at')):
                 count = db.execute(f'SELECT COUNT(*) FROM {table} WHERE {closed}').fetchone()[0]     # nosec B608: fixed tuple
-                removed += db.execute(f'DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {closed} '   # nosec B608
-                                      f'ORDER BY {order} LIMIT ?)', (max(1, count // 4),)).rowcount
-            if not removed:
+                if count:
+                    db.execute(f'DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {closed} '   # nosec B608
+                               f'ORDER BY {order} LIMIT ?)', (max(1, count // 4),))
+                    break
+            else:
                 break
         db.execute('PRAGMA incremental_vacuum').fetchall()     # each step frees a page: run them all
