@@ -37,3 +37,4 @@ alert-secrets.bin
 *.crt
 *-backup*.zip
 *.zip.sha256
+rust/lifetime_fast/target/

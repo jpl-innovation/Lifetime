@@ -101,6 +101,10 @@ done
 admin --operation server_info --field fingerprint || {
     echo "The server did not start"; tail -n 50 "$work/server.log" /var/log/lifetime-server.log 2>/dev/null || true; exit 1
 }
+# The packaged server loads its Rust accelerator on this distribution (the container image runs from source: Python).
+engine="$(admin --operation server_info --field availability_engine)"
+echo "availability engine: $engine"
+[[ "$mode" == --docker || "$engine" == "Rust accelerator" ]] || { echo "the server package lacks the Rust accelerator"; exit 1; }
 if [[ "$mode" != direct ]]; then
     # root (installer) or the lifetime-admin service account (container) over the Unix socket, not the token
     [[ "$(admin --operation whoami --field channel)" == socket ]] || { echo "admin did not use the Unix socket"; exit 1; }

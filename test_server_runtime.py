@@ -426,6 +426,11 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.admin.call('names', names=[])['server_names'], [])
         self.assertEqual(self.admin.call('server_info')['certificate']['names'], ['127.0.0.1'])
 
+    def test_server_info_says_which_availability_engine_runs(self):
+        import lifetime_availability
+        self.assertIn(lifetime_availability.ENGINE, ('Python', 'Rust accelerator'))
+        self.assertEqual(self.runtime.server_info()['availability_engine'], lifetime_availability.ENGINE)
+
     def test_capabilities_only_for_computers_that_ask_and_validation_stays_strict(self):
         from lifetime_protocol import CAPABILITIES
         self.assertEqual(self.public('enroll', self.enrollment())['capabilities'], list(CAPABILITIES))

@@ -80,7 +80,8 @@ class SourceInstallationTests(unittest.TestCase):
         for name in ('LifetimeServerRuntime', 'LifetimeServerDashboard', 'LifetimeServerService'):
             with self.subTest(build=name):
                 entry, hidden, text = pyinstaller_command(script, name)
-                self.assertEqual({item for item in hidden if item.startswith('lifetime_')} - set(graph), set(), 'unknown module')
+                self.assertEqual({item for item in hidden if item.startswith('lifetime_')} - set(graph) - {'lifetime_fast'},
+                                 set(), 'unknown module')
                 bundled = closure(graph, {entry} | (hidden & set(graph)), lazy=False)
                 missing = {target for module in bundled for target in graph[module][1]} - bundled
                 self.assertEqual(missing, set(), f'{name}: add --hidden-import for these')
@@ -88,6 +89,26 @@ class SourceInstallationTests(unittest.TestCase):
                     # Windows Python has no time zone database: zoneinfo loads it from tzdata through importlib.
                     self.assertIn('--collect-all tzdata', text)
                     self.assertIn('--exclude-module PyQt6', text)
+
+    def test_only_the_server_runtime_gets_the_rust_accelerator(self):
+        """lifetime_fast (rust/lifetime_fast) is native code: only in the Windows server programs and the Linux server
+        runtime, never in the agent or any desktop program (Smart App Control blocks unsigned native files on employee
+        PCs; on Linux the server dashboard shares the desktop bundle, so it goes without)."""
+        script = (PROJECT/'build_server_windows.ps1').read_text(encoding='utf-8')
+        for name, wanted in (('LifetimeServerRuntime', True), ('LifetimeServerService', True),
+                             ('LifetimeServerDashboard', True), ('LifetimeAgent', False)):
+            with self.subTest(build=name):
+                _, hidden, text = pyinstaller_command(script, name)
+                self.assertEqual('lifetime_fast' in hidden, wanted)
+                if not wanted:
+                    self.assertIn('--exclude-module lifetime_fast', text)
+        self.assertIn("$fast = if ($WithRust) { @('--hidden-import', 'lifetime_fast') } else { @('--exclude-module', "
+                      "'lifetime_fast') }", script)     # an older installed build is never bundled by accident
+        self.assertIn("'--exclude-module', 'lifetime_fast'", (PROJECT/'build_windows.ps1').read_text(encoding='utf-8'))
+        spec = (PROJECT/'packaging/linux/lifetime-linux.spec').read_text(encoding='utf-8')
+        self.assertIn("([] if fast else ['lifetime_fast'])", spec)
+        self.assertEqual(spec.count('fast=True'), 1)
+        self.assertIn("analysis('lifetime_server.py', False, server_datas, server_binaries, server_hidden, fast=True)", spec)
 
     def test_server_packages_copy_every_module(self):
         for path, pattern in (('build_server_windows.ps1', "-Filter 'lifetime_*.py'"),

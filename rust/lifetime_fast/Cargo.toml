@@ -1,0 +1,17 @@
+# lifetime_fast: the optional Rust copy of the hot part of lifetime_availability.py (see README.md).
+# Exact versions, like requirements-server.txt: `=` here, and every other crate in Cargo.lock (built with --locked).
+[package]
+name = "lifetime_fast"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+name = "lifetime_fast"          # the Python module name: `import lifetime_fast`
+crate-type = ["cdylib"]         # a Python extension (.pyd on Windows, .so on Linux)
+
+[dependencies]
+# extension-module: a module Python loads; abi3-py311: one build works for every Python from 3.11 on.
+pyo3 = { version = "=0.27.2", features = ["extension-module", "abi3-py311"] }
