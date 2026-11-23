@@ -6,7 +6,6 @@ Keys are local ISO dates; all six fields are integers >= 0; asleep + off + unkno
 exceed the day's length. A missing day means unknown, never zero. Awake time itself stays in ``daily`` and is never
 changed here: this module only reads it.
 """
-import calendar
 import datetime as dt
 import math
 
@@ -386,7 +385,3 @@ def coverage(ledger):
     return dict(first=first, source=source, recorded=recorded, log=sources.get('log'),
                 archives=sources.get('archives', 0) if is_count(sources.get('archives', 0)) else 0,
                 archive_note=sources.get('archive_note'), wtmp=sources.get('wtmp', 0), note=sources.get('note'))
-
-
-def month_name(number):
-    return calendar.month_abbr[number]

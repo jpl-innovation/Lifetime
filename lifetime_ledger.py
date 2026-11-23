@@ -8,6 +8,8 @@ import copy
 import datetime as dt
 import math
 
+import lifetime_downtime  # stdlib only; imported here so every build that bundles the ledger bundles it
+
 NUMBER_FIELDS = ('total_seconds', 'baseline_seconds', 'current_session_seconds',
                  'longest_session_seconds', 'boot_accounted_seconds', 'unattributed_seconds',
                  'awake_clock_high_water')
@@ -126,8 +128,7 @@ def problems(ledger):
     if 'downtime_daily' in ledger:
         # 1.3.0 downtime per local day. Not cross-checked against ``daily``: awake time can move later (import,
         # repair), and the writer keeps the day-length rule. Salvage drops bad entries, as for ``daily``.
-        from lifetime_downtime import problems as downtime_problems
-        for reason in downtime_problems(ledger['downtime_daily'])[:1]:
+        for reason in lifetime_downtime.problems(ledger['downtime_daily'])[:1]:
             bad('downtime_daily', reason)
     if 'downtime_sources' in ledger and not isinstance(ledger['downtime_sources'], dict):
         bad('downtime_sources', 'must be an object')
@@ -218,8 +219,8 @@ def salvage(value, defaults):
             check = is_number if field == 'daily' else hours_list
             result[field] = {k: v for k, v in result[field].items() if is_date(k) and check(v)}
         elif field == 'downtime_daily' and isinstance(value.get(field), dict):
-            from lifetime_downtime import valid_date, valid_day
-            result[field] = {k: v for k, v in result[field].items() if valid_date(k) and valid_day(v)}
+            result[field] = {k: v for k, v in result[field].items()
+                             if lifetime_downtime.valid_date(k) and lifetime_downtime.valid_day(v)}
         elif field in ('sessions', 'coverage_gaps') and isinstance(value.get(field), list):
             check = valid_session if field == 'sessions' else valid_gap
             result[field] = [v for v in result[field] if check(v)]
