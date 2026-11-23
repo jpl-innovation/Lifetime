@@ -670,5 +670,47 @@ class ScrubTests(unittest.TestCase):
         self.assertNotIn('Q' * 32, result)          # a cut line never leaves a piece of a secret behind
 
 
+class CommandOutputTests(unittest.TestCase):
+    """PowerShell output that is not valid in the local code page (a network named "WLAN (Büro)")."""
+    CHILD = "import sys; sys.stdout.buffer.write(b'rule|True|8443\\r\\nprofile|Wi-Fi (B\\x81ro)|Public\\r\\nprofile|WLAN (B\\xc3\\xbcro)|Private\\r\\n')"
+
+    def child(self, command, script=None, **options):
+        import subprocess
+        import sys
+        return subprocess.run([sys.executable, '-c', script or self.CHILD], **options)
+
+    def desktop_child(self, command, **options):
+        return self.child(command, self.CHILD.replace('rule|True|8443\\r\\n', '').replace('profile|', ''), **options)
+
+    def test_undecodable_bytes_never_hide_the_firewall_rule(self):
+        import sys
+        import lifetime_server as server
+        result = server._command([sys.executable, '-c', self.CHILD], None, 7)
+        self.assertEqual(result[0], 0)
+        self.assertIn('rule|True|8443', result[1])
+        self.assertIn('WLAN (Büro)', result[1])
+        checks = server.firewall_checks(8443, self.child, 'win32')
+        self.assertEqual(checks[0]['text'], 'The Windows firewall rule LifetimeServer-Connect allows port {port} from the '
+                                            'local network.')
+        self.assertEqual(checks[1]['state'], 'danger')          # Wi-Fi (B?ro) is Public
+
+    def test_unreadable_output_is_could_not_read_not_missing(self):
+        from types import SimpleNamespace
+        import lifetime_server as server
+        checks = server.firewall_checks(8443, lambda command, **options: SimpleNamespace(returncode=0, stdout=None), 'win32')
+        self.assertEqual([check['state'] for check in checks], ['neutral'])
+        self.assertIsNone(connect.windows_profiles(lambda command, **options: SimpleNamespace(returncode=0, stdout=None)))
+
+    def test_the_desktop_reads_non_ascii_network_names(self):
+        profiles = connect.windows_profiles(self.desktop_child)
+        self.assertIn(('WLAN (Büro)', 'Private'), profiles)
+        self.assertEqual(profiles[0][1], 'Public')
+        seen = []
+        connect.windows_profiles(lambda command, **options: seen.append(command) or self.desktop_child(command, **options))
+        import lifetime_server as server
+        for script in (seen[0][-1], server.WINDOWS_FIREWALL):      # PowerShell is told to write UTF-8
+            self.assertTrue(script.startswith('[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); '))
+
+
 if __name__ == '__main__':
     unittest.main()

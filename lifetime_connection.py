@@ -327,6 +327,25 @@ def check_lines(checks, t):
     return lines
 
 
+# PowerShell writes its output in the console's OEM code page unless told otherwise.
+UTF8_OUTPUT = '[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); '
+
+
+def run_read(command, run=None, timeout=5):
+    """(exit code, output) of a read-only command (lifetime_signals.run_command: UTF-8, undecodable bytes replaced),
+    or None when it cannot run or its output cannot be read. ``run`` replaces subprocess.run in tests."""
+    import subprocess
+    if run is None:
+        from lifetime_signals import run_command
+        return run_command(command, timeout)
+    try:
+        result = run(command, capture_output=True, timeout=timeout, encoding='utf-8', errors='replace',
+                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return None if result.stdout is None else (result.returncode, result.stdout)
+
+
 def log_tail(paths, lines=200):
     """[(file name, its last ``lines`` lines)] of each log in ``paths`` that exists and may be read."""
     found = []

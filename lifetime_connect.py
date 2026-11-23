@@ -123,17 +123,15 @@ def _check(state, text, fix=None, **values):
     return dict(state=state, text=text, fix=fix, values={key: str(value) for key, value in values.items()})
 
 
-def windows_profiles(run=subprocess.run):
-    """[(network, category)] of the active Windows networks, or None when they cannot be read. Read only."""
-    try:
-        result = run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
-                      "Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }"],
-                     capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    except (OSError, subprocess.TimeoutExpired):
+def windows_profiles(run=None):
+    """[(network, category)] of the active Windows networks, or None when they cannot be read. Read only. PowerShell
+    writes UTF-8 and undecodable bytes are replaced, so a network named "WLAN (Büro)" never breaks the diagnosis."""
+    from lifetime_connection import UTF8_OUTPUT, run_read
+    result = run_read(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', UTF8_OUTPUT +
+                       "Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }"], run, 15)
+    if result is None or result[0]:
         return None
-    if result.returncode:
-        return None
-    return [tuple(line.strip().rsplit('|', 1)) for line in result.stdout.splitlines() if '|' in line]
+    return [tuple(line.strip().rsplit('|', 1)) for line in result[1].splitlines() if '|' in line]
 
 
 def local_server(port):

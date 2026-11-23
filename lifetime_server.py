@@ -34,6 +34,7 @@ from lifetime_protocol import CAPABILITIES, MAX_BYTES, ProtocolError, canonical,
 from lifetime_server_store import (AuthenticationError, ConflictError, Store,
                                    StoreError, ThrottledError)
 import lifetime_tls as tls
+from lifetime_connection import UTF8_OUTPUT
 
 MAX_CONNECTIONS = 32
 MAX_PER_ADDRESS = 8       # request slots one remote address may hold at once: a quarter, so one host cannot take them all
@@ -1283,19 +1284,15 @@ def _line(state, text, fix=None, **values):
 
 
 def _command(command, run=None, timeout=2):
-    """(exit code, output) of a read-only system command, or None when it cannot run. Nothing typed by a person is
-    ever part of ``command``. The dashboard waits 10 s for the whole Self check, so each command gets little time."""
-    import subprocess
-    try:
-        result = (run or subprocess.run)(command, capture_output=True, text=True, timeout=timeout,
-                                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return None
-    return result.returncode, result.stdout or ''
+    """(exit code, output) of a read-only system command, or None when it cannot run or its output is unreadable.
+    Nothing typed by a person is ever part of ``command``. The dashboard waits 10 s for the whole Self check, so each
+    command gets little time."""
+    from lifetime_connection import run_read
+    return run_read(command, run, timeout)
 
 
 # Read only: the rule the installer adds for the connection port, and the network profiles.
-WINDOWS_FIREWALL = ("$rule = Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue; "
+WINDOWS_FIREWALL = (UTF8_OUTPUT + "$rule = Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue; "
                     "if ($rule) { 'rule|' + $rule.Enabled + '|' + ((($rule | Get-NetFirewallPortFilter).LocalPort) -join ',') }; "
                     "Get-NetConnectionProfile | ForEach-Object { 'profile|' + $_.InterfaceAlias + '|' + $_.NetworkCategory }")
 PRIVATE_FIX = 'Set the network to Private: Settings > Network & internet > {networks} > Network profile type > Private.'
