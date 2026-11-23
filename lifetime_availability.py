@@ -172,18 +172,21 @@ def outages(counted, offline):
 
 
 def device_availability(presence, schedule, laptop, maintenance, first_day, last_day, zone, now, floor=DEFAULT_FLOOR,
-                        daily=True, since=None):
+                        daily=True, since=None, spans=None):
     """One computer over local days first_day..last_day (inclusive) in ``zone``. ``presence``: (state, start, end)
     with UTC datetimes, ``maintenance``: UTC (start, end) pairs that apply to it. Time after ``now`` is not counted,
     nor time before ``since`` (for "everything kept": from the first record, not from that day's midnight).
-    The same seconds as ``classify`` per day, in one sweep over the whole period."""
+    The same seconds as ``classify`` per day, in one sweep over the whole period. With ``spans`` (consecutive
+    inclusive (first, last) dates covering the period, lifetime_uptime.buckets) the seconds of each span are
+    ``spans_s`` [[good, bad, unknown, excluded]] instead of per day, without building a day at a time."""
     start, end = local_midnight(first_day, zone), min(local_midnight(last_day + dt.timedelta(days=1), zone), now)
     start = max(start, since) if since else start
     windows = schedule_windows(schedule, laptop, start, end, zone) if start < end else []
     states, cuts = normalize(presence, now), _merge(maintenance)
-    count = (last_day - first_day).days + 1
-    edges = [min(max(local_midnight(first_day + dt.timedelta(days=offset), zone), start), max(start, end))
-             for offset in range(count + 1)]
+    starts = [first for first, _ in spans] if spans else [first_day + dt.timedelta(days=i) for i in range((last_day - first_day).days + 1)]
+    count = len(starts)
+    edges = [min(max(local_midnight(day, zone), start), max(start, end))
+             for day in (*starts, last_day + dt.timedelta(days=1))]
     scheduled = _intersect(windows, [(start, end)]) if start < end else []
     counted = _subtract(scheduled, cuts)
     good, bad = _spread(_intersect(counted, states['online']), edges), _spread(_intersect(counted, states['offline']), edges)
@@ -194,11 +197,15 @@ def device_availability(presence, schedule, laptop, maintenance, first_day, last
                     excluded_s=excluded[index])
         for key in FIELDS:
             totals[key] += part[key]
-        if daily:
-            days.append(dict(date=(first_day + dt.timedelta(days=index)).isoformat(),
-                             **{key: round(value) for key, value in part.items()}))
+        if spans:
+            days.append([part[key] for key in FIELDS])
+        elif daily:
+            days.append(dict(date=starts[index].isoformat(), **{key: round(value) for key, value in part.items()}))
     number, longest = outages(counted, states['offline'])
-    return dict(summarise(totals, floor), daily=days, outages=number, longest_outage_s=longest)
+    result = dict(summarise(totals, floor), daily=[] if spans else days, outages=number, longest_outage_s=longest)
+    if spans:
+        result['spans_s'] = days
+    return result
 
 
 def combine(results, floor=DEFAULT_FLOOR):

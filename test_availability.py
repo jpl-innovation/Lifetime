@@ -176,6 +176,17 @@ class SweepTests(unittest.TestCase):
             now = at(chance.randint(15, 29), chance.randint(0, 23))
             expected = reference(presence, schedule, False, maintenance, first, last, zone, now)
             result = availability.device_availability(presence, schedule, False, maintenance, first, last, zone, now)
+            import lifetime_uptime
+            spans = lifetime_uptime.buckets(first, last, 'week')
+            weekly = availability.device_availability(presence, schedule, False, maintenance, first, last, zone, now, spans=spans)
+            by_day = {day['date']: day for day in expected}
+            with self.subTest(case=case, spans=True):
+                self.assertEqual(len(weekly['spans_s']), len(spans))
+                for (low, high), values in zip(spans, weekly['spans_s']):
+                    days = [by_day[(low + dt.timedelta(days=i)).isoformat()] for i in range((high - low).days + 1)]
+                    for key, value in zip(availability.FIELDS, values):
+                        self.assertAlmostEqual(value, sum(day[key] for day in days), delta=len(days))
+                self.assertEqual(weekly['availability'], result['availability'])
             with self.subTest(case=case):
                 for got, want in zip(result['daily'], expected):
                     self.assertEqual(got['date'], want['date'])

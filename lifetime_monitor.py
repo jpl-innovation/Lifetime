@@ -1162,7 +1162,7 @@ class Monitor:
             results = [self._device_availability(self._db, device, first, last, now, floor, daily) for device in devices]
         return dict(as_of=_stamp(now), coverage_floor=floor, devices=results)
 
-    def _device_availability(self, db, device, first, last, now, floor, daily):
+    def _device_availability(self, db, device, first, last, now, floor, daily, spans=None):
         schedule = self._schedule_for(db, device)
         zone, zone_ok = schedule_zone(schedule)
         local = (lambda moment: moment.astimezone(zone)) if zone else (lambda moment: moment.astimezone())
@@ -1187,7 +1187,7 @@ class Monitor:
                AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
                ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
         result = availability.device_availability(presence, schedule, device.get('laptop'), windows, begin, finish,
-                                                  zone, now, floor, daily, since)
+                                                  zone, now, floor, daily, since, spans)
         name = schedule['timezone'] if zone_ok else 'local'
         offset = now.astimezone().strftime('%z')
         return dict(result, device_id=device['device_id'], name=device.get('name', ''),
@@ -1216,13 +1216,8 @@ class Monitor:
             rows = []
             with self._lock:
                 for device in devices:
-                    found = self._device_availability(self._db, device, first, last, now, floor, True)
-                    days, bars, index = found['daily'], [], 0
-                    for span_start, span_end in spans:
-                        width = (span_end - span_start).days + 1
-                        part = days[index:index + width]
-                        index += width
-                        bars.append([round(sum(day[field] for day in part) / 60) for field in ('good_s', 'bad_s', 'unknown_s')])
+                    found = self._device_availability(self._db, device, first, last, now, floor, False, spans)
+                    bars = [[round(good / 60), round(bad / 60), round(unknown / 60)] for good, bad, unknown, _ in found['spans_s']]
                     rows.append(dict(device_id=device['device_id'], name=device.get('name', ''),
                                      group=device.get('group', ''), availability=found['availability'],
                                      coverage=found['coverage'], status=found['status'], outages=found['outages'],

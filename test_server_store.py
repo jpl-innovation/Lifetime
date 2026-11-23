@@ -749,17 +749,28 @@ class StoreTests(unittest.TestCase):
                 self.store.fleet(start=start, end=end)
 
     def test_ten_years_of_daily_and_downtime_fit_one_admin_reply(self):
-        """The admin channel answers at most 1 MiB; a computer's detail must fit with the largest history allowed."""
+        """The admin channel answers at most 1 MiB; a computer's detail (as the dashboard asks for it: 24 hours of
+        readings, 100 records) must fit with the largest history a computer may send."""
         from lifetime_protocol import MAX_BYTES, canonical
-        allowed = {'history': True, 'resources': False}
+        allowed = {'history': True, 'resources': True}
         request, credential = self.pair(policy=allowed)
         device = request['device_id']
         days = [(dt.date(2016, 11, 15) + dt.timedelta(days=i)).isoformat() for i in range(3660)]
         off = dict(asleep_s=28800, off_s=36000, unknown_s=7200, restarts=12, shutdowns=10, unexpected_stops=3)
-        history = {'daily': {day: 14399.5 for day in days}, 'downtime_daily': {day: off for day in days}}
-        self.store.ingest(device, credential, message(device, policy=allowed, history=history))
-        size = len(canonical(self.store.get_device(device)))
-        self.assertLess(size, MAX_BYTES * 0.6, size)
+        history = {'daily': {day: 14399.5 for day in days}, 'imported_daily': {day: 1234.5 for day in days},
+                   'downtime_daily': {day: off for day in days},
+                   'dated_hourly': {day: [3599.5] * 24 for day in days[-120:]}, 'hourly': [3599.5] * 24,
+                   'sessions': [dict(start='2026-11-07T08:00:00+07:00', seconds=3600.5, imported=True)] * 100,
+                   'first_seen': '2016-11-15T08:00:00+07:00', 'first_seen_source': 'os-install-date',
+                   'recording_started': '2026-11-01T08:00:00+07:00', 'boots': 5000,
+                   'current_session_seconds': 3600.5, 'longest_session_seconds': 86400.5}
+        self.store.ingest(device, credential, message(device, policy=allowed, history=history,
+                                                      records=[record(seq) for seq in range(1, 101)]))
+        rows = [(device, (NOW - dt.timedelta(minutes=5 * i)).isoformat(), 12.5, 45.5, 33.3, 88.8, 12.25, 55.5)
+                for i in range(288)]
+        self.store._db.executemany('INSERT INTO performance_samples VALUES (?,?,?,?,?,?,?,?)', rows)
+        size = len(canonical(self.store.get_device(device, limit=100, hours=24)))
+        self.assertLess(size, MAX_BYTES * 0.85, size)
 
     def test_retention_keeps_latest_stock_but_does_not_invent_retained_usage(self):
         request, credential = self.pair()

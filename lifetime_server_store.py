@@ -1493,7 +1493,8 @@ class Store:
             threshold = max(OVERDUE_SECONDS, interval * 3)
             counts['pending'] = db.execute("SELECT COUNT(*) FROM requests WHERE status='pending'").fetchone()[0]
             groups.update(row[0] for row in db.execute('SELECT name FROM named_groups'))
-            for row in db.execute('SELECT * FROM devices'):
+            for row in db.execute("SELECT *,json_extract(history,'$.daily') AS history_daily,"
+                                  "json_extract(history,'$.recording_started') AS history_started FROM devices"):
                 received = self._last_seen(row)
                 identity, policy = json.loads(row['identity']), json.loads(row['policy'])
                 name = identity.get('display_name') or row['device_id']
@@ -1520,7 +1521,9 @@ class Store:
                                                time=_stamp(min(_now(), went_offline))))
                     else:
                         current = 'unavailable'
-                history = json.loads(row['history']) if row['history'] and policy['history'] else {}
+                # Only the daily totals are read: a long off-time history would triple the parsing on every refresh.
+                history = (dict(daily=json.loads(row['history_daily'] or '{}'), recording_started=row['history_started'])
+                           if row['history'] and policy['history'] else {})
                 dated = history.get('daily', {})
                 if row['retained_before']:
                     dated = {date: seconds for date, seconds in dated.items() if date >= row['retained_before'][:10]}
@@ -1627,7 +1630,10 @@ class Store:
         detail (health), plus the agent version."""
         result = []
         with self._transaction() as db:
-            for row in db.execute("SELECT * FROM devices WHERE status='approved' ORDER BY created_at,device_id").fetchall():
+            # The awake parts of the history only, not its off-time breakdown (parsed by SQLite, not here).
+            for row in db.execute("""SELECT *,json_extract(history,'$.daily') AS history_daily,
+                    json_extract(history,'$.dated_hourly') AS history_hourly,json_extract(history,'$.first_seen') AS history_seen
+                    FROM devices WHERE status='approved' ORDER BY created_at,device_id""").fetchall():
                 identity, policy = json.loads(row['identity']), json.loads(row['policy'])
                 item = dict(device_id=row['device_id'], name=identity.get('display_name') or row['device_id'],
                             group=identity.get('department', ''), room=identity.get('location', ''),
@@ -1639,9 +1645,8 @@ class Store:
                     totals = latest['totals']
                     item['awake_seconds'] = totals['measured_seconds'] + totals['imported_seconds'] + totals['baseline_seconds']
                 if policy.get('history') and row['history']:
-                    history = json.loads(row['history'])
-                    item['history'] = dict(daily=history.get('daily') or {}, dated_hourly=history.get('dated_hourly') or {},
-                                           first_seen=history.get('first_seen'))
+                    item['history'] = dict(daily=json.loads(row['history_daily'] or '{}'),
+                                           dated_hourly=json.loads(row['history_hourly'] or '{}'), first_seen=row['history_seen'])
                 if policy.get('resources'):
                     readings = json.loads(row['readings']) if row['readings'] else {}
                     item['readings'] = readings or None
