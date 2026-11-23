@@ -782,6 +782,31 @@ class StoreTests(unittest.TestCase):
         self.assertEqual((len(part['daily']), len(part['downtime_daily']), part['history']), (7, 7, True))
         self.assertEqual(len(canonical(self.store.uptime_days(device, days[0], days[-1]))) < MAX_BYTES * 0.85, True)
 
+    def test_a_sync_without_the_extended_parts_keeps_the_last_good_ones(self):
+        """A 1.3 computer that falls back to the older format for a while (after a refused sync) must not wipe the
+        off-time days or the activity detail the server already has; a new valid set replaces them."""
+        allowed = {'history': True, 'resources': False}
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        off = dict(asleep_s=28800, off_s=0, unknown_s=0, restarts=0, shutdowns=0, unexpected_stops=0)
+        full = {'daily': {'2026-11-05': 3600, '2026-11-06': 3600}, 'hourly': [0] * 24, 'boots': 3,
+                'downtime_daily': {'2026-11-05': off, '2026-11-06': off}}
+        self.store.ingest(device, credential, message(device, policy=allowed, history=full))
+        # The fallback format: daily totals only. Day 6 now has 18 h awake, which no longer fits with 8 h asleep.
+        self.store.ingest(device, credential, message(device, policy=allowed, records=[record(2)],
+                                                      history={'daily': {'2026-11-05': 3600, '2026-11-06': 64800}}))
+        kept = self.store.get_device(device)
+        self.assertEqual((kept['history']['hourly'], kept['history']['boots']), ([0] * 24, 3))
+        self.assertEqual(kept['history']['daily']['2026-11-06'], 64800)
+        self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], {'2026-11-05': off})
+        backup = self.root / 'kept.sqlite'
+        self.store.backup(backup)          # what is kept still passes the protocol checks of a backup
+        newer = dict(off, asleep_s=3600)
+        self.store.ingest(device, credential, message(device, policy=allowed, records=[record(3)],
+                                                      history=dict(full, downtime_daily={'2026-11-06': newer})))
+        self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], {'2026-11-06': newer})
+        self.store.restore(backup)
+
     def test_uptime_days_follow_consent_and_bounds(self):
         allowed = {'history': True, 'resources': False}
         request, credential = self.pair(policy=allowed)

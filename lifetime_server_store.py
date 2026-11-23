@@ -20,7 +20,8 @@ import threading
 import time
 import uuid
 
-from lifetime_protocol import ProtocolError, number, validate_identity, validate_problem, validate_sync, validate_performance
+from lifetime_protocol import (DOWNTIME_SECONDS, HISTORY_EXTRA, MAX_DAY_SECONDS, ProtocolError, number, validate_identity,
+                               validate_problem, validate_sync, validate_performance)
 
 SCHEMA_VERSION = 10
 APPLICATION_ID = 0x4C544D45
@@ -832,7 +833,7 @@ class Store:
                     if category in message and current_policy.get(permission, False) and message['policy'].get(permission, False):
                         value = message[category]
                         if category == 'history':
-                            value = self._retained_history(value, row['retained_before'])
+                            value = self._retained_history(self._kept_history(value, row['history']), row['retained_before'])
                         elif row['retained_before'] and _stamp(_time(value['observed_at'])) < row['retained_before']:
                             continue
                         elif row[category] and _time(value['observed_at']) < _time(json.loads(row[category])['observed_at']):
@@ -1162,6 +1163,23 @@ class Store:
             sleep['daily'] = {d: v for d, v in sleep['daily'].items() if d >= before[:10]}
         if 'nights' in sleep:
             sleep['nights'] = [r for r in sleep['nights'] if r['date'] >= before[:10]]
+        return value
+
+    @staticmethod
+    def _kept_history(value, stored):
+        """A history without its extended parts (the older format a computer falls back to for a while) keeps the
+        last good ones already stored until a new valid set arrives. Kept off-time days must still fit with the
+        new daily awake time."""
+        if not stored:
+            return value
+        old, value = json.loads(stored), dict(value)
+        for key in ('downtime_daily', *HISTORY_EXTRA):
+            if key not in value and key in old:
+                value[key] = old[key]
+        if 'downtime_daily' in value and value['downtime_daily'] is old.get('downtime_daily'):
+            daily = value.get('daily') or {}
+            value['downtime_daily'] = {day: off for day, off in old['downtime_daily'].items()
+                                       if sum(off[key] for key in DOWNTIME_SECONDS) + (daily.get(day) or 0) <= MAX_DAY_SECONDS}
         return value
 
     @staticmethod

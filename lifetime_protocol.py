@@ -233,19 +233,23 @@ MAX_DAY_SECONDS = 90000     # a 25-hour DST day plus slack
 
 def validate_downtime(days, awake=None):
     """history.downtime_daily (1.3, capability 'downtime'): {local ISO date: the six non-negative integers}, at most
-    3,660 days. Asleep, off and unknown, plus that day's awake seconds from ``awake`` (history.daily), fit in one day."""
-    if not isinstance(days, dict) or len(days) > 3660:
-        raise ProtocolError('Invalid downtime history')
-    for day, value in days.items():
-        _day(day)
-        _object(value, DOWNTIME_SECONDS + DOWNTIME_COUNTS, DOWNTIME_SECONDS + DOWNTIME_COUNTS)
-        for key in DOWNTIME_COUNTS:
-            if number(value[key], True) > 10000:
-                raise ProtocolError('Downtime count out of range')
-        spent = sum(number(value[key], True) for key in DOWNTIME_SECONDS)
-        awake_seconds = (awake or {}).get(day, 0)
-        if spent + (awake_seconds if isinstance(awake_seconds, (int, float)) else 0) > MAX_DAY_SECONDS:
-            raise ProtocolError('Downtime exceeds one day')
+    3,660 days. Asleep, off and unknown, plus that day's awake seconds from ``awake`` (history.daily), fit in one day.
+    Every refusal starts with "Invalid downtime history", so a refused sync says which part was wrong."""
+    try:
+        if not isinstance(days, dict) or len(days) > 3660:
+            raise ProtocolError('not an object of at most 3,660 days')
+        for day, value in days.items():
+            _day(day)
+            _object(value, DOWNTIME_SECONDS + DOWNTIME_COUNTS, DOWNTIME_SECONDS + DOWNTIME_COUNTS)
+            for key in DOWNTIME_COUNTS:
+                if number(value[key], True) > 10000:
+                    raise ProtocolError('count out of range')
+            spent = sum(number(value[key], True) for key in DOWNTIME_SECONDS)
+            awake_seconds = (awake or {}).get(day, 0)
+            if spent + (awake_seconds if isinstance(awake_seconds, (int, float)) else 0) > MAX_DAY_SECONDS:
+                raise ProtocolError('a day exceeds 90,000 s')
+    except ProtocolError as error:
+        raise ProtocolError(f'Invalid downtime history: {error}') from None
     return days
 
 

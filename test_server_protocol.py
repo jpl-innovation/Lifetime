@@ -51,6 +51,11 @@ class DowntimeTests(unittest.TestCase):
                 validate_sync(self.with_downtime(days))
         with self.assertRaises(ProtocolError):      # with that day's awake time it no longer fits in a day
             validate_sync(self.with_downtime({'2026-11-20': day_off(asleep_s=60000, off_s=0)}, {'2026-11-20': 30001}))
+        for days in bad:      # every rejection names the field, so a refused sync says what was wrong
+            with self.subTest(days=str(days)[:60]):
+                with self.assertRaises(ProtocolError) as caught:
+                    validate_sync(self.with_downtime(days))
+                self.assertTrue(str(caught.exception).startswith('Invalid downtime history'), str(caught.exception))
         refused = self.with_downtime({'2026-11-20': day_off()})
         refused['policy']['history'] = False        # history not shared: nothing dated may arrive
         with self.assertRaises(ProtocolError):
