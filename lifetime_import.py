@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 import lifetime_tracker as tracker
 
@@ -76,7 +77,7 @@ def parse_shutdowns(raw):
     return stamps
 
 
-def linux_boots():
+def _journal_boots():
     if not shutil.which('journalctl'):
         raise ValueError('Earlier history is not available: this system has no systemd journal')
     try:
@@ -88,28 +89,56 @@ def linux_boots():
     current = next((b for b in boots if b['id'] == identity), None)
     if current is None:
         raise ValueError('Current boot missing; refusing to guess the import boundary')
+    return boots, current
+
+
+def _wtmp_shutdowns():
     try:
-        shutdowns = parse_shutdowns(command(['last', '-x', '-F', 'reboot', 'shutdown']))
+        return parse_shutdowns(command(['last', '-x', '-F', 'reboot', 'shutdown']))
     except (OSError, ValueError):
-        shutdowns = []  # Optional corroboration; missing wtmp never invents an end.
+        return []  # Optional corroboration; missing wtmp never invents an end.
+
+
+def _power_details(boot, shutdowns):
+    """Sleep/wake events and whether the boot ended cleanly (journal, then the wtmp shutdown records)."""
+    raw = command(['journalctl', '-k', '-b', boot['id'], '-g',
+                   'PM: (suspend|hibernation) (entry|exit)', '-o', 'json', '--no-pager'], True)
+    boot['events'] = parse_events(raw)
+    if not boot['events']:
+        raw = command(['journalctl', '-b', boot['id'], '-u', 'systemd-logind',
+                       '-o', 'json', '--no-pager'])
+        boot['events'] = parse_events(raw, fallback=True)
+    tail = command(['journalctl', '-b', boot['id'], '-n', '100', '-o', 'json', '--no-pager'])
+    records = [json.loads(line) for line in tail.splitlines() if line.strip()]
+    boot['clean'] = any(boot['start'] <= stamp and abs(stamp - boot['end']) <= 120 for stamp in shutdowns)
+    boot['clean'] |= any(row.get('_PID') == '1' and re.search(
+        r'Shutting down|Reached target .*System (Reboot|Power Off)|Stopped Record System Boot/Shutdown in UTMP',
+        row.get('MESSAGE', '')) for row in records)
+
+
+def linux_boots():
+    boots, current = _journal_boots()
+    shutdowns = _wtmp_shutdowns()
     for boot in boots:
-        if boot['id'] == identity or boot['end'] >= current['start']:
+        if boot['id'] == current['id'] or boot['end'] >= current['start']:
             continue
-        raw = command(['journalctl', '-k', '-b', boot['id'], '-g',
-                       'PM: (suspend|hibernation) (entry|exit)', '-o', 'json', '--no-pager'], True)
-        boot['events'] = parse_events(raw)
-        if not boot['events']:
-            raw = command(['journalctl', '-b', boot['id'], '-u', 'systemd-logind',
-                           '-o', 'json', '--no-pager'])
-            boot['events'] = parse_events(raw, fallback=True)
+        _power_details(boot, shutdowns)
         boot['activity'] = parse_activity(command(['journalctl', '-b', boot['id'], '-o', 'short-unix', '--no-pager']))
-        tail = command(['journalctl', '-b', boot['id'], '-n', '100', '-o', 'json', '--no-pager'])
-        records = [json.loads(line) for line in tail.splitlines() if line.strip()]
-        boot['clean'] = any(boot['start'] <= stamp and abs(stamp - boot['end']) <= 120 for stamp in shutdowns)
-        boot['clean'] |= any(row.get('_PID') == '1' and re.search(
-            r'Shutting down|Reached target .*System (Reboot|Power Off)|Stopped Record System Boot/Shutdown in UTMP',
-            row.get('MESSAGE', '')) for row in records)
     return boots, current['start']
+
+
+def linux_power(since=None):
+    """Boots and downtime details for ``lifetime_downtime``: (boots, extras, info). On Linux an end that neither
+    the journal nor wtmp shows as a clean shutdown counts as an unexpected stop (there is no Kernel-Power 41)."""
+    boots, current = _journal_boots()
+    shutdowns = _wtmp_shutdowns()
+    chosen = [boot for boot in sorted(boots, key=lambda b: b['start']) if since is None or boot['end'] >= since]
+    for boot in chosen:
+        _power_details(boot, shutdowns)
+        if boot['id'] == current['id']:
+            boot['clean'] = False
+    stops = [after['start'] for before, after in zip(chosen, chosen[1:]) if not before['clean']]
+    return chosen, dict(requests=[], stops=stops, wakes=[]), dict(log='journal')
 
 
 GAP = 600  # seconds. A running desktop writes to the journal constantly; a longer silence means the
@@ -306,7 +335,23 @@ def report(result):
     print(f"Daily sum: {sum(result['daily'].values()):.6f}; hourly sum: {sum(result['hourly']):.6f}")
 
 
-def main(provider=linux_boots):
+def add_downtime(ledger, power, since=None):
+    """Write ``downtime_daily`` from the power history ``power(since)`` returns. Awake accounting is not touched;
+    a log that cannot be read only leaves a note for the coverage line."""
+    import time
+    import lifetime_downtime as downtime
+    try:
+        boots, extras, info = power(since)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        ledger['downtime_sources'] = dict(ledger.get('downtime_sources') or {}, note='unavailable')
+        return str(error)
+    now = time.time()
+    result = downtime.from_boots(boots, extras, now)
+    downtime.apply(ledger, result, downtime.sources_for(result, now=now, **info), now)
+    return None
+
+
+def main(provider=linux_boots, power=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--dry-run', action='store_true')
@@ -324,9 +369,14 @@ def main(provider=linux_boots):
                 imported = rebuild(boots, current, ledger)
                 from lifetime_settings import load_settings
                 settings = load_settings(path.parent)
-                if settings['completed'] and not settings['history']:
+                history = not (settings['completed'] and not settings['history'])
+                if not history:
                     imported.update(daily={}, hourly=[0.0]*24, sessions=[])
                 result = merge(ledger, imported)
+                if power is not None and history:
+                    problem = add_downtime(result, power)
+                    if problem:
+                        print(f'Downtime history not added: {problem}', file=sys.stderr)
                 if path.exists():
                     shutil.copy2(path, path.with_name(path.name + '.bak-before-import'))
                 tracker.atomic_json(path, result)
@@ -343,4 +393,4 @@ def main(provider=linux_boots):
 
 
 if __name__ == '__main__':
-    main()
+    main(linux_boots, linux_power)

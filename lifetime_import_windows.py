@@ -148,11 +148,55 @@ def parse_windows_xml(raw):
     return _parse_events(_xml_events(io.StringIO(raw)))[0]
 
 
-def _query_system():
+POWER_IDS = (1, 12, 13, 27, 41, 42, 107, 1074, 6005, 6006, 6008, 6009, 6013)
+STOPS = (('Microsoft-Windows-Kernel-Power', 41), ('EventLog', 6008))
+
+
+def _note(event, extras):
+    """Collect what downtime needs and the awake parser ignores: unexpected stops and wake sources.
+
+    41 and 6008 normally describe the same stop, both written at the next start: keep one per incident."""
+    system = event.find('{*}System')
+    provider = system.find('{*}Provider').get('Name', '')
+    identity = int(system.findtext('{*}EventID'))
+    stamp = _timestamp(system.find('{*}TimeCreated').get('SystemTime'))
+    data = {item.get('Name'): item.text or '' for item in event.findall('{*}EventData/{*}Data')}
+    if (provider, identity) in STOPS:
+        if not any(abs(stamp - other) < 120 for other in extras['stops'][-3:]):
+            extras['stops'].append(stamp)
+    elif provider == 'Microsoft-Windows-Power-Troubleshooter' and identity == 1 and data.get('WakeTime'):
+        extras['wakes'].append((_timestamp(data['WakeTime']), (data.get('WakeSourceText') or data.get('WakeTimerOwner') or '')[:200]))
+
+
+def _tap(events, extras):
+    """Pass events through unchanged while noting downtime details; a detail that cannot be read is skipped."""
+    for event in events:
+        try:
+            _note(event, extras)
+        except (AttributeError, TypeError, ValueError):
+            pass
+        yield event
+
+
+def new_extras():
+    return dict(requests=[], stops=[], wakes=[])
+
+
+def power_query(since=None):
+    """XPath for the power events only (fast: a fraction of a second), optionally from a UTC instant on."""
+    when = ''
+    if since is not None:
+        moment = dt.datetime.fromtimestamp(since, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        when = f" and TimeCreated[@SystemTime>='{moment}']"
+    return '*[System[(' + ' or '.join(f'EventID={i}' for i in POWER_IDS) + ')' + when + ']]'
+
+
+def _query_system(extras=None, query=None):
     # /uni:true avoids the active code page and localized message decoding.
     # /e:Events supplies a root for iterparse. No message rendering, elevation,
     # event count cap, or query of a restricted log such as Security is needed.
-    args = ['wevtutil', 'qe', 'System', '/f:xml', '/e:Events', '/rd:false', '/uni:true']
+    # ``extras`` (optional) also collects downtime details from the same stream; ``query`` filters by XPath.
+    args = ['wevtutil', 'qe', 'System', '/f:xml', '/e:Events', '/rd:false', '/uni:true'] + ([f'/q:{query}'] if query else [])
     errors = bytearray()
     with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
         def read_errors():
@@ -164,7 +208,8 @@ def _query_system():
         reader.start()
         parse_error = None
         try:
-            result = _parse_events(_xml_events(process.stdout))
+            events = _xml_events(process.stdout)
+            result = _parse_events(_tap(events, extras) if extras is not None else events)
         except (ET.ParseError, ValueError) as error:
             parse_error = error
             if process.poll() is None:
@@ -192,6 +237,18 @@ def _native_boot_time():
     if not 0 < stamp <= time.time():
         raise ValueError('Invalid native Windows boot time')
     return stamp
+
+
+def windows_power(since=None):
+    """Boots and downtime details from the power events in the System log, for ``lifetime_downtime``.
+
+    Returns (boots, extras, info); raises ValueError when the log cannot be read."""
+    extras = new_extras()
+    try:
+        boots, _ = _query_system(extras, power_query(since))
+    except (OSError, ET.ParseError) as error:
+        raise ValueError(f'Cannot read the System event log. {error}') from error
+    return boots, extras, dict(log='windows-log', archives=0, archive_note='none')
 
 
 def windows_boots():
@@ -226,4 +283,4 @@ def windows_boots():
 
 
 if __name__ == '__main__':
-    main(windows_boots)
+    main(windows_boots, windows_power)

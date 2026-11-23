@@ -137,7 +137,7 @@ def from_boots(boots, extras=None, now=None, tz=None):
         for start, end in _sleep_intervals(boot):
             request = _near(requests, start, FAST_STARTUP_GAP, 5)
             if request is not None:        # "Shut down" with Fast Startup hibernates the kernel: it is a shutdown
-                add(start, end, 'off')
+                add(start, end, 'off_s')
                 bucket(local_day(start, tz))['shutdowns'] += 1
                 event(start, 'shutdown', by=request.get('by', ''), reason=request.get('reason', ''), source='fast-startup')
                 event(end, 'start', source='fast-startup')
@@ -154,7 +154,7 @@ def from_boots(boots, extras=None, now=None, tz=None):
         if boot.get('clean'):
             request = _near(requests, boot['end'], 900, 5) or {}
             kind = request.get('kind') or ('restart' if following['start'] - boot['end'] <= RESTART_GAP else 'shutdown')
-            add(boot['end'], following['start'], 'off')
+            add(boot['end'], following['start'], 'off_s')
             bucket(local_day(boot['end'], tz))['restarts' if kind == 'restart' else 'shutdowns'] += 1
             event(boot['end'], kind, by=request.get('by', ''), reason=request.get('reason', ''))
         elif stopped:
@@ -215,8 +215,8 @@ def apply(ledger, result, sources=None, now=None, tz=None):
         day = first
         while day <= today:
             key = day.isoformat()
-            fresh[key] = dict(asleep_s=0.0, off_s=0.0, restarts=0, shutdowns=0, unexpected_stops=0,
-                              **result['days'].get(key, {}))
+            fresh[key] = {**dict(asleep_s=0.0, off_s=0.0, restarts=0, shutdowns=0, unexpected_stops=0),
+                          **result['days'].get(key, {})}
             day += dt.timedelta(days=1)
         fresh = settle(fresh, ledger.get('daily', {}), now, tz)
         first_key = first.isoformat()
@@ -239,7 +239,7 @@ def apply(ledger, result, sources=None, now=None, tz=None):
 def sources_for(result, log, archives=0, archive_note='none', now=None, tz=None, **more):
     """The coverage facts saved beside ``downtime_daily`` (no paths, names or accounts)."""
     now = now if now is not None else dt.datetime.now().timestamp()
-    value = dict(log=log, archives=archives, archive_note=archive_note,
+    value = dict(log=log, archives=archives, archive_note=archive_note, note=None,
                  checked=dt.datetime.fromtimestamp(now, dt.timezone.utc).isoformat(timespec='seconds'), **more)
     if result.get('start') is not None:
         value['log_from'] = local_day(result['start'], tz).isoformat()

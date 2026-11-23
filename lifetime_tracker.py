@@ -307,6 +307,49 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     return ledger
 
 
+def read_power(since=None):
+    """(boots, extras, info, now) from this computer's power log, or the exception that stopped the read."""
+    try:
+        if sys.platform == 'win32':
+            from lifetime_import_windows import windows_power as reader
+        else:
+            from lifetime_import import linux_power as reader
+        now = time.time()
+        return (*reader(since), now)
+    except Exception as error:      # a log problem is reported in the coverage line, never raised into the tracker
+        return error
+
+
+def power_since(ledger):
+    """Read from just before the last start already seen (so its shutdown is classified); the first time, all of it."""
+    last = (ledger.get('downtime_sources') or {}).get('last_boot') if isinstance(ledger.get('downtime_sources'), dict) else None
+    return last - 60 if isinstance(last, (int, float)) and not isinstance(last, bool) and math.isfinite(last) else None
+
+
+def refresh_downtime(ledger, found):
+    """Apply a ``read_power`` result to the downtime keys only. Any failure leaves the ledger as it was."""
+    try:
+        import lifetime_downtime as downtime
+        from lifetime_ledger import problems
+        work = dict(daily=ledger.get('daily', {}), downtime_daily=ledger.get('downtime_daily') or {},
+                    downtime_sources=ledger.get('downtime_sources') if isinstance(ledger.get('downtime_sources'), dict) else {})
+        if isinstance(found, Exception):
+            work['downtime_sources'] = dict(work['downtime_sources'], note='unavailable')
+        else:
+            boots, extras, info, now = found
+            result = downtime.from_boots(boots, extras, now)
+            downtime.apply(work, result, downtime.sources_for(result, now=now, **info), now)
+        if problems({'total_seconds': 0, 'downtime_daily': work['downtime_daily'],
+                     'downtime_sources': work['downtime_sources']}):
+            return ledger
+        if work['downtime_daily'] or 'downtime_daily' in ledger:
+            ledger['downtime_daily'] = work['downtime_daily']
+        ledger['downtime_sources'] = work['downtime_sources']
+    except Exception:
+        pass
+    return ledger
+
+
 def credit_current_boot(directory=None):
     directory = Path(directory or data_dir())
     from lifetime_settings import load_settings
@@ -498,10 +541,17 @@ def run(directory=None):
         health_results = []
         health_pending = False
         health_attempt = -3600
+        # Downtime (asleep / off / stops) is read from the System log or journal in the background, at most
+        # hourly, and applied at the next save. It never delays or changes awake accounting.
+        power_results = []
+        power_pending = False
+        power_attempt = -3600
         def collect_capacity():
             health_results.append(health.probe_battery())
+        def collect_power(since):
+            power_results.append(read_power(since))
         def flush(running):
-            nonlocal health_pending, health_attempt
+            nonlocal health_pending, health_attempt, power_pending, power_attempt
             with file_lock(directory, 'ledger.lock'):
                 settings = load_settings(directory)
                 if not settings['completed']:
@@ -520,6 +570,17 @@ def run(directory=None):
                     health_results.clear()
                     health_pending = False
                 sample(ledger, awake_clock(), boot_id(), history=settings['history'])
+                if settings['history']:
+                    if power_results:
+                        refresh_downtime(ledger, power_results.pop())
+                        power_pending = False
+                    if running and not power_pending and time.monotonic()-power_attempt >= 3600:
+                        power_pending = True
+                        power_attempt = time.monotonic()
+                        threading.Thread(target=collect_power, args=(power_since(ledger),), daemon=True).start()
+                else:
+                    power_results.clear()
+                    power_pending = False
                 save(directory, ledger, running)
         try:
             flush(True)
