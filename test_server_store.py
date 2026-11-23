@@ -807,6 +807,16 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.uptime_days(device, '2026-11-01', '2026-11-07')['downtime_daily'], {'2026-11-06': newer})
         self.store.restore(backup)
 
+    def test_delete_before_refuses_a_date_in_the_future(self):
+        request, credential = self.pair()
+        self.store.ingest(request['device_id'], credential, message(request['device_id']))
+        for future in ('2026-11-08T00:00:00+00:00', '2026-11-07T12:00:01+00:00'):
+            with self.subTest(future=future), self.assertRaises(StoreError):
+                self.store.retain(future)
+        self.assertIsNone(self.store.get_configuration()['retained_before'])
+        self.assertEqual(self.store.get_device(request['device_id'])['record_count'], 1)
+        self.store.retain('2026-11-07T00:00:00+00:00')        # today's midnight is allowed
+
     def test_uptime_days_follow_consent_and_bounds(self):
         allowed = {'history': True, 'resources': False}
         request, credential = self.pair(policy=allowed)
@@ -830,7 +840,8 @@ class StoreTests(unittest.TestCase):
         request, credential = self.pair()
         device = request['device_id']
         self.store.ingest(device, credential, message(device))
-        self.store.retain('2026-11-08T00:00:00Z')
+        with patch.object(storage, '_now', return_value=NOW + dt.timedelta(days=1)):     # a boundary is never in the future
+            self.store.retain('2026-11-08T00:00:00Z')
         info = self.store.get_device(device)
         self.assertEqual(info['record_count'], 0)
         self.assertIsNone(info['retained_usage'])

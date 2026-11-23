@@ -321,6 +321,15 @@ class DetailRetentionTests(MonitorCase):
         self.assertEqual(sorted(row[0] for row in db.execute('SELECT state FROM incidents')), ['open', 'resolved'])
         self.assertEqual(db.execute('SELECT COUNT(*) FROM timeline').fetchone()[0], 2)    # the deleted one's went with it
 
+    def test_delete_before_refuses_a_date_in_the_future(self):
+        cutoff = self.clock.now - dt.timedelta(days=10)
+        self.seed(cutoff)
+        before = self.monitor._db.execute('SELECT COUNT(*) FROM presence').fetchone()[0]
+        with self.assertRaises(monitoring.MonitorError):
+            self.monitor.retain(stamp(self.clock.now + dt.timedelta(days=30)))
+        self.assertEqual(self.monitor._db.execute('SELECT COUNT(*) FROM presence').fetchone()[0], before)
+        self.assertEqual(self.monitor._db.execute("SELECT COUNT(*) FROM incidents WHERE state='resolved'").fetchone()[0], 2)
+
     def test_daily_totals_in_the_server_store_are_never_trimmed(self):
         from lifetime_server_store import Store
         store = Store(Path(self.temporary.name) / 'server.sqlite')

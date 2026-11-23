@@ -28,6 +28,17 @@ class UptimeGuiTests(_Base):
         self.assertEqual(uptime.detail_days.suffix(), ' ngày')
         self.assertEqual(uptime.detail_days.accessibleName(), 'Giữ dữ liệu chi tiết trong')
 
+    def test_delete_before_says_what_goes_and_stops_at_today(self):
+        from unittest.mock import patch
+        self.assertEqual(self.window.retention_date.maximumDate(), QDate.currentDate())
+        with patch.object(self.window, '_confirm', return_value=False) as confirm:
+            self.window.retain_button.click()
+        words = confirm.call_args.args[0]
+        for part in ('monitoring history', 'resolved incidents', 'maintenance windows', 'open incidents',
+                     'latest totals', 'cannot be undone'):
+            self.assertIn(part, words)
+        self.assertEqual(self.arguments('retain'), [])
+
     def test_range_control_quick_choices_custom_dates_and_limits(self):
         control = self.window.detail_range
         today = dt.date.today()

@@ -1364,6 +1364,8 @@ class Monitor:
     def retain(self, before):
         """"Delete records before" reaches monitoring too: presence, incidents (with their timelines), deliveries,
         maintenance windows and daily readings that ended before the boundary. An interval crossing it is cut there."""
+        if _time(before) > self.clock():
+            raise MonitorError('The boundary cannot be in the future')
         boundary = _stamp(_time(before))
         with self._transaction() as db:
             db.execute('DELETE FROM presence WHERE end_at IS NOT NULL AND end_at<=?', (boundary,))

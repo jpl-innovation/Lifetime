@@ -1205,6 +1205,8 @@ class Store:
         the floor remain immutable; unseen sequences at/below it are retired.
         The latest stock snapshot remains available with its original timestamp.
         """
+        if _time(before) > _now():
+            raise StoreError('Retention boundary cannot be in the future')
         before = _stamp(_time(before))
         with self._transaction() as db:
             old = db.execute('SELECT retained_before FROM settings WHERE singleton=1').fetchone()[0]

@@ -2279,6 +2279,8 @@ _SERVER_UPTIME_VI = {
     'Outages in expected hours': 'Số lần mất kết nối trong giờ dự kiến',
     'Longest outage (hours)': 'Lần mất kết nối lâu nhất (giờ)',
     'Sleep and off time: loading…': 'Thời gian ngủ và tắt: đang tải…',
+    "Delete everything recorded before this date permanently? This removes, from before the date: usage records, daily awake and off-time totals, readings, monitoring history, resolved incidents, sent alerts, maintenance windows and daily readings. It keeps each computer's latest totals (with their original time), open incidents and everything from the date on. This cannot be undone.":
+        'Xóa vĩnh viễn mọi dữ liệu ghi nhận trước ngày này? Việc này xóa, trước ngày đó: bản ghi sử dụng, tổng thời gian thức và thời gian tắt theo ngày, số liệu đo, lịch sử giám sát, sự cố đã xử lý, cảnh báo đã gửi, khung bảo trì và số liệu đo hằng ngày. Giữ lại tổng mới nhất của từng máy (với thời điểm gốc), các sự cố đang mở và mọi dữ liệu từ ngày đó trở đi. Không thể hoàn tác.',
 }
 for _key, _text in _SERVER_UPTIME_VI.items():
     EN.setdefault(_key, _key)

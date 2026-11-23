@@ -45,6 +45,10 @@ from lifetime_widgets_dashboard import VISUAL_ROLE, CapacityBar, EmptyState, Eve
 from lifetime_shell import ModeSwitch, draw_mode_icon, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, themed_logo, theme_reveal
 
 SERVER_TEXT_VI = catalog.SERVER_DASHBOARD_VI
+RETAIN_CONFIRM = ('Delete everything recorded before this date permanently? This removes, from before the date: usage '
+                  'records, daily awake and off-time totals, readings, monitoring history, resolved incidents, sent '
+                  'alerts, maintenance windows and daily readings. It keeps each computer\'s latest totals (with their '
+                  'original time), open incidents and everything from the date on. This cannot be undone.')
 THEME_KEYS = ('auto', 'light', 'dark')
 # Why a computer's last report failed (its own category, or what the server saw), for the device detail.
 PROBLEM_TEXT = {'certificate': 'Server certificate not trusted', 'expired': 'Certificate out of date or wrong clock',
@@ -1523,6 +1527,7 @@ class ServerWindow(QMainWindow):
         self.retention_boundary.setWordWrap(True)
         form.addRow(self.retention_boundary)
         self.retention_date = QDateEdit(QDate.currentDate())
+        self.retention_date.setMaximumDate(QDate.currentDate())     # the server refuses a boundary in the future
         self.retention_date.setMinimumWidth(190)
         self.retention_date.setCalendarPopup(True)
         self.retention_date.setDisplayFormat('d MMM yyyy')
@@ -2554,7 +2559,8 @@ class ServerWindow(QMainWindow):
             self._mutate('set_configuration', dict(reporting_interval=self.interval.value()), self.interval_button)
 
     def apply_retention(self):
-        if self._confirm('Delete older records permanently? Latest totals remain, with their original timestamps.'):
+        self.retention_date.setMaximumDate(QDate.currentDate())
+        if self._confirm(RETAIN_CONFIRM):
             before = self.retention_date.date().toString('yyyy-MM-dd') + 'T00:00:00+00:00'
             self._mutate('retain', dict(before=before), self.retain_button)
 
