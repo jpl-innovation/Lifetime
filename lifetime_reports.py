@@ -126,8 +126,9 @@ def uptime_section(ledger, start, end, events=None):
 
 
 def build_report(ledger, settings, start=None, end=None, system_fields=None,
-                 language='en', selected_identity=None, verification=None, power_events=None):
-    """Build an independent snapshot; optional metadata is opt-in on every call."""
+                 language='en', selected_identity=None, verification=None, power_events=None, uptime=True):
+    """Build an independent snapshot; optional metadata is opt-in on every call. ``uptime=False`` leaves out the
+    desktop's Uptime and downtime section (Lifetime Server reports have their own, from the server's records)."""
     if language not in ('en', 'vi'):
         raise ValueError('Unsupported report language')
     if not export_allowed(settings, 'report'):
@@ -192,7 +193,7 @@ def build_report(ledger, settings, start=None, end=None, system_fields=None,
         notes.append('Daily allocation includes estimates; exact historical awake intervals cannot be recovered.')
     if len(daily) > MAX_PREVIEW_DAYS:
         notes.append('Only the first 90 daily rows are shown in the preview and PDF. CSV contains every selected retained daily row.')
-    uptime = uptime_section(ledger, start, end, power_events) if history_allowed else None
+    uptime = uptime_section(ledger, start, end, power_events) if history_allowed and uptime else None
     if uptime is not None:
         notes.append('Uptime and downtime: asleep is sleep or hibernation, off is shut down or restarting, and unknown is time with no record. Days the system log no longer covers are unknown, never counted as zero. Longest spans need the power events of the system log and are not available without them.')
     comparison = {}

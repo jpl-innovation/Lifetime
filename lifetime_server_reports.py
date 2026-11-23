@@ -381,7 +381,8 @@ def _device_report(device, start=None, end=None, selected_identity=(), system_fi
                     identity=deepcopy(device.get('identity') or {}))
     if set(selected_identity) - set(FIELDS) or set(system_fields) - set(SYSTEM_FIELDS):
         raise ValueError('Unknown report metadata field')
-    report = build_report(ledger, settings, start, end, language=language, selected_identity=selected_identity)
+    report = build_report(ledger, settings, start, end, language=language, selected_identity=selected_identity,
+                          uptime=False)    # the server report has its own Uptime & downtime section
     # A report describes the client, not the machine producing the PDF.
     readings = device.get('readings') or {} if policy.get('resources') else {}
     report['system'] = {key: readings.get(key) for key in system_fields if readings.get(key) is not None}
