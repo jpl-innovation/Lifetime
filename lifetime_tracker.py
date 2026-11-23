@@ -307,10 +307,12 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     return ledger
 
 
-def read_power(since=None):
+def read_power(since=None, reader=None):
     """(boots, extras, info, now) from this computer's power log, or the exception that stopped the read."""
     try:
-        if sys.platform == 'win32':
+        if reader is not None:
+            pass
+        elif sys.platform == 'win32':
             from lifetime_import_windows import windows_power as reader
         else:
             from lifetime_import import linux_power as reader
@@ -587,13 +589,20 @@ def run(directory=None):
                     power_results.clear()
                     power_pending = False
                 save(directory, ledger, running)
+        def flush_or_retry(running):
+            # Another program holding the ledger lock too long (Windows gives up after about 10 s) or a failed
+            # write must not end the tracker: the awake clock keeps counting and the next save credits the time.
+            try:
+                flush(running)
+            except OSError:
+                pass
         try:
-            flush(True)
+            flush_or_retry(True)
             while not stop.wait(INTERVAL):
-                flush(True)
+                flush_or_retry(True)
         finally:
             try:
-                flush(False)
+                flush_or_retry(False)
             finally:
                 finished.set()
 

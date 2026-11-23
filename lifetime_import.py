@@ -396,22 +396,6 @@ def report(result):
     print(f"Daily sum: {sum(result['daily'].values()):.6f}; hourly sum: {sum(result['hourly']):.6f}")
 
 
-def add_downtime(ledger, power, since=None):
-    """Write ``downtime_daily`` from the power history ``power(since)`` returns. Awake accounting is not touched;
-    a log that cannot be read only leaves a note for the coverage line."""
-    import time
-    import lifetime_downtime as downtime
-    try:
-        boots, extras, info = power(since)
-    except (OSError, ValueError, KeyError, TypeError) as error:
-        ledger['downtime_sources'] = dict(ledger.get('downtime_sources') or {}, note='unavailable')
-        return str(error)
-    now = time.time()
-    result = downtime.from_boots(boots, extras, now)
-    downtime.apply(ledger, result, downtime.sources_for(result, now=now, **info), now)
-    return None
-
-
 def main(provider=linux_boots, power=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -425,6 +409,11 @@ def main(provider=linux_boots, power=None):
     try:
         boots, current = provider()
         if args.apply:
+            # Read the power log before taking the ledger lock: the tracker saves under it every 30 s, and a slow
+            # log read must never keep it waiting (that would cost awake time or stop the tracker).
+            power_found = tracker.read_power(None, power) if power is not None else None
+            if isinstance(power_found, Exception):
+                print(f'Downtime history not added: {power_found}', file=sys.stderr)
             with tracker.file_lock(path.parent, 'ledger.lock'):
                 ledger = read_path(path) if path.exists() else tracker.new_ledger()
                 imported = rebuild(boots, current, ledger)
@@ -434,10 +423,8 @@ def main(provider=linux_boots, power=None):
                 if not history:
                     imported.update(daily={}, hourly=[0.0]*24, sessions=[])
                 result = merge(ledger, imported)
-                if power is not None and history:
-                    problem = add_downtime(result, power)
-                    if problem:
-                        print(f'Downtime history not added: {problem}', file=sys.stderr)
+                if power_found is not None and history:
+                    tracker.refresh_downtime(result, power_found)
                 if path.exists():
                     shutil.copy2(path, path.with_name(path.name + '.bak-before-import'))
                 tracker.atomic_json(path, result)

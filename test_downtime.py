@@ -744,5 +744,57 @@ class HourlyReadTests(unittest.TestCase):
         self.assertEqual(ledger['downtime_daily'], saved)
 
 
+class LedgerLockTests(unittest.TestCase):
+    """Review finding 2: a slow power-log read must never hold the ledger lock, and a busy lock never stops the tracker."""
+    def test_import_reads_the_power_log_before_taking_the_ledger_lock(self):
+        directory = Path(tempfile.mkdtemp())
+        (directory / 'ledger.json').write_text(json.dumps(tracker.new_ledger()))
+        seen = {}
+        def power(since=None):
+            try:
+                with tracker.file_lock(directory, 'ledger.lock', blocking=False):
+                    seen['free'] = True
+            except OSError:
+                seen['free'] = False
+            return [boot('2026-08-30T22:00', '2026-08-31T02:00')], dict(stops=[]), dict(log='journal')
+        provider = lambda: ([boot('2026-08-30T22:00', '2026-08-31T02:00')], at('2026-11-06T08:00'))
+        with patch('sys.argv', ['import', '--apply', '--data-dir', str(directory)]), contextlib.redirect_stdout(io.StringIO()):
+            imp.main(provider, power)
+        self.assertEqual(seen, {'free': True})
+        self.assertIn('2026-08-30', json.loads((directory / 'ledger.json').read_text())['downtime_daily'])
+
+    def test_tracker_survives_a_ledger_lock_timeout_without_losing_awake_time(self):
+        import threading
+        import lifetime_settings as settings
+        directory = Path(tempfile.mkdtemp())
+        settings.save_settings(dict(settings.defaults(), completed=True, history=True), directory)
+        ticks = iter(range(1000, 100000, 60))
+        clock = {'tick': 1000}
+        def awake_clock():
+            clock['tick'] = next(ticks)
+            return clock['tick']
+        real_lock = tracker.file_lock
+        calls = {'ledger': 0}
+        def file_lock(where, name, blocking=True):
+            if name == 'ledger.lock':
+                calls['ledger'] += 1
+                if calls['ledger'] in (2, 3):          # another program holds it: Windows gives up with Errno 36
+                    raise OSError(36, 'Resource deadlock avoided')
+            return real_lock(where, name, blocking)
+        class Stopper(threading.Event):
+            waits = 0
+            def wait(self, timeout=None):
+                type(self).waits += 1
+                return type(self).waits > 5
+        with patch.object(tracker, 'file_lock', side_effect=file_lock), patch.object(tracker, 'awake_clock', side_effect=awake_clock), \
+                patch.object(tracker, 'boot_id', return_value='boot-a'), patch.object(tracker.threading, 'Event', Stopper), \
+                patch.object(tracker, 'read_power', return_value=ValueError('no log in tests')), \
+                patch('lifetime_daily.boot_history', return_value=(None, [], True)):
+            tracker.run(directory)
+        ledger = tracker.read_ledger(directory)
+        self.assertEqual(ledger['total_seconds'], clock['tick'])       # every second of the awake clock is counted
+        self.assertFalse(ledger.get('coverage_gaps'))
+
+
 if __name__ == '__main__':
     unittest.main()
