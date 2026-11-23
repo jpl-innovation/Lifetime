@@ -17,7 +17,8 @@ Usage: sudo ./install_server_linux.sh [--address https://NAME:8443] [--host 0.0.
                                       [--admin USER]
   --address     the address computers use to reach this server (default: this server's own IP address)
   --init        service manager; auto picks systemd, then OpenRC, then a SysV script
-  --admin USER  also add USER to the lifetime-admin and lifetime-console groups (Admin in the dashboard)
+  --admin USER  also add USER to the lifetime-admin and lifetime-console groups (Admin in the dashboard);
+                default: the account that ran sudo
 EOF
 }
 
@@ -84,6 +85,8 @@ if [[ "$console_created" == true ]]; then
         usermod -a -G lifetime-console "$member"
     done
 fi
+# The person installing with sudo administers it from the dashboard without another step.
+[[ -n "$extra_admin" || -z "${SUDO_USER:-}" || "$SUDO_USER" == root ]] || extra_admin="$SUDO_USER"
 if [[ -n "$extra_admin" ]]; then
     getent passwd "$extra_admin" >/dev/null || fail "no such user: $extra_admin"
     usermod -a -G lifetime-admin,lifetime-console "$extra_admin"
@@ -203,5 +206,15 @@ fi
 printf 'Never open port %s: administration stays on this server.\n' "$LIFETIME_ADMIN_PORT"
 printf 'Administer: sudo %s/LifetimeServerRuntime admin --directory %s --admin-port %s --operation invitation\n' "$program" "$data" "$LIFETIME_ADMIN_PORT"
 printf 'Other accounts: sudo usermod -a -G lifetime-console USER, then give a role (set_role); membership alone grants nothing.\n'
-printf 'Dashboard from a desktop (member of lifetime-console with a role, or of lifetime-admin): Lifetime-Linux-%s.AppImage --run-tool LifetimeServerDashboard --directory %s --admin-port %s\n' "$(uname -m)" "$data" "$LIFETIME_ADMIN_PORT"
+# Lifetime for Linux already installed for that person: its hidden Lifetime Server entry goes into the app menu.
+if [[ -n "$extra_admin" ]]; then
+    entry="$(getent passwd "$extra_admin" | cut -d: -f6)/.local/share/applications/lifetime-server.desktop"
+    # Edited as that person, never as root in their home folder (where a link could point anywhere).
+    if [[ -f "$entry" && ! -L "$entry" ]] && command -v runuser >/dev/null; then
+        runuser -u "$extra_admin" -- sed -i '/^NoDisplay=true$/d' "$entry" || true
+        printf 'Dashboard: %s signs out and back in once, then opens Lifetime Server from the app menu.\n' "$extra_admin"
+    else
+        printf 'Dashboard: install Lifetime for Linux as %s (install_linux.sh); it adds Lifetime Server to the app menu.\n' "$extra_admin"
+    fi
+fi
 printf 'Group membership takes effect at your next sign-in.\n'

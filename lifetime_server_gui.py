@@ -3251,10 +3251,33 @@ def show_fitted(window):
     window.tray = install_tray(window, 'Lifetime Server', window.server_status.text, key='lifetime-server-gui', translate=window.t)
 
 
+LINUX_DATA = '/var/lib/lifetime-server'
+LINUX_CONFIG = '/etc/lifetime-server/server.conf'
+
+
+def linux_admin_port(config=LINUX_CONFIG, sockets='/run/lifetime-server'):
+    """The loopback administration port install_server_linux.sh wrote, so the menu entry needs no arguments.
+    server.conf is readable only by root and the service account; for anyone else the running server's one socket
+    (/run/lifetime-server/admin-PORT.sock, a searchable folder) names the port."""
+    try:
+        for line in Path(config).read_text(encoding='utf-8').splitlines():
+            key, _, value = line.strip().partition('=')
+            if key == 'LIFETIME_ADMIN_PORT' and value.isdigit():
+                return int(value)
+    except OSError:
+        pass
+    try:
+        ports = [name[6:-5] for name in os.listdir(sockets) if name.startswith('admin-') and name.endswith('.sock')]
+    except OSError:
+        ports = []
+    return int(ports[0]) if len(ports) == 1 and ports[0].isdigit() else 8444
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Lifetime Server local dashboard')
-    parser.add_argument('--directory', required=True)
-    parser.add_argument('--admin-port', type=int, required=True)
+    linux = sys.platform.startswith('linux')     # a server on this computer: its standard folder and settings
+    parser.add_argument('--directory', required=not linux, default=LINUX_DATA if linux else None)
+    parser.add_argument('--admin-port', type=int, required=not linux, default=linux_admin_port() if linux else None)
     parser.add_argument('--language', choices=('en', 'vi'), default='en')
     parser.add_argument('--theme', choices=('auto', 'light', 'dark'), default=None)
     args = parser.parse_args(argv)

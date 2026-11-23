@@ -205,12 +205,15 @@ mkdir -p "$data_home/applications"
     printf '\nIcon=%s\nTerminal=false\nCategories=Utility;\n' "$icon"
 } > "$data_home/applications/lifetime.desktop"
 if [[ -x "$install_dir/LifetimeServerDashboard" ]]; then
-    # Not a menu entry (the dashboard needs its server's --directory): it gives the dashboard's app id
-    # (lifetime-server) its own yellow icon in the dock and taskbar on Wayland.
+    # Gives the dashboard's app id (lifetime-server) its yellow icon in the dock and taskbar on Wayland. It is in the
+    # app menu when Lifetime Server is installed on this computer (the dashboard then finds it without arguments);
+    # install_server_linux.sh shows it there too when the server comes second.
+    hidden='NoDisplay=true\n'
+    [[ ! -f /etc/lifetime-server/server.conf ]] || hidden=''
     {
         printf '[Desktop Entry]\nType=Application\nName=Lifetime Server\nComment=Lifetime Server dashboard\nExec='
         desktop_quote "$install_dir/LifetimeServerDashboard"
-        printf '\nIcon=%s\nTerminal=false\nNoDisplay=true\nCategories=Utility;\n' "$install_dir/assets/lifetime-server.png"
+        printf "\nIcon=%s\nTerminal=false\n${hidden}Categories=Utility;\n" "$install_dir/assets/lifetime-server.png"
     } > "$data_home/applications/lifetime-server.desktop"
 fi
 printf 'Open Lifetime to choose what to collect and whether it starts automatically with the computer. This installer does not start tracking.\n'

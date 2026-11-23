@@ -113,5 +113,52 @@ class MissingToolTests(unittest.TestCase):
             run.assert_not_called()
 
 
+class ServerDashboardMenuTests(unittest.TestCase):
+    """The Lifetime Server menu entry starts the dashboard with no arguments: it finds the server on this computer."""
+
+    def test_the_admin_port_comes_from_the_installed_settings(self):
+        import lifetime_server_gui as gui
+        folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        config = folder / 'server.conf'
+        config.write_text('# settings\nLIFETIME_PORT=8443\nLIFETIME_ADMIN_PORT=9444\n', encoding='utf-8')
+        self.assertEqual(gui.linux_admin_port(config), 9444)
+        sockets = folder / 'run'
+        sockets.mkdir()
+        self.assertEqual(gui.linux_admin_port(folder / 'missing.conf', sockets), 8444)
+        # server.conf is not readable by a desktop admin: the running server's socket names the port instead.
+        (sockets / 'admin-9555.sock').touch()
+        self.assertEqual(gui.linux_admin_port(folder / 'missing.conf', sockets), 9555)
+        (sockets / 'admin-9556.sock').touch()        # two servers: no guessing
+        self.assertEqual(gui.linux_admin_port(folder / 'missing.conf', sockets), 8444)
+
+    def test_on_linux_the_dashboard_needs_no_arguments(self):
+        import lifetime_server_gui as gui
+        opened = Mock(side_effect=SystemExit)
+        with patch.object(gui.sys, 'platform', 'linux'), patch.object(gui, 'linux_admin_port', return_value=9444), \
+                patch.object(gui, 'create_application'), patch.object(gui, 'set_theme'), \
+                patch.object(gui, 'tray_available', return_value=False), patch.object(gui, 'ServerWindow', opened):
+            with self.assertRaises(SystemExit):
+                gui.main([])
+        self.assertEqual(opened.call_args.args[:2], ('/var/lib/lifetime-server', 9444))
+        with patch.object(gui.sys, 'platform', 'win32'), self.assertRaises(SystemExit), \
+                patch('sys.stderr'):
+            gui.main([])            # Windows passes them from its Start menu shortcut
+
+    def test_the_installers_put_the_dashboard_in_the_menu_for_the_person_who_installed_the_server(self):
+        root = Path(__file__).parent
+        server = (root / 'install_server_linux.sh').read_text(encoding='utf-8')
+        # sudo ./install_server_linux.sh makes the person who ran it Admin; root itself is not "a person".
+        self.assertIn('[[ -n "$extra_admin" || -z "${SUDO_USER:-}" || "$SUDO_USER" == root ]] || extra_admin="$SUDO_USER"', server)
+        self.assertLess(server.index('extra_admin="$SUDO_USER"'),
+                        server.index('usermod -a -G lifetime-admin,lifetime-console "$extra_admin"'))
+        # Their hidden menu entry is shown, edited as them (root never writes through a link in their home folder).
+        self.assertIn('[[ -f "$entry" && ! -L "$entry" ]]', server)
+        self.assertIn("runuser -u \"$extra_admin\" -- sed -i '/^NoDisplay=true$/d' \"$entry\"", server)
+        self.assertNotIn('chown "$extra_admin', server)
+        # Lifetime for Linux shows the entry by itself when the server is already installed.
+        desktop = (root / 'install_linux.sh').read_text(encoding='utf-8')
+        self.assertIn("[[ ! -f /etc/lifetime-server/server.conf ]] || hidden=''", desktop)
+
+
 if __name__ == '__main__':
     unittest.main()

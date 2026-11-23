@@ -90,7 +90,7 @@ It installs to `/opt/lifetime-server`, keeps its data in `/var/lib/lifetime-serv
 
 **Any Linux with Docker or Podman** (also musl hosts such as Alpine): `docker build -t lifetime-server .` in a source checkout, then see [server operations](docs/SERVER_OPERATIONS.md#linux-server). The container runs as a non-root user with its data in a volume.
 
-**Dashboard:** on a Linux desktop, run `Lifetime-Linux-x86_64.AppImage --run-tool LifetimeServerDashboard --directory /var/lib/lifetime-server --admin-port 8444` against a server on the same computer. For a headless server, forward its admin socket over SSH (see [server operations](docs/SERVER_OPERATIONS.md#linux-server)); there is deliberately no network-reachable admin interface.
+**Dashboard:** on a Linux desktop with the server on the same computer, install Lifetime for Linux from `Lifetime-Linux-x86_64.tar.gz`, sign out and back in once, and open **Lifetime Server** from the app menu. It finds the server by itself, and the person who installed the server with `sudo` is Admin. For a headless server, forward its admin socket over SSH (see [server operations](docs/SERVER_OPERATIONS.md#linux-server)); there is deliberately no network-reachable admin interface.
 
 ### Linux desktop (any distribution, no Python needed)
 
