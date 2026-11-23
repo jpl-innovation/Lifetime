@@ -796,5 +796,38 @@ class LedgerLockTests(unittest.TestCase):
         self.assertFalse(ledger.get('coverage_gaps'))
 
 
+class WrongClockTests(unittest.TestCase):
+    """Review finding 4: a boot logged with a reset clock (2018) must not wipe saved days or move where data starts."""
+    def test_a_reset_clock_boot_does_not_replace_saved_days(self):
+        saved = {'2026-03-02': entry(asleep_s=30000, off_s=20000, restarts=1, shutdowns=2)}
+        ledger = dict(daily={'2026-03-02': 36400}, downtime_daily=dict(saved), downtime_sources=dict(log_from='2026-01-01'))
+        boots = [dict(start=at('2018-01-01T00:00'), end=at('2026-09-10T18:00'), events=[], clean=True),
+                 dict(start=at('2026-09-11T08:00'), end=at('2026-11-20T12:00'), events=[], clean=False)]
+        now = at('2026-11-20T12:00')
+        result = downtime.from_boots(boots, {}, now, TZ)
+        downtime.apply(ledger, result, downtime.sources_for(result, 'windows-log', now=now, tz=TZ), now, TZ)
+        self.assertEqual(ledger['downtime_daily']['2026-03-02'], saved['2026-03-02'])
+        self.assertEqual(min(k for k in ledger['downtime_daily'] if k > '2026-03-02'), '2026-09-10')
+        self.assertFalse(any('2018' <= k < '2026' for k in ledger['downtime_daily']))
+        self.assertEqual(ledger['downtime_sources']['log_from'], '2026-01-01')
+        self.assertEqual(downtime.sources_for(result, 'windows-log', now=now, tz=TZ)['log_from'], '2026-09-10')
+        self.assertEqual(result['days']['2026-09-10']['shutdowns'], 1)       # its clean shutdown still counts
+
+    def test_a_long_boot_with_no_sleep_is_not_turned_into_off_time(self):
+        boots = [boot('2026-08-01T08:00', '2026-08-01T18:00'),
+                 boot('2026-08-02T08:00', '2026-10-01T18:00'),          # 60 days on, no sleep logged, shut down cleanly
+                 boot('2026-10-02T08:00', '2026-10-02T09:00')]
+        result = downtime.from_boots(boots, {}, tz=TZ)
+        off = sum(day['off_s'] for day in result['days'].values())
+        self.assertEqual(off, 14*H)                              # only the night after the long boot is known to be off
+        self.assertEqual(sum(day['shutdowns'] for day in result['days'].values()), 2)
+
+    def test_a_day_with_nothing_new_keeps_what_was_seen(self):
+        ledger = dict(daily={}, downtime_daily={'2026-11-18': entry(off_s=8*H, unknown_s=16*H, shutdowns=1)})
+        result = downtime.from_boots([boot('2026-11-17T08:00', '2026-11-20T12:00')], {}, tz=TZ)
+        downtime.apply(ledger, result, now=at('2026-11-20T12:00'), tz=TZ)
+        self.assertEqual(ledger['downtime_daily']['2026-11-18']['shutdowns'], 1)
+
+
 if __name__ == '__main__':
     unittest.main()

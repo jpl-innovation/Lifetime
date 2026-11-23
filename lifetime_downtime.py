@@ -18,6 +18,8 @@ MAX_DAYS = 3660          # days kept and sent, the same limit as daily awake tot
 RESTART_GAP = 600        # a clean stop followed by a start this soon is a restart (locale-free rule)
 FAST_STARTUP_GAP = 120   # a shutdown request followed this soon by hibernation is Windows Fast Startup's "shut down"
 STOP_WINDOW = 900        # Kernel-Power 41 / EventLog 6008 are written within minutes of the next start
+UNTRUSTED_GAP = 45 * 86400   # a boot whose own first sign of life is this long after its start has a wrong start
+                             # time (a reset clock, fixed later by the network): its start is not used
 EVENT_KINDS = ('start', 'shutdown', 'restart', 'sleep', 'wake', 'unexpected')
 
 
@@ -112,6 +114,13 @@ def _near(items, stamp, before, after):
     return min(found, key=lambda pair: pair[0])[1] if found else None
 
 
+def _trusted(boot):
+    first_sign = min([stamp for stamp, _ in boot.get('events', [])] + [boot['end']])
+    if first_sign - boot['start'] > UNTRUSTED_GAP:
+        return dict(boot, start=first_sign, untrusted=True)
+    return boot
+
+
 def from_boots(boots, extras=None, now=None, tz=None):
     """Turn boots (``start``, ``end``, ``clean``, ``events`` of (time, 'sleep'|'wake')) into per-day evidence.
 
@@ -125,7 +134,7 @@ def from_boots(boots, extras=None, now=None, tz=None):
     requests = sorted(extras.get('requests', []), key=lambda item: item[0])
     stops = sorted(extras.get('stops', []))
     wakes = sorted(extras.get('wakes', []), key=lambda item: item[0])
-    boots = sorted(boots, key=lambda b: b['start'])
+    boots = sorted((_trusted(boot) for boot in boots), key=lambda b: b['start'])
     days, events = {}, []
 
     def bucket(day):
@@ -140,7 +149,8 @@ def from_boots(boots, extras=None, now=None, tz=None):
                            source=detail.get('source', '')))
 
     for index, boot in enumerate(boots):
-        event(boot['start'], 'start')
+        if not boot.get('untrusted'):
+            event(boot['start'], 'start')
         for start, end in _sleep_intervals(boot):
             request = _near(requests, start, FAST_STARTUP_GAP, 5)
             if request is not None:        # "Shut down" with Fast Startup hibernates the kernel: it is a shutdown
@@ -161,7 +171,8 @@ def from_boots(boots, extras=None, now=None, tz=None):
         if boot.get('clean'):
             request = _near(requests, boot['end'], 900, 5) or {}
             kind = request.get('kind') or ('restart' if following['start'] - boot['end'] <= RESTART_GAP else 'shutdown')
-            add(boot['end'], following['start'], 'off_s')
+            if not following.get('untrusted'):          # when it started again is not known: the gap stays unknown
+                add(boot['end'], following['start'], 'off_s')
             bucket(local_day(boot['end'], tz))['restarts' if kind == 'restart' else 'shutdowns'] += 1
             event(boot['end'], kind, by=request.get('by', ''), reason=request.get('reason', ''))
         elif stopped:
@@ -201,6 +212,10 @@ def settle(downtime, daily, now=None, tz=None):
     return {key: result[key] for key in sorted(result) if key >= cutoff}
 
 
+def _measured(entry):
+    return any(_number(entry.get(key)) > 0 for key in ('asleep_s', 'off_s', *COUNTS))
+
+
 def _number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else 0
 
@@ -229,8 +244,11 @@ def apply(ledger, result, sources=None, now=None, tz=None):
         first_key = first.isoformat()
         for key, entry in fresh.items():
             old = stored.get(key)
-            if key == first_key and isinstance(old, dict) and _number(old.get('unknown_s')) < entry['unknown_s']:
-                continue
+            if isinstance(old, dict):
+                if key == first_key and _number(old.get('unknown_s')) < entry['unknown_s']:
+                    continue
+                if not _measured(entry) and _measured(old):
+                    continue        # a day the new evidence says nothing about keeps what was seen before
             stored[key] = entry
     ledger['downtime_daily'] = settle(stored, ledger.get('daily', {}), now, tz)
     if sources is not None:
