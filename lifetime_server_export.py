@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QComboBox, QFileDialog, QMessageBox
 
 from lifetime_reports import ensure_report_font, write_csv, write_pdf
+import lifetime_uptime as uptime
 from lifetime_server_reports import device_report, fleet_report
 from lifetime_server_uptime import RangeControl
 from lifetime_tasks import Tasks
@@ -68,12 +69,18 @@ class ServerExportDialog(ExportDialog):
                     raise ValueError('Fleet selection exceeds the supported limit')
         devices = [self.client.call('device', device_id=identifier, limit=1) for identifier in ids]
         single = self.device_ids is not None and len(devices) == 1
-        measured = []
+        measured, previous = [], []
+        earlier = (uptime.previous_period(*(dt.date.fromisoformat(options[key]) for key in ('start', 'end')))
+                   if options['start'] else None)
         for index in range(0, len(ids), 100):
             arguments = dict(device_ids=list(ids[index:index + 100]), as_of=as_of, daily=single)
             if options['start']:
                 arguments.update(start=options['start'], end=options['end'])
             measured += self.client.call('availability', **arguments)['devices']
+            if earlier:     # the previous period of the same length, for "compared with the previous period"
+                previous += self.client.call('availability', **dict(arguments, daily=False, start=earlier[0].isoformat(),
+                                                                    end=earlier[1].isoformat()))['devices']
+        compared = dict(current=measured, previous=previous if earlier else None, as_of=as_of)
         thresholds = {rule['rule']: rule.get('threshold') for rule in self.client.call('alert_rules')}
         try:
             found = self.client.call('insights')
@@ -83,8 +90,9 @@ class ServerExportDialog(ExportDialog):
                                computers={c['device_id']: c for c in found['computers']})
         if single:
             return device_report(devices[0], availability=measured[0] if measured else None, thresholds=thresholds,
-                                 insights=energy, **options)
-        return fleet_report(devices, availability=measured, thresholds=thresholds, group=group, insights=energy, **options)
+                                 insights=energy, uptime=compared, **options)
+        return fleet_report(devices, availability=measured, thresholds=thresholds, group=group, insights=energy,
+                            uptime=compared, **options)
 
     # When a computer last reported changes with every sync, so a connected computer would make every save
     # "different from the review" and the file could never be written. The saved report still carries the

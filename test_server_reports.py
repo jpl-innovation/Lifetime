@@ -42,6 +42,69 @@ def worn(identifier='one'):
     return source
 
 
+class UptimeReportTests(unittest.TestCase):
+    """1.3: any period with an "Uptime & downtime" section beside the previous period of the same length."""
+    AS_OF = '2026-11-23T05:00:00+00:00'
+
+    def computers(self):
+        off = dict(asleep_s=28800, off_s=14400, unknown_s=0, restarts=1, shutdowns=1, unexpected_stops=1)
+        new, old = device('new'), device('old')
+        new['history'] = dict(daily={'2026-11-10': 36000, '2026-11-01': 18000},
+                              downtime_daily={'2026-11-10': off, '2026-11-01': dict(off, unexpected_stops=0)})
+        old['history'] = dict(daily={'2026-11-10': 7200})
+        return new, old
+
+    def rows(self, report):
+        return {title: value for section, title, value in report['extra_rows'] if section == 'uptime'}
+
+    def test_a_computer_compared_with_the_previous_period(self):
+        new, _ = self.computers()
+        compared = dict(current=[measured('new', outages=2, longest_outage_s=5400)],
+                        previous=[measured('new', good_s=7200, bad_s=0, unknown_s=0, outages=0, longest_outage_s=0)],
+                        as_of=self.AS_OF)
+        report = device_report(new, '2026-11-08', '2026-11-14', uptime=compared)
+        rows = self.rows(report)
+        self.assertEqual(rows['Uptime & downtime'], '2026-11-08 to 2026-11-14, compared with 2026-11-01 to 2026-11-07')
+        self.assertEqual(rows['Awake (hours)'], '10.0 (previous period: 5.0)')
+        self.assertEqual(rows['Asleep (hours)'], '8.0 (previous period: 8.0)')
+        self.assertEqual(rows['Unknown (hours)'], f'{(6 * 86400 + 86400 - 36000 - 43200) / 3600:.1f} (previous period: '
+                                                  f'{(6 * 86400 + 86400 - 18000 - 43200) / 3600:.1f})')
+        self.assertEqual(rows['Unexpected stops'], '1 (previous period: 0)')
+        self.assertEqual(rows['Availability in expected hours'], '90.909 % (previous period: 100 %)')
+        self.assertEqual(rows['Outages in expected hours'], '2 (previous period: 0)')
+        self.assertEqual(rows['Longest outage (hours)'], '1.5 (previous period: 0.0)')
+        self.assertIn('previous period of the same length', ' '.join(report['notes']))
+
+    def test_group_or_fleet_sums_and_an_old_computer_counts_as_unknown(self):
+        new, old = self.computers()
+        compared = dict(current=[measured('new'), measured('old')], previous=[], as_of=self.AS_OF)
+        report = fleet_report([new, old], '2026-11-08', '2026-11-14', group='Sales', uptime=compared)
+        rows = self.rows(report)
+        self.assertEqual(rows['Awake (hours)'], '12.0 (previous period: 5.0)')
+        self.assertEqual(rows['Computers that report sleep and off time'], '1 / 2 (previous period: 1 / 2)')
+        self.assertEqual(rows['Availability in expected hours'], '90.909 % (previous period: Not available)')
+        self.assertEqual([value for section, title, value in report['extra_rows'] if (section, title) == ('uptime-by-computer', 'Computer')],
+                         ['=Máy, "lễ tân"\n🖥'] * 2)
+        self.assertIn(('report', 'Report scope', 'Group: Sales'), report['extra_rows'])
+        everything = fleet_report([new, old], uptime=dict(current=[], previous=None, as_of=self.AS_OF))
+        rows = self.rows(everything)
+        self.assertEqual(rows['Uptime & downtime'], '2026-11-01 to 2026-11-23')         # all history: no comparison
+        self.assertEqual(rows['Awake (hours)'], '17.0')
+        self.assertIn('needs a chosen period', ' '.join(everything['notes']))
+
+    def test_vietnamese_and_csv(self):
+        new, _ = self.computers()
+        report = device_report(new, '2026-11-08', '2026-11-14', language='vi',
+                               uptime=dict(current=[], previous=[], as_of=self.AS_OF))
+        rows = self.rows(report)
+        self.assertEqual(rows['Awake (hours)'], '10.0 (khoảng trước: 5.0)')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'uptime.csv'
+            write_csv(report, path)
+            text = path.read_text(encoding='utf-8-sig')
+        self.assertIn('uptime,Awake (hours),10.0 (khoảng trước: 5.0)', text)
+
+
 class ServerReportTests(unittest.TestCase):
     def test_stock_and_bounded_period(self):
         source = device()

@@ -2260,6 +2260,24 @@ _SERVER_UPTIME_VI = {
     'Availability in expected hours per month, worst first. A bar is unknown when monitoring saw less than {floor} % of the expected time.':
         'Mức sẵn sàng trong giờ dự kiến theo tháng, kém nhất trước. Một cột là chưa xác định khi giám sát thấy ít hơn {floor} % thời gian dự kiến.',
     'Showing {shown} of {total} computers': 'Đang hiện {shown} trên {total} máy',
+    'Uptime & downtime: awake time comes from each computer’s record; asleep, off and unknown time and the restarts and stops only from computers with Lifetime 1.3 or later that share their history (older ones count as unknown, never as zero). Each figure is shown with the previous period of the same length.':
+        'Thời gian hoạt động & ngừng: thời gian thức lấy từ bản ghi của từng máy; thời gian ngủ, tắt, chưa xác định cùng số lần khởi động lại và dừng chỉ có từ các máy dùng Lifetime 1.3 trở lên có chia sẻ lịch sử (máy cũ hơn được tính là chưa xác định, không bao giờ là 0). Mỗi số liệu được so với khoảng thời gian liền trước có cùng độ dài.',
+    'Uptime & downtime: comparison with the previous period needs a chosen period, not all history.':
+        'Thời gian hoạt động & ngừng: để so với khoảng thời gian trước cần chọn một khoảng thời gian, không phải toàn bộ lịch sử.',
+    '{first} to {last}, compared with {previous_first} to {previous_last}':
+        '{first} đến {last}, so với {previous_first} đến {previous_last}',
+    '{current} (previous period: {previous})': '{current} (khoảng trước: {previous})',
+    'Awake (hours)': 'Thức (giờ)',
+    'Asleep (hours)': 'Ngủ (giờ)',
+    'Off (hours)': 'Tắt (giờ)',
+    'Unknown (hours)': 'Chưa xác định (giờ)',
+    'Restarts': 'Khởi động lại',
+    'Clean shutdowns': 'Tắt máy bình thường',
+    'Unexpected stops': 'Dừng bất thường',
+    'Computers that report sleep and off time': 'Số máy báo thời gian ngủ và tắt',
+    'Availability in expected hours': 'Mức sẵn sàng trong giờ dự kiến',
+    'Outages in expected hours': 'Số lần mất kết nối trong giờ dự kiến',
+    'Longest outage (hours)': 'Lần mất kết nối lâu nhất (giờ)',
 }
 for _key, _text in _SERVER_UPTIME_VI.items():
     EN.setdefault(_key, _key)

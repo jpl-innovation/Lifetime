@@ -116,6 +116,8 @@ class ServerExportTests(unittest.TestCase):
         calls = [arguments for operation, arguments in self.requests if operation == 'availability']
         self.assertEqual(calls[0]['as_of'], calls[-1]['as_of'])         # the save measures what was reviewed
         self.assertTrue(first[0]['daily'])
+        self.assertEqual(len(first), 1)         # All: no previous period to compare with
+        self.assertIn(('uptime', 'Uptime & downtime'), [row[:2] for row in self.dialog.reviewed_report['extra_rows']])
         self.assertIn('Observed availability', path.read_text(encoding='utf-8-sig'))
         fleet = ServerExportDialog(self.client, None, groups=['Sales', 'Lab'])
         self.addCleanup(dispose, fleet)
@@ -126,6 +128,16 @@ class ServerExportTests(unittest.TestCase):
         self.wait()
         self.assertIn(('devices', dict(limit=25, offset=0, group='Sales')), self.requests)
         self.assertIn(('report', 'Report scope', 'Group: Sales'), fleet.reviewed_report['extra_rows'])
+
+    def test_a_chosen_period_also_measures_the_previous_one(self):
+        self.dialog.period.set_custom(__import__('datetime').date(2026, 10, 1), __import__('datetime').date(2026, 10, 31))
+        self.dialog.refresh_preview()
+        self.wait()
+        calls = [arguments for operation, arguments in self.requests if operation == 'availability']
+        self.assertEqual([(call['start'], call['end']) for call in calls], [('2026-10-01', '2026-10-31'), ('2026-08-31', '2026-09-30')])
+        self.assertEqual(calls[0]['as_of'], calls[1]['as_of'])
+        rows = {title: value for section, title, value in self.dialog.reviewed_report['extra_rows'] if section == 'uptime'}
+        self.assertEqual(rows['Uptime & downtime'], '2026-10-01 to 2026-10-31, compared with 2026-08-31 to 2026-09-30')
 
     def test_read_failure_is_visible(self):
         self.client.call = lambda *a, **k: (_ for _ in ()).throw(PermissionError('secret'))
