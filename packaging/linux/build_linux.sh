@@ -36,7 +36,7 @@ build() {
     export LIFETIME_SERVER_ONLY=$([[ "$server_only" == true ]] && echo 1 || echo 0)
     python3.12 -m PyInstaller --noconfirm --clean --distpath "$work/dist" --workpath "$work/pyinstaller" \
         "$root/packaging/linux/lifetime-linux.spec"
-    if [[ "${LIFETIME_RUST:-0}" == 1 ]] && ! compgen -G "$work/dist/LifetimeServer/_internal/lifetime_fast*.so" >/dev/null; then
+    if [[ "${LIFETIME_RUST:-0}" == 1 ]] && ! find "$work/dist/LifetimeServer" -name 'lifetime_fast*.so' | grep -q .; then
         echo "The server bundle was built without the Rust accelerator (lifetime_fast)" >&2
         exit 1
     fi

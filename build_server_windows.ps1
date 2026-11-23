@@ -51,7 +51,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Version information failed ($Program)." }
         return $path
     }
-    # The Rust accelerator goes into the server runtime only (when it is installed here); never the dashboard or agent.
+    # The Rust accelerator (when it is installed here) goes into the server programs; never the agent.
     $fast = @('--hidden-import', 'lifetime_fast')
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
                 '--distpath', $output, '--workpath', $work, '--specpath', $work)
@@ -71,7 +71,7 @@ try {
     if ($WithRust -and -not (Select-String -Path (Join-Path $work 'LifetimeServerRuntime\PKG-00.toc') -Pattern 'lifetime_fast' -SimpleMatch -Quiet)) {
         throw 'The runtime was built without the Rust accelerator (lifetime_fast).'    # PKG: what went into the .exe
     }
-    & $Python -m PyInstaller @common --noconsole --version-file (New-VersionFile LifetimeServerDashboard 'Lifetime Server Dashboard') --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --exclude-module lifetime_fast --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --add-data $serverLogo --icon $serverIcon lifetime_server_gui.py
+    & $Python -m PyInstaller @common --noconsole --version-file (New-VersionFile LifetimeServerDashboard 'Lifetime Server Dashboard') --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules @fast --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --add-data $serverLogo --icon $serverIcon lifetime_server_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
     & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeAgent 'Lifetime Agent') --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module lifetime_fast --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
     if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }

@@ -9,8 +9,10 @@ version, with the same results.
 When the dashboard asks for the uptime bars of the whole fleet (for example 500 computers x 365 daily bars), the server
 works out for each computer how many seconds of each day were good (online), bad (offline), expected and under
 maintenance, and its outages. That is `_sums`: four helpers (`_subtract`, `_intersect`, `_spread`, `outages`) that
-walk sorted lists of time intervals. Measured with 500 computers x 365 days, it was the largest part of the time the
-server spent on that request.
+walk sorted lists of time intervals. Measured with 500 computers x 365 days, it was the largest part of the
+availability computation (about 0.45 s of 0.8 s); the whole request took about 2.4 s, most of it reading and parsing
+the presence history from the database, which stays in Python. So the request gets only somewhat faster (about 10%
+expected; CI prints the measured times).
 
 `src/lib.rs` has the same functions with the same names, line by line, and the same results: times go over as whole
 microseconds since 1970 (exact), and seconds come back as the same floating-point numbers Python computes, added in

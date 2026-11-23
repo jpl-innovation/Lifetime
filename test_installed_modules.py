@@ -91,11 +91,12 @@ class SourceInstallationTests(unittest.TestCase):
                     self.assertIn('--exclude-module PyQt6', text)
 
     def test_only_the_server_runtime_gets_the_rust_accelerator(self):
-        """lifetime_fast (rust/lifetime_fast) is native code: only in the server runtime and service, never in the
-        dashboard, the agent or any desktop program (Smart App Control blocks unsigned native files on employee PCs)."""
+        """lifetime_fast (rust/lifetime_fast) is native code: only in the Windows server programs and the Linux server
+        runtime, never in the agent or any desktop program (Smart App Control blocks unsigned native files on employee
+        PCs; on Linux the server dashboard shares the desktop bundle, so it goes without)."""
         script = (PROJECT/'build_server_windows.ps1').read_text(encoding='utf-8')
         for name, wanted in (('LifetimeServerRuntime', True), ('LifetimeServerService', True),
-                             ('LifetimeServerDashboard', False), ('LifetimeAgent', False)):
+                             ('LifetimeServerDashboard', True), ('LifetimeAgent', False)):
             with self.subTest(build=name):
                 _, hidden, text = pyinstaller_command(script, name)
                 self.assertEqual('lifetime_fast' in hidden, wanted)

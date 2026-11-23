@@ -5,7 +5,7 @@
 Synthetic data, no database: COMPUTERS (default 500) computers with an online/offline change every 1 to 15 hours for
 400 days, and the 365 daily bars of Last 12 months (lifetime_availability.device_availability, as uptime_bars calls
 it). Prints the time per engine and checks that both give identical results. Reading the presence from the database
-and parsing its times (about 40% of a real uptime_bars request) are not included.
+and parsing its times (about 60% of a real uptime_bars request) are not included.
 """
 import datetime as dt
 import os
