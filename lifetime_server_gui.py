@@ -31,6 +31,7 @@ import os
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
+from lifetime_connection import CHECK_WORDS, check_lines, log_tail, report
 from lifetime_server_insights import InsightsUI
 from lifetime_server_alerts import AlertsUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, GroupField, DeviceDetailsDialog, GroupsDialog, local_expiry, reduced_motion, table_action
@@ -91,6 +92,58 @@ def text(key, language='en', **values):
     else:
         value = SERVER_TEXT_VI.get(key, key) if language == 'vi' else key
     return value.format(**values)
+
+
+# Copy diagnostics: only these named fields of server_info (never the admin port, hardware serials or alert settings).
+SAFE_INFO = ('server_version', 'os', 'name', 'organisation', 'address', 'host', 'port', 'started_at', 'uptime',
+             'reporting_interval', 'device_counts', 'discovery', 'database_size', 'fingerprint', 'server_names')
+
+
+# Why Self check gave no lines: (cause, what to do). Only a server that does not know the operation is too old.
+SELF_CHECK_PROBLEMS = {
+    'unsupported': ('Self check could not run.', 'Update Lifetime Server: versions before 1.3.0 have no self check. Then try again.'),
+    'timeout': ('Self check did not finish in time.',
+                'Try again in a minute. If it keeps happening, the server may be very busy, or a name lookup or the firewall '
+                'tools on it answer very slowly.'),
+    'denied': ('Your role does not allow Self check.', 'Ask an administrator of this server for a role (Viewer or higher).'),
+    'failed': ('Self check could not run.', 'Check that Lifetime Server is running, then try again. The server log may say more.'),
+}
+
+
+def self_check_problem(error):
+    """The SELF_CHECK_PROBLEMS key for an error from AdminClient.call('self_check')."""
+    from lifetime_admin import NotAllowed
+    if isinstance(error, NotAllowed):
+        return 'denied'
+    if isinstance(error, TimeoutError):
+        return 'timeout'
+    if type(error) is ValueError and 'HTTP 404' in str(error):      # the operation is unknown to this server
+        return 'unsupported'
+    return 'failed'
+
+
+def server_logs():
+    """The Linux server's own log file, used only when it exists (the systemd service logs to the journal)."""
+    return ['/var/log/lifetime-server.log'] if sys.platform.startswith('linux') else []
+
+
+def diagnostics_text(t, info, check=None, log=(), logs=None):
+    """Copy diagnostics for the server: versions, system, settings that are not secret, Self check and the last server
+    log events without computer names (and log file lines). Named fields only, and the whole text is scrubbed. Reads
+    files: call it from a worker."""
+    import platform
+    certificate = info.get('certificate') or {}
+    sections = [(t('Lifetime diagnostics'), [f'Lifetime Server {CLIENT_VERSION} ({t("server")})',
+                                             f'{platform.platform()} · Python {platform.python_version()}',
+                                             dt.datetime.now().astimezone().isoformat(timespec='seconds')]),
+                (t('Server'), [f'{key}: {info[key]}' for key in SAFE_INFO if key in info] +
+                 [f'certificate {key}: {certificate[key]}' for key in ('expires', 'names', 'warning', 'renewed_at') if certificate.get(key)]),
+                (t('Self check'), check_lines(check['checks'], t) if check else [t('Self check could not run.')]),
+                (t('Server log'), [' '.join(str(event[key]) for key in ('time', 'kind', 'category', 'count') if event.get(key))
+                                   for event in log or []])]
+    for name, lines in log_tail(server_logs() if logs is None else logs):
+        sections.append((t('Log: {name}, last {count} lines', name=name, count=len(lines)), lines))
+    return report(sections)
 
 
 class ElidedLabel(QLabel):
@@ -1392,6 +1445,84 @@ class ServerWindow(QMainWindow):
             value = values.get(key)
             label.setText(missing if value is None else str(value))
 
+    # Self check (1.3.0 diagnostics): what computers need from this server, one line each with what to do.
+    def _make_self_check(self):
+        panel, layout = self._section('Self check')
+        note = self.label('Checks the addresses, certificate, discovery, firewall and time that computers need. It only reads; nothing is changed.')
+        note.setObjectName('muted')
+        layout.addWidget(note)
+        actions = QHBoxLayout()
+        self.self_check_button = self.access_ui.gate(self.button('Run self check', self.run_self_check), 'self_check')
+        # Needs only server_info and server_log, so it also works with a server older than Self check.
+        self.diagnostics_button = self.access_ui.gate(self.button('Copy diagnostics', self.copy_diagnostics), 'server_info')
+        actions.addWidget(self.self_check_button)
+        actions.addWidget(self.diagnostics_button)
+        actions.addStretch()
+        layout.addLayout(actions)
+        self.self_check_rows = QVBoxLayout()
+        self.self_check_rows.setSpacing(10)
+        layout.addLayout(self.self_check_rows)
+        self._self_check = None
+        self.admin_layout.addWidget(panel)
+
+    def run_self_check(self):
+        client = self.client
+
+        def work():
+            try:
+                return client.call('self_check')
+            except Exception as error:      # said in the Self check panel itself, by its cause
+                return dict(problem=self_check_problem(error))
+        self._submit(work, self._self_check_finished, self.self_check_button)
+
+    def copy_diagnostics(self):
+        client = self.client
+
+        def work():
+            try:
+                check = client.call('self_check')
+            except Exception:       # an older server: the rest is still worth copying
+                check = None
+            # Built here, in the worker: reading the log file and scrubbing 256 KB must not hold up the window.
+            return diagnostics_text(self.t, client.call('server_info'), check, client.call('server_log', limit=200))
+
+        def finished(result, success):
+            if success:
+                QApplication.clipboard().setText(result)
+                self.status_label.setText(self.t('Diagnostics copied. Codes, tokens and passwords are left out.'))
+        self._submit(work, finished, self.diagnostics_button)
+
+    def _self_check_finished(self, result, success):
+        self._self_check = result if success else None        # shown again in another language
+        problem = (result or {}).get('problem') if success else 'failed'
+        if problem:
+            cause, fix = SELF_CHECK_PROBLEMS[problem]
+            checks = [dict(state='danger', text=cause, fix=fix, values={})]
+        else:
+            checks = result.get('checks') or []
+        while self.self_check_rows.count():
+            item = self.self_check_rows.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for check in checks:
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(StatusChip(check['state'], self.t(CHECK_WORDS.get(check['state'], 'Info'))), 0, Qt.AlignmentFlag.AlignTop)
+            words = QVBoxLayout()
+            words.setSpacing(2)
+            for key, muted in ((check['text'], False), (check.get('fix'), True)):
+                if key:
+                    label = QLabel(self.t(key, **check['values']) if not muted else
+                                   self.t('What to do: {fix}', fix=self.t(key, **check['values'])))
+                    label.setWordWrap(True)
+                    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                    if muted:
+                        label.setObjectName('muted')
+                    words.addWidget(label)
+            line.addLayout(words, 1)
+            self.self_check_rows.addWidget(row)
+
     def _make_admin(self):
         self.admin_layout = self._scroll_page('Administration')
         self.admin_layout.setContentsMargins(32, 24, 32, 24)
@@ -1493,6 +1624,7 @@ class ServerWindow(QMainWindow):
         organisation_row.addWidget(gate(self.button('Save organisation', lambda: self._mutate('organisation', dict(name=self.organisation_edit.text()))), 'organisation'))
         form.addRow(self.label('Organisation'), organisation_row)
         self.admin_layout.addWidget(server)
+        self._make_self_check()
         log_panel, log_layout = self._section('Server log')
         log_note = self.label('Recent server events: starts and stops, certificate renewals and refused requests. No report contents or codes are kept.')
         log_note.setObjectName('muted')
@@ -1812,6 +1944,8 @@ class ServerWindow(QMainWindow):
             self._render_fleet_detail(None)
         if self._admin_result:
             self._render_server_info(self._admin_result)
+        if getattr(self, '_self_check', None):
+            self._self_check_finished(self._self_check, True)
         self.detail_hint.set_state('off', self.t('Select a computer to see its details.'))
         self._detail_shown(bool(self._detail) or len(self.selected_device_ids()) == 1)
         if self._detail:

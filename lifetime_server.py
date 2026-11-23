@@ -34,6 +34,7 @@ from lifetime_protocol import CAPABILITIES, MAX_BYTES, ProtocolError, canonical,
 from lifetime_server_store import (AuthenticationError, ConflictError, Store,
                                    StoreError, ThrottledError)
 import lifetime_tls as tls
+from lifetime_connection import UTF8_OUTPUT
 
 MAX_CONNECTIONS = 32
 MAX_PER_ADDRESS = 8       # request slots one remote address may hold at once: a quarter, so one host cannot take them all
@@ -50,6 +51,8 @@ POWER_PER_DEVICE = 3        # power commands (and Turn on) per computer in that 
 POWER_PER_ACTOR = 10        # per named administrator or operator in that window
 SLEEP_GRACE = dt.timedelta(minutes=30)     # after closing time before the after-hours policy sends a sleep
 SLEEP_AGAIN = dt.timedelta(hours=12)       # one sleep per computer and night, whatever its result
+SELF_CHECK_BUDGET = 8      # seconds; the dashboard waits 10 s for an answer
+SELF_CHECK_REUSE = 30      # seconds a Self check result is reused
 
 
 def monitoring_backup(path):
@@ -286,6 +289,7 @@ _ADMIN = {
     'invitation': ('create_invitation', (), ('ttl', 'uses')),
     'fleet': ('fleet', (), ('day', 'days', 'limit', 'offset', 'search', 'group', 'status', 'sort', 'descending')),
     'server_info': (None, (), ()),
+    'self_check': (None, (), ()),       # read only: addresses, certificate, discovery, firewall, time
     'pending_enrollments': ('pending_enrollments', (), ('limit', 'offset')),
     'organisation': ('organisation', (), ('name',)),
     'names': (None, ('names',), ()),
@@ -569,6 +573,8 @@ class ServerRuntime:
         self._token = None
         self._public_address = self._admin_address = None
         self._discovery = None
+        self.discovery_state = None
+        self._check_lock, self._check_cache = threading.Lock(), None      # Self check: one run, reused 30 s
         self.fingerprint = None
         self._resource_state = {}
         self.started_at = None
@@ -688,6 +694,8 @@ class ServerRuntime:
             self._check_backup_path(value['path'])
         if operation == 'server_info':
             return self.server_info()
+        if operation == 'self_check':
+            return self.self_check()
         if operation == 'insights':
             return self.insights()
         if operation == 'set_sleep_policy':
@@ -938,12 +946,14 @@ class ServerRuntime:
                     loopback = ipaddress.ip_address(self.host).is_loopback
                 except ValueError:
                     loopback = self.host.lower() == 'localhost'
+                self.discovery_state = 'loopback'       # why discovery is off, for Self check
                 if not loopback:
                     from lifetime_discovery import Responder
                     responder = Responder('Lifetime-' + socket.gethostname()[:40], self._hostname,
                                           public.server_port, self.fingerprint)
+                    self.discovery_state = 'unavailable'
                     if responder.start():
-                        self._discovery = responder
+                        self._discovery, self.discovery_state = responder, 'running'
                 return self
             except BaseException:
                 self.stop()
@@ -1013,6 +1023,106 @@ class ServerRuntime:
                           server_names=self._store.server_names()['names'])
             result.update(self._store.organisation())
             return result
+
+    def self_check(self):
+        """What computers need from this server, one line each with its cause and what to do. Read only: the firewall
+        is read, never changed. Lines are catalogue keys with values (as the desktop's Diagnose connection) plus the
+        English words for the command line. The administration port is never reported.
+
+        One run at a time, reused for SELF_CHECK_REUSE seconds (any reader may ask, so it must not start a stream of
+        PowerShells), and finished within SELF_CHECK_BUDGET seconds so the dashboard's 10 s wait is never reached."""
+        with self._check_lock:
+            if self._check_cache and time.monotonic() - self._check_cache[0] < SELF_CHECK_REUSE:
+                return self._check_cache[1]
+            result = self._self_check(time.monotonic() + SELF_CHECK_BUDGET)
+            self._check_cache = (time.monotonic(), result)
+            return result
+
+    def _self_check(self, deadline):
+        with self._lock:
+            host, port = self._servers[0].server_address[:2]
+            address, hostname = self.public_address, self._hostname
+            certificate, discovery = dict(self.certificate), self.discovery_state
+        checks = []
+        try:
+            lan = self._lan_names()
+        except (OSError, ValueError):
+            lan = []
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = host == 'localhost'
+        if loopback:
+            checks.append(_line('danger', 'Lifetime Server listens only on {host}: other computers cannot reach it.',
+                                'Start Lifetime Server with --host 0.0.0.0 (the installer does this unless told otherwise).', host=host))
+        elif host in ('0.0.0.0', '::', ''):
+            checks.append(_line('good', 'Lifetime Server listens on port {port} of every address of this computer: {addresses}.',
+                                port=port, addresses=', '.join(lan) or '-'))
+        else:
+            checks.append(_line('good', 'Lifetime Server listens on {host}, port {port}.', host=host, port=port))
+        checks.append(_line('info', 'Computers are told to use {address}.', address=address))
+        try:
+            itself = ipaddress.ip_address(hostname).is_loopback
+            resolved = [hostname]
+        except ValueError:
+            itself = hostname == 'localhost'
+            resolved = _lookup(hostname, port, max(0.1, min(2.0, deadline - time.monotonic())))
+        if resolved is None:
+            checks.append(_line('warning', '{host} did not resolve within 2 s on this server.',
+                                'Computers that use this name wait just as long. Check the DNS servers this server uses, or '
+                                'let computers connect by the IP address.', host=hostname))
+        elif itself:
+            checks.append(_line('warning', '{host} means this computer itself: other computers cannot use it.',
+                                'Computers still connect by the network search and the IP addresses in the certificate. To '
+                                'give them a name, install the server with --address https://<server name>:{port}.',
+                                host=hostname, port=port))
+        elif not resolved:
+            checks.append(_line('warning', '{host} does not resolve on this network.',
+                                'Computers can still connect by the network search or the IP address. To use the name, ask IT '
+                                'to add {host} to the DNS.', host=hostname))
+        elif resolved != [hostname]:
+            checks.append(_line('good', '{host} resolves to {addresses} on this network.', host=hostname, addresses=', '.join(resolved)))
+        names = certificate.get('names') or []
+        if hostname in names:
+            checks.append(_line('good', 'The server certificate names {host}.', host=hostname))
+        else:
+            checks.append(_line('danger', 'The server certificate does not name {host}. It names: {names}.',
+                                'Restart Lifetime Server: it renews the certificate with the names it needs.',
+                                host=hostname, names=', '.join(names) or '-'))
+        missing = [ip for ip in lan if ip not in names]
+        if missing:
+            checks.append(_line('warning', "The certificate does not name this server's IP address {addresses}.",
+                                'Computers that find the server by its IP address cannot use it. Add {addresses} under Other '
+                                'server names and IPs (the certificate is renewed with the same key).', addresses=', '.join(missing)))
+        elif lan:
+            checks.append(_line('good', "The certificate also names this server's IP address {addresses}.", addresses=', '.join(lan)))
+        if discovery == 'running':
+            checks.append(_line('good', 'Discovery is answering on port 5353 (UDP): computers find this server with the code alone.'))
+        elif discovery == 'loopback':
+            checks.append(_line('info', 'Discovery is off: the server listens only on this computer.'))
+        else:
+            checks.append(_line('warning', 'Discovery is off: port 5353 (UDP) could not be opened. Another program may be using '
+                                'it, such as Bonjour or Avahi.',
+                                'Computers can still connect with the connection line from Add device. To turn discovery on, '
+                                'stop the other program and restart Lifetime Server.'))
+        checks += firewall_checks(port, deadline=deadline)
+        now = self.clock()
+        checks.append(_line('info', 'Server time: {time} UTC.', time=now.astimezone(dt.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')))
+        if certificate.get('expires'):
+            end = dt.datetime.fromisoformat(certificate['expires'])
+            values = dict(date=end.date().isoformat(), days=max(0, (end - now).days))
+            if certificate.get('warning') == 'renewal-failed':
+                checks.append(_line('danger', 'Lifetime Server could not renew its certificate. It works until {date}.',
+                                    'Check the server names under Administration > Other server names and IPs, then restart '
+                                    'Lifetime Server.', **values))
+            elif end - now < tls.RENEW_BEFORE:
+                checks.append(_line('warning', 'The certificate ends on {date}, in {days} days.',
+                                    'Lifetime Server renews it 30 days before it ends. Restart Lifetime Server; if it still '
+                                    'does not renew, look at the server log.', **values))
+            else:
+                checks.append(_line('good', 'The certificate is valid until {date} ({days} days). Lifetime renews it 30 days '
+                                    'before.', **values))
+        return dict(checks=checks, checked_at=now.astimezone(dt.timezone.utc).isoformat(timespec='seconds'))
 
     @staticmethod
     def _validate_certificate(context, bundle):
@@ -1179,6 +1289,208 @@ class ServerRuntime:
                 self.access = None
             self._token = None
             self._public_address = self._admin_address = None
+
+
+def _line(state, text, fix=None, **values):
+    """One Self check line: state, catalogue keys and values, and the English words for the command line."""
+    values = {key: str(value) for key, value in values.items()}
+    return dict(state=state, text=text, fix=fix, values=values, message=text.format(**values),
+                what_to_do=fix.format(**values) if fix else None)
+
+
+def _lookup(host, port, timeout):
+    """The addresses ``host`` resolves to: [] when it does not resolve, None when the lookup took longer than
+    ``timeout`` (getaddrinfo itself has no limit; the lookup is left to finish on its own)."""
+    found = {}
+
+    def lookup():
+        try:
+            found['addresses'] = sorted({item[4][0] for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
+        except OSError:
+            found['addresses'] = []
+    thread = threading.Thread(target=lookup, name='Lifetime-self-check-lookup', daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return found.get('addresses')
+
+
+def _command(command, run=None, timeout=2):
+    """(exit code, output) of a read-only system command, or None when it cannot run or its output is unreadable.
+    Nothing typed by a person is ever part of ``command``. The dashboard waits 10 s for the whole Self check, so each
+    command gets little time."""
+    from lifetime_connection import run_read
+    return run_read(command, run, timeout) if timeout > 0.2 else None
+
+
+# Read only: the rule the installer adds for the connection port, and the network profiles.
+WINDOWS_FIREWALL = (UTF8_OUTPUT + "$rule = Get-NetFirewallRule -Name 'LifetimeServer-Connect' -ErrorAction SilentlyContinue; "
+                    "if ($rule) { 'rule|' + $rule.Enabled + '|' + ((($rule | Get-NetFirewallPortFilter).LocalPort) -join ',') }; "
+                    "Get-NetConnectionProfile | ForEach-Object { 'profile|' + $_.InterfaceAlias + '|' + $_.NetworkCategory }")
+PRIVATE_FIX = 'Set the network to Private: Settings > Network & internet > {networks} > Network profile type > Private.'
+
+
+def firewall_checks(port, run=None, platform=None, ufw_conf='/etc/ufw/ufw.conf', deadline=None):
+    """Whether the firewall lets computers reach ``port`` (and, on Linux, discovery on 5353/udp). Never changes it.
+    Every command ends by ``deadline`` (time.monotonic()); what is left unread then says so."""
+    platform = platform or sys.platform
+
+    def budget(limit):
+        return limit if deadline is None else min(limit, deadline - time.monotonic())
+    if platform == 'win32':
+        return _windows_firewall(port, run, budget)
+    if platform.startswith('linux'):
+        return _linux_firewall(port, run, ufw_conf, budget)
+    return []
+
+
+OUT_OF_TIME = 'The firewall was not checked to the end: Self check ran out of time.'
+OUT_OF_TIME_FIX = 'Run Self check again. If this keeps happening, the firewall tools on this server answer very slowly.'
+
+
+def _windows_firewall(port, run, budget=lambda limit: limit):
+    if budget(7) < 1:
+        return [_line('neutral', OUT_OF_TIME, OUT_OF_TIME_FIX)]
+    result = _command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_FIREWALL], run, budget(7))
+    if result is None or result[0]:
+        return [_line('neutral', 'Could not read the Windows firewall and network profiles.')]
+    rule, profiles = None, []
+    for line in result[1].splitlines():
+        parts = line.strip().split('|')
+        if len(parts) == 3 and parts[0] == 'rule':
+            rule = parts[1:]
+        elif len(parts) == 3 and parts[0] == 'profile':
+            profiles.append(parts[1:])
+    if rule is None:
+        checks = [_line('danger', 'The Windows firewall rule LifetimeServer-Connect is missing: other computers cannot reach port {port}.',
+                        'Run the Lifetime Server installer again; it adds the rule for the port the server uses.', port=port)]
+    elif rule[0] != 'True':
+        checks = [_line('danger', 'The Windows firewall rule LifetimeServer-Connect is turned off.',
+                        'Turn it on in Windows Defender Firewall > Inbound rules, or run the Lifetime Server installer again.')]
+    elif str(port) not in rule[1].split(','):
+        checks = [_line('danger', 'The Windows firewall rule LifetimeServer-Connect allows port {rule_port}, but the server uses port {port}.',
+                        'Run the Lifetime Server installer again with the port the server uses.', rule_port=rule[1] or '-', port=port)]
+    else:
+        checks = [_line('good', 'The Windows firewall rule LifetimeServer-Connect allows port {port} from the local network.', port=port)]
+    public = ', '.join(name for name, kind in profiles if kind.lower() == 'public')
+    if public:
+        checks.append(_line('danger', 'The network {networks} of this server is Public: Windows lets no computer reach it.',
+                            PRIVATE_FIX, networks=public))
+    elif profiles:
+        checks.append(_line('good', 'Windows network profile: {networks}. None is Public.',
+                            networks=', '.join(f'{name} ({kind})' for name, kind in profiles)))
+    return checks
+
+
+def _in_ports(text, port, protocol):
+    """Whether a firewall port list ('8443/tcp', '8000-9000/tcp', '8000:9000/tcp', '80,8443/tcp', '8443') covers it."""
+    ports, _, kind = text.partition('/')
+    if kind and kind != protocol:
+        return False
+    for part in ports.split(','):
+        low, _, high = part.replace(':', '-').partition('-')
+        if low.isdigit() and (high or low).isdigit() and int(low) <= port <= int(high or low):
+            return True
+    return False
+
+
+def _ufw_allows(status, port, protocol):
+    """``ufw status verbose``: allowed by the default incoming policy, an ALLOW rule for everything or for the port.
+    Rule order and DENY rules are not weighed, so a 'no' is only 'not seen' (the caller says Check, not Problem)."""
+    if re.search(r'^Default:\s*allow \(incoming\)', status, re.MULTILINE):
+        return True
+    for line in status.splitlines():
+        rule = re.match(r'(\S+)(?: \(v6\))?\s+ALLOW(?: IN)?\s', line)
+        if rule and (rule.group(1) == 'Anywhere' or _in_ports(rule.group(1), port, protocol)):
+            return True
+    return False
+
+
+def _firewalld_allows(zones, port, protocol, service):
+    """``firewall-cmd --list-all-zones``: an active zone (or the default one when none is marked active) that accepts
+    everything, has the port (or a range with it), the service, or a rich rule for the port."""
+    blocks, current = [], None
+    for line in zones.splitlines():
+        if line and not line[0].isspace():
+            current = [line, '']
+            blocks.append(current)
+        elif current is not None:
+            current[1] += line + '\n'
+    chosen = [body for head, body in blocks if 'active' in head] or [body for head, body in blocks if 'default' in head]
+    for body in chosen:
+        fields = {key.strip(): value.split() for key, _, value in (line.partition(':') for line in body.splitlines())}
+        if (fields.get('target') == ['ACCEPT'] or service in fields.get('services', ())
+                or any(_in_ports(item, port, protocol) for item in fields.get('ports', ()))):
+            return True
+        for rule in re.findall(r'port port="?([0-9-]+)"? protocol="?(\w+)"?[^\n]*\baccept', body):
+            if _in_ports(rule[0] + '/' + rule[1], port, protocol):
+                return True
+    return False
+
+
+def _linux_firewall(port, run, ufw_conf, budget=lambda limit: limit):
+    from lifetime_connection import local_ipv4
+    try:
+        subnet = str(ipaddress.IPv4Network(local_ipv4(named=False)[0] + '/24', strict=False))
+    except (IndexError, OSError, ValueError):
+        subnet = '<your network>'
+    checks = []
+
+    class OutOfTime(Exception):
+        pass
+
+    def command(args, limit=2):
+        if budget(limit) < 0.3:
+            raise OutOfTime
+        return _command(args, run, budget(limit))
+
+    def active(unit):
+        result = command(['systemctl', 'is-active', unit])
+        return bool(result) and result[1].strip() == 'active'
+
+    def allowed(name, tcp, udp, check, tcp_fix, udp_fix):
+        """Allowed is certain; not seen is not (rule order, other tools), so it is Check with how to verify."""
+        return [_line('good', '{firewall} allows {port}/tcp.', firewall=name, port=port) if tcp else
+                _line('warning', '{firewall} shows no rule that allows {port}/tcp: other computers may not reach the server.',
+                      'Check with: {check}. If it is not allowed, run: {command}', firewall=name, port=port, check=check,
+                      command=tcp_fix),
+                _line('good', '{firewall} allows 5353/udp (discovery).', firewall=name) if udp else
+                _line('warning', '{firewall} shows no rule that allows 5353/udp: computers may not find the server with the '
+                      'code alone.', 'Check with: {check}. If it is not allowed, run: {command}', firewall=name, check=check,
+                      command=udp_fix)]
+
+    try:
+        ufw = active('ufw')
+        if ufw:
+            try:
+                with open(ufw_conf, encoding='utf-8') as source:
+                    ufw = bool(re.search(r'^\s*ENABLED\s*=\s*yes', source.read(65536), re.MULTILINE | re.IGNORECASE))
+            except OSError:
+                pass
+        if ufw:
+            result = command(['ufw', 'status', 'verbose'])
+            if result is None or result[0] or 'Status:' not in result[1]:
+                checks.append(_line('warning', 'ufw is on, but only an administrator can read its rules.',
+                                    'Run: sudo ufw status verbose. It must allow {port}/tcp and 5353/udp from the local network.',
+                                    port=port))
+            elif 'Status: active' in result[1]:
+                checks += allowed('ufw', _ufw_allows(result[1], port, 'tcp'), _ufw_allows(result[1], 5353, 'udp'),
+                                  'sudo ufw status verbose', f'sudo ufw allow from {subnet} to any port {port} proto tcp',
+                                  f'sudo ufw allow from {subnet} to any port 5353 proto udp')
+        if active('firewalld'):
+            result = command(['firewall-cmd', '--list-all-zones'], 3)
+            if result is None or result[0]:
+                checks.append(_line('warning', 'firewalld is on, but its rules could not be read.',
+                                    'Run: sudo firewall-cmd --list-all-zones. It must allow {port}/tcp and the mdns service from '
+                                    'the local network.', port=port))
+            else:
+                checks += allowed('firewalld', _firewalld_allows(result[1], port, 'tcp', None),
+                                  _firewalld_allows(result[1], 5353, 'udp', 'mdns'), 'sudo firewall-cmd --list-all-zones',
+                                  f"sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address={subnet} "
+                                  f"port port={port} protocol=tcp accept' && sudo firewall-cmd --reload",
+                                  'sudo firewall-cmd --permanent --add-service=mdns && sudo firewall-cmd --reload')
+    except OutOfTime:
+        return checks + [_line('neutral', OUT_OF_TIME, OUT_OF_TIME_FIX)]
+    return checks or [_line('good', 'No firewall (ufw or firewalld) is on: nothing blocks port {port}.', port=port)]
 
 
 def _offline(args):

@@ -14,7 +14,7 @@ from lifetime_protocol import MAX_BYTES, canonical, decode
 OPERATIONS = frozenset((
     'live', 'devices', 'device', 'code', 'approve', 'deny', 'revoke', 'delete', 'send_command', 'cancel_command',
     'wake', 'identity', 'retain', 'backup', 'restore', 'configuration', 'set_configuration', 'refresh', 'overview',
-    'invitation', 'invitations', 'revoke_invitation', 'fleet', 'server_info', 'pending_enrollments', 'organisation',
+    'invitation', 'invitations', 'revoke_invitation', 'fleet', 'server_info', 'self_check', 'pending_enrollments', 'organisation',
     'names', 'server_log', 'presence', 'alert_rules', 'set_alert_rule', 'incidents', 'incident', 'acknowledge',
     'alert_summary', 'schedules', 'set_schedule', 'delete_schedule', 'maintenance', 'add_maintenance',
     'delete_maintenance', 'notifications', 'set_notifications', 'test_notification', 'deliveries', 'time_zones',

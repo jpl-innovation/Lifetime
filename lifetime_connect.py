@@ -18,6 +18,7 @@ from lifetime_shell import PageStack, PulseDot
 from lifetime_i18n import tr, TABLES, datetime_text
 from lifetime_i18n_qt import QLabel, QPushButton
 from lifetime_company import read_status
+from lifetime_connection import CHECK_WORDS
 from lifetime_settings import read_settings
 from lifetime_theme import SWITCH_W, tokens
 from lifetime_glass import solid
@@ -83,6 +84,353 @@ def server_state(status, t, now=None):
 def locate_server(value):
     from lifetime_connection import locate      # shared with the agent's command line, which has no Qt
     return locate(value)
+
+
+# ---- Diagnose connection: one check per line, each saying its cause and what to do ----
+
+CLOCK_LIMIT = 300       # seconds of clock difference shown as a problem
+FIX_SELF_CHECK = 'On the server, open Administration > Self check.'
+FIX_CLOCK = "Check the date and time on this computer (set them automatically). If they are right, open Administration > Self check on the server."
+
+
+def _check(state, text, fix=None, **values):
+    """One line: a state (good, warning, danger, info, neutral), catalogue keys for its words and what to do. Values
+    lose control characters (a discovery answer cannot start a forged line of its own)."""
+    from lifetime_connection import plain
+    return dict(state=state, text=text, fix=fix, values={key: plain(value, 300) for key, value in values.items()})
+
+
+def _matching(servers, code, timeout):
+    """The first discovered server whose certificate matches ``code``, as locate_server tries them: only certificates
+    are read (no application data); the address the answer came from is tried as well as the announced name."""
+    import hashlib
+    import hmac
+    import lifetime_connection as connection
+    import lifetime_tls as tls
+    invitation, secret, expected = connection.parts(code)
+    for server in servers:
+        for host in dict.fromkeys(item for item in (server.get('source'), server['host']) if item):
+            try:
+                der = tls.peer_certificate(host, server['port'], timeout)
+            except (OSError, ValueError):
+                continue
+            if hmac.compare_digest(connection.commitment(hashlib.sha256(der).hexdigest(), invitation, secret), expected):
+                return server
+    return None
+
+
+def windows_profiles(run=None):
+    """[(network, category)] of the active Windows networks, or None when they cannot be read. Read only. PowerShell
+    writes UTF-8 and undecodable bytes are replaced, so a network named "WLAN (Büro)" never breaks the diagnosis."""
+    from lifetime_connection import UTF8_OUTPUT, run_read
+    result = run_read(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', UTF8_OUTPUT +
+                       "Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }"], run, 15)
+    if result is None or result[0]:
+        return None
+    return [tuple(line.strip().rsplit('|', 1)) for line in result[1].splitlines() if '|' in line]
+
+
+def local_server(port):
+    """Whether something listens on this computer's own port: then this computer is (most likely) the server."""
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def server_time(host, port, pem, timeout):
+    """The server's clock, from the Date header of an empty request (HEAD /, which the server refuses) over a
+    connection that trusts only ``pem``. Called only after ``pem`` matched the typed code."""
+    import email.utils
+    import http.client
+    import ssl
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.verify_flags |= ssl.VERIFY_X509_STRICT
+    context.check_hostname = False      # the code proved this certificate, whatever names it carries
+    context.load_verify_locations(cadata=pem)
+    connection = http.client.HTTPSConnection(host, port, timeout=timeout, context=context)
+    try:
+        connection.request('HEAD', '/', headers={'Connection': 'close'})
+        date = connection.getresponse().getheader('Date')
+    finally:
+        connection.close()
+    return email.utils.parsedate_to_datetime(date).timestamp()
+
+
+def diagnose(value='', saved=None, *, profiles=windows_profiles, here=local_server, now=time.time, timeout=3):
+    """The Diagnose connection lines for what was typed (a code or connection line) or the saved server address.
+
+    On the network: a name lookup, TCP connects, one discovery query, TLS handshakes that send no application data,
+    and the server's clock only after its certificate matched the typed code. Never raises; no result carries the code.
+    """
+    import hashlib
+    import hmac
+    import ipaddress
+    import ssl
+    import lifetime_connection as connection
+    import lifetime_discovery
+    import lifetime_tls as tls
+    from lifetime_i18n import date_text
+    checks, origin, code, source = [], None, None, None
+    value = (value or '').strip()
+    try:
+        if value.startswith(connection.PREFIX):
+            origin, code = connection.parse(value)
+        elif value:
+            code = connection.normalize(value)
+    except ValueError:
+        checks.append(_check('danger', 'The code or connection line is not complete.',
+                             'Type the whole code from the server: LTS and 20 letters and numbers. 0 or O, either works.'))
+    if origin:
+        checks.append(_check('info', 'Checking {address}, from the connection line.', address=origin))
+    elif code:
+        checks.append(_check('info', 'Checking: searching the network for the server (only a code was typed).'))
+    elif saved:
+        try:
+            origin = tls._address(saved)[0]
+            checks.append(_check('info', 'Checking {address}, the saved connection.', address=origin))
+        except ValueError:
+            pass
+    if not checks:
+        checks.append(_check('neutral', 'Nothing to check yet.', 'Type the code from the server, then press Diagnose connection.'))
+
+    try:
+        found = lifetime_discovery.discover(2)
+    except (OSError, ValueError):
+        found = []
+    if found:
+        def name(server):       # an untrusted hint: one printable line, at most a DNS label long
+            return connection.plain(server['instance'], 63)
+        checks.append(_check('good', 'A Lifetime Server answered on this network: {servers}.', servers='; '.join(
+            f"{name(server)} ({server['address']}, {server.get('source') or server['host']})" for server in found[:4])))
+        if not origin and code:
+            chosen = _matching(found[:4], code, min(timeout, 2))
+            if chosen is None and len(found) > 1:
+                checks.append(_check('warning', 'Several Lifetime Servers answered and none has a certificate that matches '
+                                     'the code. Checking the first one, {name}.',
+                                     'Make sure the code comes from the server this computer should use, or type its '
+                                     'connection line (Add device shows it).', name=name(found[0])))
+            elif chosen is not None and len(found) > 1:
+                checks.append(_check('info', 'Several Lifetime Servers answered. {name} matches the code.', name=name(chosen)))
+            chosen = chosen or found[0]
+            origin, source = chosen['address'], chosen.get('source')
+    else:
+        checks.append(_check('warning', 'No Lifetime Server answered the network search (port 5353).',
+                             'On the server, allow 5353/udp in the firewall and set its network to Private. Guest and some '
+                             'office Wi-Fi block these answers: then type the connection line from the server (Add device) '
+                             'instead of only the code.'))
+
+    try:
+        networks = sorted({str(ipaddress.IPv4Network(ip + '/24', strict=False)) for ip in connection.local_ipv4()})
+    except (OSError, ValueError):
+        networks = []
+    if networks:
+        checks.append(_check('good', 'The network search covers {networks} (port 8443).', networks=', '.join(networks)))
+    else:
+        checks.append(_check('danger', 'This computer has no local IPv4 network to search.',
+                             'Connect this computer to the office network (Wi-Fi or cable). Over a VPN, type the connection '
+                             'line from the server instead of only the code.'))
+    try:
+        named = sorted({item[4][0] for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)})
+    except OSError:
+        named = []
+    if any(ip.startswith('127.') for ip in named):
+        checks.append(_check('good', "This computer's name points to {address}, as on Ubuntu. Handled: the search uses "
+                             'the addresses of its network connections instead.',
+                             address=next(ip for ip in named if ip.startswith('127.'))))
+
+    if not origin:
+        checks.append(_check('neutral', 'Name, port and certificate not checked: there is no server address to check.',
+                             'Type the connection line from the server (Add device shows it), or make the network search '
+                             'work (see above).'))
+        return checks + _profile_checks(profiles, here, 8443)
+
+    _, host, port = tls._address(origin)
+    target = host
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        checks.append(_check('good', '{host} is an IP address: no name lookup needed.', host=host))
+    else:
+        try:
+            resolved = sorted({item[4][0] for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
+            checks.append(_check('good', '{host} resolves to {addresses} on this network.', host=host, addresses=', '.join(resolved)))
+        except OSError:
+            if source:
+                target = source
+                checks.append(_check('warning', '{host} does not resolve on this network. Lifetime uses {source}, the '
+                                     'address the server answered from.',
+                                     "If connecting fails, ask IT to add {host} to this network's DNS, or add the server's "
+                                     'IP under Administration > Other server names and IPs.', host=host, source=source))
+            else:
+                target = None
+                checks.append(_check('danger', '{host} does not resolve on this network.',
+                                     "Type the connection line with the server's IP address instead (Administration on the "
+                                     "server shows it), or ask IT to add {host} to this network's DNS.", host=host))
+
+    reachable = False
+    if target:
+        try:
+            with socket.create_connection((target, port), timeout=timeout):
+                reachable = True
+            checks.append(_check('good', 'Port {port} on {host} is reachable.', host=target, port=port))
+        except ConnectionRefusedError:
+            checks.append(_check('danger', 'Port {port} on {host} refused the connection.',
+                                 'The computer answered, but Lifetime Server is not running there or uses another port. '
+                                 'Start Lifetime Server, or check its port under Administration.', host=target, port=port))
+        except TimeoutError:
+            checks.append(_check('danger', 'No answer from {host} on port {port}.',
+                                 'The server may be off, or its firewall blocks port {port}. ' + FIX_SELF_CHECK,
+                                 host=target, port=port))
+        except OSError:
+            checks.append(_check('danger', 'No network path to {host}.',
+                                 'Check that this computer is on the same network as the server (Wi-Fi or cable, or the VPN).',
+                                 host=target))
+    else:
+        checks.append(_check('neutral', 'Port {port} not checked: the server name did not resolve.', port=port))
+
+    details, der, matched = {}, None, False
+    if reachable:
+        try:
+            der = tls.peer_certificate(target, port, timeout)       # reads the certificate only; sends nothing
+        except (OSError, ValueError):
+            checks.append(_check('danger', 'The secure connection to {host} failed: it may not be Lifetime Server.',
+                                 'Check the address and port. Lifetime Server uses port 8443 unless it was installed with another.',
+                                 host=target))
+    else:
+        checks.append(_check('neutral', 'Certificate not checked: the server could not be reached.'))
+    if der:
+        pem, problem = ssl.DER_cert_to_PEM_cert(der), None
+        try:
+            details = connection.certificate_details(target, port, pem, timeout)
+        except ssl.SSLCertVerificationError as error:
+            problem = {9: 'not-yet', 10: 'expired'}.get(error.verify_code, 'invalid')
+        except (OSError, ValueError):
+            problem = 'invalid'
+        if details:
+            names = details.get('subjectAltName', ())
+            dns = [name for kind, name in names if kind == 'DNS']
+            ips = [name.strip() for kind, name in names if kind == 'IP Address']
+            covered = (any(connection._same_ip(name, ip) for name in ips) if ip is not None
+                       else host.lower() in {name.lower() for name in dns})
+            if covered:
+                checks.append(_check('good', 'The server certificate names {host}.', host=host))
+            else:
+                checks.append(_check('danger', 'The server certificate does not name {host}. It names: {names}.',
+                                     'Use one of those names in the connection line, or on the server add {host} under '
+                                     'Administration > Other server names and IPs.', host=host, names=', '.join(dns + ips)))
+        if code:
+            invitation, secret, expected = connection.parts(code)
+            matched = hmac.compare_digest(connection.commitment(hashlib.sha256(der).hexdigest(), invitation, secret), expected)
+            if matched:
+                checks.append(_check('good', 'The server certificate matches the code.'))
+            else:
+                checks.append(_check('danger', "This server's certificate does not match the code.",
+                                     'The code belongs to another server, or the server renewed its certificate after the code '
+                                     'was made. Create a new code on the server (Add device).'))
+        if details:
+            start, end = (ssl.cert_time_to_seconds(details[key]) for key in ('notBefore', 'notAfter'))
+            dates = dict(start=date_text(dt.date.fromtimestamp(start)), end=date_text(dt.date.fromtimestamp(end)))
+            if end - now() < 30 * 86400:
+                checks.append(_check('warning', 'The server certificate is valid from {start} to {end}, less than 30 days left.',
+                                     'Lifetime Server renews it 30 days before it ends. ' + FIX_SELF_CHECK, **dates))
+            else:
+                checks.append(_check('good', 'The server certificate is valid from {start} to {end}.', **dates))
+        elif problem == 'expired':
+            checks.append(_check('danger', "The server certificate is out of date, or this computer's clock is wrong.", FIX_CLOCK))
+        elif problem == 'not-yet':
+            checks.append(_check('danger', "The server certificate is not valid yet: this computer's clock may be behind.", FIX_CLOCK))
+        else:
+            checks.append(_check('danger', 'The server certificate could not be checked.',
+                                 'Update Lifetime on this computer and on the server.'))
+        if matched and details:
+            try:
+                difference = server_time(target, port, pem, timeout) - now()
+                if abs(difference) <= CLOCK_LIMIT:
+                    checks.append(_check('good', "This computer's clock is within {seconds} s of the server's.",
+                                         seconds=round(abs(difference))))
+                else:
+                    checks.append(_check('warning', "This computer's clock differs from the server's by {minutes} minutes.",
+                                         'Set the date and time automatically on both computers.',
+                                         minutes=round(abs(difference) / 60)))
+            except Exception:       # any failure only means the clock is unknown
+                checks.append(_check('neutral', "The server's clock could not be read."))
+    if not (matched and details):
+        checks.append(_check('neutral', "Server clock not compared: Lifetime sends nothing to a server before the typed "
+                             'code proves it is the right one.'))
+    return checks + _profile_checks(profiles, here, port)
+
+
+def _profile_checks(profiles, here, port):
+    """Windows only: a Public network blocks other computers from reaching a server on this computer."""
+    if sys.platform != 'win32':
+        return []
+    found = profiles()
+    if found is None:
+        return [_check('neutral', 'Could not read the Windows network profile.')]
+    public = ', '.join(name for name, kind in found if kind.lower() == 'public')
+    listed = ', '.join(f'{name} ({kind})' for name, kind in found)
+    if public and here(port):
+        return [_check('danger', 'This computer runs Lifetime Server and its network {networks} is Public: Windows lets no '
+                       'other computer reach it.',
+                       'Set the network to Private: Settings > Network & internet > {networks} > Network profile type > Private.',
+                       networks=public)]
+    if public:
+        return [_check('info', 'Windows network {networks} is Public. That does not stop this computer from connecting out; '
+                       'it would only block computers if this computer were the server.', networks=public)]
+    return [_check('good', 'Windows network profile: {networks}. None is Public.', networks=listed or '-')]
+
+
+def diagnosis_report(checks, t):
+    """Copy report: plain text, with any code, token or secret masked."""
+    import platform
+    from lifetime_connection import check_lines, scrub
+    from lifetime_protocol import CLIENT_VERSION
+    lines = [t('Lifetime connection diagnosis'),
+             f"Lifetime {CLIENT_VERSION} · {platform.platform()} · {dt.datetime.now().astimezone().isoformat(timespec='seconds')}", '']
+    return scrub('\n'.join(lines + check_lines(checks, t)))
+
+
+# Copy diagnostics: only these named fields are copied (identity, codes and credentials never are).
+SAFE_SETTINGS = ('language', 'theme', 'style', 'completed', 'autostart', 'history', 'battery', 'network', 'wifi_name',
+                 'graphics', 'resources', 'health', 'remote_power')
+SAFE_STATUS = ('enabled', 'phase', 'status', 'server', 'server_name', 'reported', 'trimmed', 'updates', 'policy', 'pending',
+               'dropped', 'last_sync', 'server_reachable', 'server_problem', 'server_seen_at', 'checked_at', 'error', 'error_at')
+
+
+def setup_logs():
+    """The reporting service's own setup log (install_agent_windows.ps1): in its data folder, or TEMP before that exists.
+    The data folder is for administrators only, so it is usually not readable here."""
+    if sys.platform != 'win32':
+        return []
+    from lifetime_agent import machine_directory
+    return [machine_directory() / 'install.log', Path(tempfile.gettempdir()) / 'LifetimeAgent-install.log']
+
+
+def diagnostics_text(t, directory=None, machine_root=None, checks=None, logs=None):
+    """Copy diagnostics: version, system, settings that are not secret, the reporting service's state and last problem,
+    the last Diagnose connection and the end of the setup log. Named fields only, and the whole text is scrubbed."""
+    import platform
+    from lifetime_connection import check_lines, log_tail, report
+    from lifetime_protocol import CLIENT_VERSION
+    settings, status = read_settings(directory), read_status(machine_root)
+    edition = t('desktop, installed package') if getattr(sys, 'frozen', False) else t('desktop, from source')
+    sections = [(t('Lifetime diagnostics'), [f'Lifetime {CLIENT_VERSION} ({edition})',
+                                             f'{platform.platform()} · Python {platform.python_version()}',
+                                             dt.datetime.now().astimezone().isoformat(timespec='seconds')]),
+                (t('Settings'), [f'{key}: {settings[key]}' for key in SAFE_SETTINGS if key in settings])]
+    service = [server_state(status, t)[2]] + [f'{key}: {status[key]}' for key in SAFE_STATUS if status.get(key) is not None]
+    if status.get('error'):
+        service.append(t('Last problem: {reason}', reason=reason_text(status['error'], t) or status['error']))
+    sections.append((t('Reporting service'), service))
+    sections.append((t('Connection diagnosis'), check_lines(checks, t) if checks else [t('Not run. Press Diagnose connection first.')]))
+    for name, lines in log_tail(setup_logs() if logs is None else logs):
+        sections.append((t('Log: {name}, last {count} lines', name=name, count=len(lines)), lines))
+    return report(sections)
 
 
 FINISH_FAILED = 'Could not finish connecting. Check that the server is on and try again.'
@@ -410,6 +758,27 @@ class ConnectPage(QWidget):
         box.setContentsMargins(0, 0, 0, 0)
         self.steps = PageStack()
         box.addWidget(self.steps)
+        self.diagnosis = QFrame()       # below the steps: shown after Diagnose connection, on the code and connected steps
+        self.diagnosis.setObjectName('insetPanel')
+        self.diagnosis_layout = QVBoxLayout(self.diagnosis)
+        self.diagnosis_layout.setContentsMargins(24, 24, 24, 24)
+        self.diagnosis_layout.setSpacing(12)
+        self.note(self.diagnosis_layout, 'Connection diagnosis', 'pageTitle')
+        self.diagnosis_rows = QVBoxLayout()
+        self.diagnosis_rows.setSpacing(10)
+        self.diagnosis_layout.addLayout(self.diagnosis_rows)
+        self.button(self.diagnosis_layout, 'Copy report', self.copy_report)
+        self.diagnosis.hide()
+        self.diagnosis_checks = []
+        self._diagnosing = False
+        self.diagnose_tasks = Tasks(self)      # a separate Tasks bridge (same thread pool): its results never reach the status poll or block it
+        self.diagnose_tasks.completed.connect(lambda number, result: self._diagnosed(result))
+        self.diagnose_tasks.failed.connect(lambda number, error: self._diagnosed(
+            [_check('danger', 'The diagnosis could not finish.', 'Try again. If it keeps failing, tell your IT team.')]))
+        self.copy_tasks = Tasks(self)       # Copy diagnostics reads files: never on the interface thread
+        self.copy_tasks.completed.connect(lambda number, text: self._copied(text))
+        self.copy_tasks.failed.connect(lambda number, error: self._copied(None))
+        box.addWidget(self.diagnosis)
         box.addStretch()
         outer.addWidget(self.column, 1)
         outer.addStretch()
@@ -450,6 +819,8 @@ class ConnectPage(QWidget):
         self.code.textChanged.connect(self.format_input)
         self.code.returnPressed.connect(self.connect_server)
         self.note(f, 'Next you choose what to share. You can change it or disconnect any time.', 'caption')
+        self.diagnose_buttons = [self.button(f, 'Diagnose connection', self.diagnose)]
+        self.copy_buttons = [self.button(f, 'Copy diagnostics', self.copy_diagnostics)]
         self.pulse(self.forms[1], 'Looking for your server...', True)
         self.forms[1].addWidget(PacketFlight(self.reduce_motion))
         f = self.forms[2]
@@ -515,6 +886,10 @@ class ConnectPage(QWidget):
         self.unreachable.hide()
         self.button(f, 'Change what is shared', self.change_policy)
         self.button(f, 'Disconnect', self.disconnect)
+        self.diagnose_buttons.append(self.button(f, 'Diagnose connection', self.diagnose))
+        self.copy_buttons.append(self.button(f, 'Copy diagnostics', self.copy_diagnostics))
+        for button in self.diagnose_buttons + self.copy_buttons:
+            button.setObjectName('quietAction')
         self.timer = QTimer(self)
         self.timer.setInterval(2000)
         self.timer.timeout.connect(self.poll)
@@ -597,6 +972,7 @@ class ConnectPage(QWidget):
             previous.setGraphicsEffect(None)
         self.step = step
         self.steps.setCurrentIndex(step - 1)
+        self.diagnosis.setVisible(step in (1, 5) and bool(self.diagnosis_checks))
         incoming = self.steps.currentWidget()
         if snapshot is not None:
             self.animation = QParallelAnimationGroup(self)
@@ -694,6 +1070,65 @@ class ConnectPage(QWidget):
         self.code_error.hide()
         self.show_step(2)
         self.submit('find', lambda: locate_server(value))
+
+    def diagnose(self):
+        if self._diagnosing:
+            return
+        value = self.code.text() if self.step == 1 else ''
+        if value and self._origin:
+            from lifetime_connection import connection_line
+            try:
+                value = connection_line(self._origin, value)
+            except ValueError:
+                pass
+        saved = (self.status.get('server') or None) if self.status.get('enabled') else None
+        self._diagnosing = True
+        for button in self.diagnose_buttons:
+            button.setEnabled(False)
+            button.setText(self.t('Checking the connection…'))
+        self.diagnose_tasks.submit(lambda: diagnose(value, saved))
+
+    def _diagnosed(self, checks):
+        self._diagnosing = False
+        for button in self.diagnose_buttons:
+            button.setEnabled(True)
+            button.setText(self.t('Diagnose connection'))
+        self.diagnosis_checks = checks or []
+        from lifetime_widgets_dashboard import StatusChip
+        while self.diagnosis_rows.count():
+            item = self.diagnosis_rows.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for check in self.diagnosis_checks:
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(StatusChip(check['state'], self.t(CHECK_WORDS[check['state']])), 0, Qt.AlignmentFlag.AlignTop)
+            words = QVBoxLayout()
+            words.setSpacing(2)
+            self.note(words, '').setText(self.t(check['text'], **check['values']))
+            if check['fix']:
+                self.note(words, '', 'caption').setText(self.t('What to do: {fix}', fix=self.t(check['fix'], **check['values'])))
+            line.addLayout(words, 1)
+            self.diagnosis_rows.addWidget(row)
+        self.diagnosis.setVisible(self.step in (1, 5) and bool(self.diagnosis_checks))
+
+    def copy_report(self):
+        from PyQt6.QtWidgets import QApplication
+        QApplication.clipboard().setText(diagnosis_report(self.diagnosis_checks, self.t))
+
+    def copy_diagnostics(self):
+        directory, root, checks = self.directory, self.machine_root, list(self.diagnosis_checks)
+        for button in self.copy_buttons:
+            button.setEnabled(False)
+        self.copy_tasks.submit(lambda: diagnostics_text(self.t, directory, root, checks))
+
+    def _copied(self, text):
+        from PyQt6.QtWidgets import QApplication
+        for button in self.copy_buttons:
+            button.setEnabled(True)
+        if text:
+            QApplication.clipboard().setText(text)
 
     def policy(self):
         return dict(history=self.history.isChecked(), resources=self.resources.isChecked(),
