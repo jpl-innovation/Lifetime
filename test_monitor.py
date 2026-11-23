@@ -330,6 +330,30 @@ class DetailRetentionTests(MonitorCase):
         self.assertEqual(self.monitor._db.execute('SELECT COUNT(*) FROM presence').fetchone()[0], before)
         self.assertEqual(self.monitor._db.execute("SELECT COUNT(*) FROM incidents WHERE state='resolved'").fetchone()[0], 2)
 
+    def test_a_bad_saved_setting_never_trims_more_or_stops_monitoring(self):
+        with self.monitor._transaction() as db:
+            self.monitor._setting(db, 'detail_days', '1')      # outside 30..3660, from an edited or foreign backup
+            db.execute("INSERT INTO presence(device_id,state,reason,start_at,end_at) VALUES ('pc','online','x',?,?)",
+                       (stamp(self.clock.now - dt.timedelta(days=5)), stamp(self.clock.now - dt.timedelta(days=4))))
+        backup = Path(self.temporary.name) / 'bad-setting.sqlite'
+        self.monitor.backup(backup)
+        other = monitoring.Monitor(Path(self.temporary.name) / 'other.sqlite', self.fleet, clock=self.clock).start()
+        self.addCleanup(lambda: other._db.close())
+        other.restore(other.read_backup(backup))
+        self.assertEqual(other.detail_retention(), dict(days=400))
+        self.assertIsNone(other._setting(other._db, 'detail_days'))       # the bad value is not carried over
+        other._housekeeping_at = None
+        other.tick()
+        self.assertEqual(len(other.presence('pc')), 1)
+        for bad in ('1.5', 'abc', '99999', '-40'):
+            with other._transaction() as db:
+                other._setting(db, 'detail_days', bad)
+            other._housekeeping_at = None
+            with self.subTest(bad=bad):
+                other.tick()                                        # never raises inside the monitoring pass
+                self.assertEqual(other.detail_retention(), dict(days=400))
+                self.assertEqual(len(other.presence('pc')), 1)
+
     def test_daily_totals_in_the_server_store_are_never_trimmed(self):
         from lifetime_server_store import Store
         store = Store(Path(self.temporary.name) / 'server.sqlite')

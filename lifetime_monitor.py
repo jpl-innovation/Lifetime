@@ -1306,6 +1306,10 @@ class Monitor:
                 _schedule(json.loads(row['value']))
             for row in snapshot.execute('SELECT value FROM settings'):
                 json.loads(row['value'])
+            # An out-of-range "Keep detailed records for" is not restored: the default applies instead.
+            saved = snapshot.execute("SELECT value FROM settings WHERE key='detail_days'").fetchone()
+            if saved and Monitor._valid_days(saved['value']) is None:
+                snapshot.execute("DELETE FROM settings WHERE key='detail_days'")
             return snapshot
         except BaseException as error:
             snapshot.close()
@@ -1348,10 +1352,20 @@ class Monitor:
             pages = self._db.execute('PRAGMA page_count').fetchone()[0] - self._db.execute('PRAGMA freelist_count').fetchone()[0]
             return pages * self._db.execute('PRAGMA page_size').fetchone()[0]
 
+    @staticmethod
+    def _valid_days(value):
+        """A saved "Keep detailed records for" as whole days in range, else None (never trust a restored value)."""
+        if isinstance(value, str) and value.isascii() and value.isdigit() and DETAIL_DAYS_RANGE[0] <= int(value) <= DETAIL_DAYS_RANGE[1]:
+            return int(value)
+        return None
+
+    def _detail_days(self, db):
+        return self._valid_days(self._setting(db, 'detail_days')) or self.retention_days
+
     def detail_retention(self):
         """How many days detailed monitoring records are kept ("Keep detailed records for")."""
         with self._lock:
-            return dict(days=int(self._setting(self._db, 'detail_days') or self.retention_days))
+            return dict(days=self._detail_days(self._db))
 
     def set_detail_retention(self, days):
         if type(days) is not int or not DETAIL_DAYS_RANGE[0] <= days <= DETAIL_DAYS_RANGE[1]:
@@ -1380,8 +1394,7 @@ class Monitor:
         """Age limit first, then the size quota: oldest closed detail goes first. Incident summaries stay (only their
         timelines go) for up to ten years unless the size quota needs their room before recent presence; active
         incidents and their timelines are never touched."""
-        days = int(self._setting(db, 'detail_days') or self.retention_days)
-        cutoff = _stamp(now - dt.timedelta(days=days))
+        cutoff = _stamp(now - dt.timedelta(days=self._detail_days(db)))
         db.execute('DELETE FROM presence WHERE end_at IS NOT NULL AND end_at<?', (cutoff,))
         db.execute("DELETE FROM timeline WHERE incident_id IN (SELECT id FROM incidents WHERE state='resolved' "
                    "AND resolved_at<?)", (cutoff,))
