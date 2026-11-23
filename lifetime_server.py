@@ -314,6 +314,8 @@ _ADMIN = {
     'availability': ('monitor.availability', ('device_ids',), ('start', 'end', 'as_of', 'daily')),
     'set_coverage_floor': ('monitor.set_coverage_floor', ('percent',), ()),
     'coverage_floor': ('monitor.coverage_floor', (), ()),
+    'detail_retention': ('monitor.detail_retention', (), ()),
+    'set_detail_retention': ('monitor.set_detail_retention', ('days',), ()),
     'checks': ('monitor.checks', (), ()),
     'save_check': ('monitor.save_check', ('check',), ('check_id',)),
     'delete_check': ('monitor.delete_check', ('check_id',), ()),
@@ -726,6 +728,8 @@ class ServerRuntime:
         result = getattr(self._store, method)(**value)
         if operation == 'delete':
             self.monitor.forget(value['device_id'])
+        elif operation == 'retain':         # "delete before" removes monitoring's records of that time too
+            self.monitor.retain(value['before'])
         elif operation == 'rename_group':     # its hours, maintenance, sleep policy, wattage and checks move with it
             self.monitor.rename_group(value['group'].strip(), value['new_name'].strip())
         elif operation == 'overview':      # alert badges ride along with the counters

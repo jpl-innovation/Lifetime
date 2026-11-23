@@ -2183,3 +2183,16 @@ for _key, _text in _SCORE_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+
+# --- 1.3.0 server uptime ---
+_SERVER_UPTIME_VI = {
+    'days': 'ngày',
+    'Keep detailed records for': 'Giữ dữ liệu chi tiết trong',
+    'Online and offline history, incident timelines and sent alerts older than this are removed automatically. Daily awake and off-time totals and incident summaries are kept until you delete records before a date.':
+        'Lịch sử trực tuyến/ngoại tuyến, diễn biến sự cố và cảnh báo đã gửi cũ hơn mốc này được tự động xóa. Tổng thời gian thức và thời gian tắt theo ngày cùng bản tóm tắt sự cố được giữ lại cho đến khi bạn xóa dữ liệu trước một ngày.',
+}
+for _key, _text in _SERVER_UPTIME_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

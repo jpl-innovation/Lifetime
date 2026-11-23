@@ -6,8 +6,10 @@ it only through that object. It reads the server store through ``Store.monitor_s
 only the readings each computer's policy allows) and never writes there.
 
 Server downtime is UNKNOWN, never DOWN and never zero: at start the open presence intervals are closed at the last
-heartbeat and an "unknown (server-down)" interval covers the gap. History is bounded by age (RETENTION_DAYS) and by
-size (QUOTA_BYTES), checked every hour.
+heartbeat and an "unknown (server-down)" interval covers the gap. Detailed history (presence intervals, incident
+timelines, deliveries) is bounded by age ("Keep detailed records for", RETENTION_DAYS by default) and by size
+(QUOTA_BYTES), checked every hour. Incidents themselves (the summaries) are kept until "delete before" (retain) removes
+them; the computers' daily totals live in server.sqlite and are never trimmed here.
 """
 import contextlib
 import datetime as dt
@@ -29,7 +31,8 @@ import lifetime_notify as notify
 
 SCHEMA_VERSION = 3
 APPLICATION_ID = 0x4C544D4E     # "LTMN"
-RETENTION_DAYS = 180
+RETENTION_DAYS = 400         # "Keep detailed records for" until an administrator changes it
+DETAIL_DAYS_RANGE = (30, 3660)
 QUOTA_BYTES = 64 * 1024 * 1024
 MAX_DELIVERIES = 5000
 HOUSEKEEPING_SECONDS = 3600
@@ -290,7 +293,7 @@ class Monitor:
         self.server_name, self.transport = server_name, transport or notify.Transport()
         self.status = {}
         self._delivering = threading.Lock()
-        self.quota, self.retention = quota, dt.timedelta(days=retention_days)
+        self.quota, self.retention_days = quota, retention_days
         self.started_at = None
         self.checker, self.blocked_ports = None, set()
         self._housekeeping_at = None
@@ -1301,23 +1304,51 @@ class Monitor:
             pages = self._db.execute('PRAGMA page_count').fetchone()[0] - self._db.execute('PRAGMA freelist_count').fetchone()[0]
             return pages * self._db.execute('PRAGMA page_size').fetchone()[0]
 
+    def detail_retention(self):
+        """How many days detailed monitoring records are kept ("Keep detailed records for")."""
+        with self._lock:
+            return dict(days=int(self._setting(self._db, 'detail_days') or self.retention_days))
+
+    def set_detail_retention(self, days):
+        if type(days) is not int or not DETAIL_DAYS_RANGE[0] <= days <= DETAIL_DAYS_RANGE[1]:
+            raise MonitorError('Keep detailed records for 30 to 3660 days')
+        with self._transaction() as db:
+            self._setting(db, 'detail_days', str(days))
+            self._housekeeping_at = None        # applied at the next pass, not an hour later
+        return dict(days=days)
+
+    def retain(self, before):
+        """"Delete records before" reaches monitoring too: presence, incidents (with their timelines), deliveries,
+        maintenance windows and daily readings that ended before the boundary. An interval crossing it is cut there."""
+        boundary = _stamp(_time(before))
+        with self._transaction() as db:
+            db.execute('DELETE FROM presence WHERE end_at IS NOT NULL AND end_at<=?', (boundary,))
+            db.execute('UPDATE presence SET start_at=? WHERE start_at<?', (boundary, boundary))
+            db.execute("DELETE FROM incidents WHERE state='resolved' AND resolved_at<?", (boundary,))
+            db.execute("DELETE FROM deliveries WHERE status IN ('sent','failed') AND updated_at<?", (boundary,))
+            db.execute('DELETE FROM maintenance WHERE end_at<?', (boundary,))
+            db.execute('DELETE FROM trends WHERE day<?', (boundary[:10],))
+        return dict(before=boundary)
+
     def _housekeeping(self, db, now):
-        """Age limit first, then the size quota: oldest closed history goes first, active incidents never."""
-        cutoff = _stamp(now - self.retention)
+        """Age limit first, then the size quota: oldest closed detail goes first. Incident summaries stay (only their
+        timelines go), active incidents and their timelines are never touched."""
+        days = int(self._setting(db, 'detail_days') or self.retention_days)
+        cutoff = _stamp(now - dt.timedelta(days=days))
         db.execute('DELETE FROM presence WHERE end_at IS NOT NULL AND end_at<?', (cutoff,))
-        db.execute("DELETE FROM incidents WHERE state='resolved' AND resolved_at<?", (cutoff,))
+        db.execute("DELETE FROM timeline WHERE incident_id IN (SELECT id FROM incidents WHERE state='resolved' "
+                   "AND resolved_at<?)", (cutoff,))
         db.execute("DELETE FROM deliveries WHERE status IN ('sent','failed') AND updated_at<?", (cutoff,))
         db.execute('DELETE FROM deliveries WHERE id <= (SELECT MAX(id)-? FROM deliveries)', (MAX_DELIVERIES,))
         db.execute('DELETE FROM maintenance WHERE end_at<?', (cutoff,))
         db.execute('DELETE FROM trends WHERE day<?', ((now.astimezone().date() - dt.timedelta(days=TREND_DAYS)).isoformat(),))
         for _ in range(20):
-            used = (db.execute('PRAGMA page_count').fetchone()[0] - db.execute('PRAGMA freelist_count').fetchone()[0]) \
-                * db.execute('PRAGMA page_size').fetchone()[0]
+            used = (db.execute('PRAGMA page_count').fetchone()[0] - db.execute('PRAGMA freelist_count').fetchone()[0])                 * db.execute('PRAGMA page_size').fetchone()[0]
             if used <= self.quota:
                 break
             removed = 0
             for table, closed, order in (('presence', 'end_at IS NOT NULL', 'end_at'),
-                                         ('incidents', "state='resolved'", 'resolved_at'),
+                                         ('timeline', "incident_id IN (SELECT id FROM incidents WHERE state='resolved')", 'time'),
                                          ('deliveries', "status IN ('sent','failed')", 'updated_at')):
                 count = db.execute(f'SELECT COUNT(*) FROM {table} WHERE {closed}').fetchone()[0]     # nosec B608: fixed tuple
                 removed += db.execute(f'DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {closed} '   # nosec B608

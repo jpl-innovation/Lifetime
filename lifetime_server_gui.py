@@ -33,6 +33,7 @@ from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
 from lifetime_server_insights import InsightsUI
 from lifetime_server_alerts import AlertsUI
+from lifetime_server_uptime import UptimeUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, GroupField, DeviceDetailsDialog, GroupsDialog, local_expiry, reduced_motion, table_action
 from lifetime_reveal import RollLabel, fade_in, later, warm_pages
 from lifetime_server_devices import (glass, Glass, STYLES, set_style, active_style, ServerPages, DeviceBox, problems, byte_text, Skeleton,
@@ -291,6 +292,7 @@ class ServerWindow(QMainWindow):
         self._kpi_alerts = set()
         self._open_after_load = None
         self.access_ui = AccessUI(self)      # what the signed-in Windows account's role may do
+        self.uptime = UptimeUI(self)        # date ranges, uptime and downtime, fleet uptime bars, detail retention
         self._make_overview()
         self._make_devices()
         self.alerts = AlertsUI(self)        # the Incidents page, the header alert badge and the alert settings
@@ -1532,6 +1534,7 @@ class ServerWindow(QMainWindow):
         retention_row.addWidget(self.retain_button)
         retention_row.addStretch()
         form.addRow(self.label('Delete records before (UTC)'), retention_row)
+        self.uptime.retention_rows(form)
         self.admin_layout.addWidget(retention)
         about, about_layout = self._section('About')
         credit = QHBoxLayout()
@@ -1756,6 +1759,7 @@ class ServerWindow(QMainWindow):
             self.tabs.setTabText(index, self.t(key))
         self.alerts.retranslate()
         self.insights.retranslate()
+        self.uptime.retranslate()
         self.access_ui.retranslate()
         for index, key in enumerate(('All statuses', 'Pending approval', 'Approved', 'Denied', 'Disconnected', 'Connected', 'Offline', 'Unavailable')):
             self.status_filter.setItemText(index, self.t(key))
@@ -1944,6 +1948,8 @@ class ServerWindow(QMainWindow):
         self._configuration_busy = True
         if not self._submit(lambda: client.call('configuration'), self._configuration_finished):
             self._configuration_busy = False
+        else:
+            self.uptime.load_retention()
 
     def _configuration_finished(self, result, success):
         self._configuration_busy = False

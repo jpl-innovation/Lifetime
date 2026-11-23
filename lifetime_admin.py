@@ -21,7 +21,8 @@ OPERATIONS = frozenset((
     'availability', 'coverage_floor', 'set_coverage_floor', 'checks', 'save_check', 'delete_check', 'check_scopes',
     'set_check_scopes', 'whoami', 'roles', 'set_role', 'delete_role', 'audit', 'verify_audit', 'backup_archive',
     'verify_backup', 'stage_restore', 'updates', 'upload_update', 'set_update', 'rollback_update',
-    'insights', 'set_insight_settings', 'set_sleep_policy', 'groups', 'add_group', 'remove_group', 'rename_group'))
+    'insights', 'set_insight_settings', 'set_sleep_policy', 'groups', 'add_group', 'remove_group', 'rename_group',
+    'detail_retention', 'set_detail_retention'))
 
 
 class NotAllowed(ValueError):

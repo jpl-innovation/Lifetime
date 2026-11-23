@@ -224,10 +224,95 @@ class PersistenceTests(MonitorCase):
         remaining = self.monitor._db.execute('SELECT COUNT(*) FROM presence').fetchone()[0]
         self.assertLess(remaining, rows)
         self.assertEqual(self.monitor._db.execute('SELECT COUNT(*) FROM presence WHERE end_at IS NULL').fetchone()[0], 1)
-        self.clock.advance(days=monitoring.RETENTION_DAYS + 1)
+        self.clock.advance(days=self.monitor.detail_retention()['days'] + 1)
         self.monitor._housekeeping_at = None
         self.monitor.tick()
         self.assertEqual([row['end_at'] for row in self.monitor.presence(ID)], [None])
+
+
+class DetailRetentionTests(MonitorCase):
+    """"Keep detailed records for": raw presence and incident detail go after N days; summaries and totals stay."""
+
+    def seed(self, cutoff):
+        db = self.monitor._db
+        second = dt.timedelta(seconds=1)
+        for state, start, end in (('offline', cutoff - dt.timedelta(days=2), cutoff - second),     # ends before: goes
+                                  ('online', cutoff - second, cutoff),                              # ends at it: stays
+                                  ('online', cutoff, cutoff + dt.timedelta(hours=1))):
+            db.execute("INSERT INTO presence(device_id,state,reason,start_at,end_at) VALUES (?,?,'x',?,?)",
+                       (ID, state, stamp(start), stamp(end)))
+        db.execute("INSERT INTO presence(device_id,state,reason,start_at) VALUES (?,'online','x',?)",
+                   (str(uuid.UUID(int=2)), stamp(cutoff - dt.timedelta(days=900))))      # open for years: stays
+        for state, resolved in (('resolved', cutoff - second), ('resolved', cutoff + second), ('open', None)):
+            incident = db.execute("""INSERT INTO incidents(device_id,rule,cause,state,started_at,resolved_at,updated_at)
+                VALUES (?,'offline',?,?,?,?,?)""", (ID, state + str(resolved), state, stamp(cutoff - dt.timedelta(days=3)),
+                                                    resolved and stamp(resolved), stamp(cutoff))).lastrowid
+            db.execute("INSERT INTO timeline(incident_id,time,kind) VALUES (?,?,'opened')",
+                       (incident, stamp(cutoff - dt.timedelta(days=3))))
+
+    def housekeep(self):
+        with self.monitor._transaction() as db:
+            self.monitor._housekeeping(db, self.clock.now)
+
+    def test_default_400_days_trims_raw_presence_and_incident_detail_but_keeps_summaries(self):
+        self.assertEqual(self.monitor.detail_retention(), dict(days=400))
+        cutoff = self.clock.now - dt.timedelta(days=400)
+        self.seed(cutoff)
+        self.housekeep()
+        db = self.monitor._db
+        ends = sorted(row[0] or 'open' for row in db.execute('SELECT end_at FROM presence'))
+        self.assertEqual(ends, sorted([stamp(cutoff), stamp(cutoff + dt.timedelta(hours=1)), 'open']))
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM incidents').fetchone()[0], 3)      # every summary stays
+        kept = {row[0] for row in db.execute('SELECT i.state || coalesce(i.resolved_at, "") FROM timeline t '
+                                             'JOIN incidents i ON i.id = t.incident_id')}
+        self.assertEqual(kept, {'resolved' + stamp(cutoff + dt.timedelta(seconds=1)), 'open'})
+
+    def test_the_setting_moves_the_boundary_and_is_bounded(self):
+        for bad in (29, 3661, '400', 400.0, True, None):
+            with self.subTest(bad=bad), self.assertRaises(monitoring.MonitorError):
+                self.monitor.set_detail_retention(bad)
+        self.assertEqual(self.monitor.set_detail_retention(30), dict(days=30))
+        self.assertEqual(self.restart().detail_retention(), dict(days=30))      # saved with the monitoring settings
+        cutoff = self.clock.now - dt.timedelta(days=30)
+        self.seed(cutoff)
+        self.housekeep()
+        self.assertEqual(self.monitor._db.execute("SELECT COUNT(*) FROM presence WHERE end_at<?", (stamp(cutoff),)).fetchone()[0], 0)
+        self.assertEqual(self.monitor._db.execute("SELECT COUNT(*) FROM presence WHERE end_at=?", (stamp(cutoff),)).fetchone()[0], 1)
+
+    def test_delete_before_removes_summaries_and_cuts_crossing_intervals(self):
+        cutoff = self.clock.now - dt.timedelta(days=10)
+        self.seed(cutoff)
+        self.monitor.retain(stamp(cutoff))
+        db = self.monitor._db
+        self.assertEqual(db.execute('SELECT MIN(start_at) FROM presence').fetchone()[0], stamp(cutoff))
+        self.assertEqual(sorted(row[0] for row in db.execute('SELECT state FROM incidents')), ['open', 'resolved'])
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM timeline').fetchone()[0], 2)    # the deleted one's went with it
+
+    def test_daily_totals_in_the_server_store_are_never_trimmed(self):
+        from lifetime_server_store import Store
+        store = Store(Path(self.temporary.name) / 'server.sqlite')
+        self.addCleanup(store.close)
+        code = store.create_code()['code']
+        request = dict(version=1, request_id=str(uuid.uuid4()), device_id=str(uuid.uuid4()), code=code,
+                       poll_token='p' * 43, identity={'display_name': 'PC'}, policy=dict(history=True, resources=False))
+        store.enroll(request)
+        store.approve(request['request_id'])
+        credential = store.claim(request['request_id'], request['poll_token'])['credential']
+        off = dict(asleep_s=3600, off_s=0, unknown_s=0, restarts=0, shutdowns=0, unexpected_stops=1)
+        history = dict(daily={'2016-01-04': 3600.0, '2026-11-15': 7200.0}, downtime_daily={'2016-01-04': off})
+        store.ingest(request['device_id'], credential, dict(
+            version=1, device_id=request['device_id'], policy_version=1, policy=dict(history=True, resources=False),
+            history=history, records=[dict(seq=1, observed_at=stamp(T0), awake_seconds=1, measured_seconds=1,
+                                           imported_seconds=0, totals=dict(measured_seconds=1, imported_seconds=0,
+                                                                           baseline_seconds=0))]))
+        monitor = monitoring.Monitor(
+            Path(self.temporary.name) / 'other.sqlite', store, clock=self.clock).start()
+        self.addCleanup(lambda: monitor._db.close())
+        monitor.set_detail_retention(30)
+        self.clock.advance(days=4000)
+        monitor.tick()
+        self.assertEqual(store.get_device(request['device_id'])['history'], history)
+        self.assertEqual(store.get_device(request['device_id'])['record_count'], 1)     # the awake-time records too
 
 
 class RuleTests(MonitorCase):
