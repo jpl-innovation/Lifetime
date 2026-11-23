@@ -1424,13 +1424,13 @@ class ServerWindow(QMainWindow):
     # Self check (1.3.0 diagnostics): what computers need from this server, one line each with what to do.
     def _make_self_check(self):
         panel, layout = self._section('Self check')
-        self.access_ui.gate(panel, 'self_check')
         note = self.label('Checks the addresses, certificate, discovery, firewall and time that computers need. It only reads; nothing is changed.')
         note.setObjectName('muted')
         layout.addWidget(note)
         actions = QHBoxLayout()
-        self.self_check_button = self.button('Run self check', self.run_self_check)
-        self.diagnostics_button = self.button('Copy diagnostics', self.copy_diagnostics)
+        self.self_check_button = self.access_ui.gate(self.button('Run self check', self.run_self_check), 'self_check')
+        # Needs only server_info and server_log, so it also works with a server older than Self check.
+        self.diagnostics_button = self.access_ui.gate(self.button('Copy diagnostics', self.copy_diagnostics), 'server_info')
         actions.addWidget(self.self_check_button)
         actions.addWidget(self.diagnostics_button)
         actions.addStretch()

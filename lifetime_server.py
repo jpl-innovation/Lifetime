@@ -1282,12 +1282,12 @@ def _line(state, text, fix=None, **values):
                 what_to_do=fix.format(**values) if fix else None)
 
 
-def _command(command, run=None):
+def _command(command, run=None, timeout=2):
     """(exit code, output) of a read-only system command, or None when it cannot run. Nothing typed by a person is
-    ever part of ``command``."""
+    ever part of ``command``. The dashboard waits 10 s for the whole Self check, so each command gets little time."""
     import subprocess
     try:
-        result = (run or subprocess.run)(command, capture_output=True, text=True, timeout=15,
+        result = (run or subprocess.run)(command, capture_output=True, text=True, timeout=timeout,
                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
@@ -1312,7 +1312,7 @@ def firewall_checks(port, run=None, platform=None, ufw_conf='/etc/ufw/ufw.conf')
 
 
 def _windows_firewall(port, run):
-    result = _command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_FIREWALL], run)
+    result = _command(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_FIREWALL], run, 7)
     if result is None or result[0]:
         return [_line('neutral', 'Could not read the Windows firewall and network profiles.')]
     rule, profiles = None, []
@@ -1382,7 +1382,7 @@ def _linux_firewall(port, run, ufw_conf):
                               f'sudo ufw allow from {subnet} to any port {port} proto tcp',
                               f'sudo ufw allow from {subnet} to any port 5353 proto udp')
     if active('firewalld'):
-        result = _command(['firewall-cmd', '--list-all'], run)
+        result = _command(['firewall-cmd', '--list-all'], run, 3)
         if result is None or result[0]:
             checks.append(_line('warning', 'firewalld is on, but its rules could not be read.',
                                 'Run: sudo firewall-cmd --list-all. It must allow {port}/tcp and the mdns service from the local network.',
