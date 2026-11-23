@@ -69,16 +69,19 @@ class EnergyTests(unittest.TestCase):
         self.assertNotIn('range', plain['computers'][0])
         five = insights.fleet(items, config, TODAY, None, (TODAY - dt.timedelta(days=1826), TODAY))
         self.assertEqual((five['fleet']['range']['kwh'], five['fleet']['range']['cost']), (1.0, 2000.0))   # day 2000 is out
-        self.assertEqual(five['fleet']['range']['kind'], 'month')
-        series = five['fleet']['range']['series']
-        self.assertEqual(len(series), 61)
-        self.assertEqual(sum(value is None for _, value in series), 59)  # months with no record are unknown, not 0
+        self.assertEqual(five['fleet']['range']['daily'], {day(400): 0.1, day(1): 0.8, day(0): 0.1})
+        import lifetime_uptime as uptime
+        bars = uptime.series(five['fleet']['range'])           # what the server replies with
+        self.assertEqual((bars['kind'], bars['kwh']), ('month', 1.0))
+        self.assertNotIn('daily', bars)
+        self.assertEqual(len(bars['series']), 61)
+        self.assertEqual(sum(value is None for _, value in bars['series']), 59)  # months with no record: unknown, not 0
         self.assertEqual(five['computers'][0]['range'], dict(first=day(1826), last=day(0), days_known=2, kwh=0.2,
                                                              cost=400.0, awake_hours=20.0))   # no per-day series per computer
         self.assertNotIn('range', five['computers'][2])
         self.assertEqual(five['top'], ['b', 'a'])
         week = insights.fleet(items, config, TODAY, None, (TODAY - dt.timedelta(days=6), TODAY))
-        self.assertEqual(week['fleet']['range']['series'][-2:], [[day(1), 0.8], [day(0), 0.1]])
+        self.assertEqual(uptime.series(week['fleet']['range'])['series'][-2:], [[day(1), 0.8], [day(0), 0.1]])
         self.assertEqual(week['groups']['Office'].get('range'), None)
 
     def test_settings_are_validated(self):

@@ -762,6 +762,11 @@ class ServerRuntime:
         latest = max((v for v in (CLIENT_VERSION, offered) if v), key=lambda v: insights.version_key(v) or ())
         result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date(), latest,
                                 period)
+        if period:      # per-day energy of the fleet, each group and room as day, week or month bars
+            import lifetime_uptime
+            for summary in (result['fleet'], *result['groups'].values(), *result['rooms'].values()):
+                if summary.get('range'):
+                    summary['range'] = lifetime_uptime.series(summary['range'])
         result['sleep_policies'] = {key: dict(group=value['group'], name=value['name'], since=value['since'])
                                     for key, value in self.monitor.sleep_policies().items()}
         return result

@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, 
 from lifetime_i18n_qt import PlainLabel as QLabel
 
 import lifetime_insights as insights
+import lifetime_uptime as uptime
 from lifetime_charts import Plot
 from lifetime_layout import ControlRow
 from lifetime_health_gui import HEALTH_EXPLAIN_FULL
@@ -544,7 +545,8 @@ class InsightsUI:
                               '{unknown} do not share their awake history.', measured=summary['measured'],
                               known=summary['known'], unknown=summary['unknown']))
         if summary.get('range'):
-            series, kind = summary['range']['series'], summary['range']['kind']
+            bars = summary['range'] if 'series' in summary['range'] else uptime.series(summary['range'])
+            series, kind = bars['series'], bars['kind']
             labels = [self.w.uptime.bucket_text(dt.date.fromisoformat(start), kind) for start, _ in series]
             self.chart.set_data(labels, [value for _, value in series],
                                 message='' if summary['known'] else t('No shared awake history yet'))

@@ -255,20 +255,15 @@ def after_week(history, schedule, watts, config, today):
 
 
 def _period_summary(known, config):
-    """The period sums of several computers and the energy per day, week or month (lifetime_uptime.buckets);
-    a bucket in which no computer had a record is None."""
-    import lifetime_uptime as uptime
-    first, last = (dt.date.fromisoformat(known[0]['range'][key]) for key in ('first', 'last'))
+    """The period sums of several computers and their kWh on each day that has a record (the server turns the days
+    into day, week or month bars before replying, lifetime_uptime.series)."""
     daily = {}
     for item in known:
         for day, value in item['range']['daily'].items():
-            daily[day] = daily.get(day, 0.0) + value
-    kind = uptime.bucket_kind(first, last)
-    return dict(first=first.isoformat(), last=last.isoformat(), kind=kind,
+            daily[day] = round(daily.get(day, 0.0) + value, 4)
+    return dict(first=known[0]['range']['first'], last=known[0]['range']['last'],
                 kwh=round(sum(item['range']['kwh'] for item in known), 3),
-                cost=round(sum(item['range']['cost'] for item in known), 2),
-                series=[[row['start'].isoformat(), None if row['seconds'] is None else round(row['seconds'], 4)]
-                        for row in uptime.daily_buckets(daily, first, last, kind)])
+                cost=round(sum(item['range']['cost'] for item in known), 2), daily=dict(sorted(daily.items())))
 
 
 def summarize(items, config=None):

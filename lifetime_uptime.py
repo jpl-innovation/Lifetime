@@ -88,6 +88,17 @@ def daily_buckets(daily, first, last, kind=None):
     return result
 
 
+def series(summary):
+    """A period summary with per-day values ({first, last, daily, ...}) as chart bars: the same summary with ``kind``
+    and ``series`` [[bucket start, sum or None]] instead of ``daily``, so a ten-year reply stays small."""
+    first, last = dt.date.fromisoformat(summary['first']), dt.date.fromisoformat(summary['last'])
+    kind = bucket_kind(first, last)
+    result = {key: value for key, value in summary.items() if key != 'daily'}
+    result.update(kind=kind, series=[[row['start'].isoformat(), None if row['seconds'] is None else round(row['seconds'], 4)]
+                                     for row in daily_buckets(summary['daily'], first, last, kind)])
+    return result
+
+
 def _days(first, last):
     return (first + offset * DAY for offset in range((last - first).days + 1))
 
