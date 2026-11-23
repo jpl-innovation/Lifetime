@@ -1,36 +1,187 @@
-## Next release
+## Lifetime 1.3.0
 
-Not released yet. Items marked *(not yet tried on a real machine)* passed the automatic tests only.
+See how long each computer was up and how long it was down, for any dates; find out why a computer cannot connect;
+install and remove Lifetime more easily. Made by JPL Innovation.
 
-### Installing and setting up
+### Download
 
-- **Linux: Lifetime Server dashboard from the app menu.** `sudo ./install_server_linux.sh` makes the person who ran
-  it Admin (as `--admin USER` did; also a directory account such as AD/LDAP, and if that fails the installer only
-  warns) and shows **Lifetime Server** in their app menu when Lifetime for Linux is installed; installing Lifetime for
-  Linux on a computer that has the server shows it too, to members of `lifetime-admin` or `lifetime-console`. The dashboard finds the
-  server by itself (no `--directory` or `--admin-port`). Sign out and back in once after installing.
-  *(not yet tried on a real machine)*
+- **Windows 10/11:** `Lifetime-Windows.zip` -> right-click it, **Properties**, tick **Unblock**, **OK** -> unzip ->
+  double-click **Install Lifetime.cmd** (without the Unblock step, Smart App Control blocks the installer itself)
+- **Linux (glibc 2.28 or newer, x86_64):** `Lifetime-Linux-x86_64.AppImage` (make it executable and run it), or
+  `Lifetime-Linux-x86_64.tar.gz` -> unpack -> `bash install_linux.sh` (for your account, no root)
+- **Lifetime Server for Windows:** `Lifetime-Server-Windows.zip` -> unzip -> double-click
+  **Install Lifetime Server.cmd** (no Python needed; it asks for administrator approval)
+- **Lifetime Server for Linux:** `Lifetime-Server-Linux-x86_64.tar.gz` or `-aarch64.tar.gz` -> unpack ->
+  `sudo ./install_server_linux.sh`, then allow 8443/tcp and 5353/udp from your local network (the installer prints
+  the commands)
+
+The programs are not code-signed, so Windows SmartScreen may say "Windows protected your PC": choose **More info ->
+Run anyway**. Check your download against `SHA256SUMS.txt`.
+
+### What is new
+
+**Uptime and downtime on the computer**
+
+- **Choose any dates.** Activity and Reports share one date picker: Today, Last 7 days, Last 30 days, This month,
+  Last month, This year, Last 12 months, Last 5 years, All, or Custom with From and To calendars (From goes back to
+  2 January 1970; To cannot be in the future). The choice is remembered. Every chart and total on Activity follows
+  it, and Export report starts on the same period.
+- **Days with no record are unknown, never zero.** A line under the title says where the data starts, for example
+  "Data from 3 Jul 2026 (Windows log) · recorded by Lifetime since 6 Nov 2026 · no archived logs found".
+- **New page: Uptime & downtime** (in Vietnamese "Thời gian hoạt động & ngừng"), after Activity in the sidebar, shown when
+  history is on. For the chosen dates: time awake, asleep, off (shut down or restarting) and unknown, and the awake
+  share of the known time; how many restarts, shutdowns and unexpected stops (crash or power loss), the average awake
+  time between unexpected stops, the longest time awake and the longest time off; one row per day (up to a month) or
+  one bar per day (longer), with a red mark on days with an unexpected stop; and the power events, newest first, 50
+  at a time: started, shut down, restarted (with the program or account that asked, from Windows event 1074), slept,
+  woke (with what woke it) and unexpected stop.
+- **Downtime history.** Lifetime now keeps, for each day, the time asleep, off and unknown and the number of
+  restarts, shutdowns and unexpected stops. It reads them from the Windows System log (or the Linux journal) in the
+  background about once an hour, and **Add earlier usage** fills in the past from the same log. It also reads archived
+  System logs (`Archive-System-*.evtx`, kept when IT sets the log to "archive when full") and, on Linux, rotated login
+  records (`/var/log/wtmp.1`, `wtmp.*.gz`). If these are missing or cannot be read, nothing fails; the line under the
+  title says so.
+- **How it is counted.** Awake time is counted exactly as before; downtime never changes it. A clean stop followed by
+  a start within 10 minutes is a restart, a longer gap a shutdown; when Windows logged the type in English
+  ("restart", "power off") that type wins. A "shut down" with Windows Fast Startup is really a hibernation: when a
+  shutdown request is followed within two minutes by hibernation, that time counts as off and as a shutdown. An
+  unexpected stop is Kernel-Power 41 or EventLog 6008 (counted once), shown on the day of the next start because
+  nothing records when the computer really stopped; the time until that start is unknown. On Linux an end that
+  neither the journal nor the login records show as a clean shutdown counts as an unexpected stop.
+- **Reports** (PDF and CSV) have an "Uptime and downtime" section for the chosen period, with where the data starts.
+- **Daily awake totals are kept for 10 years** (was 400 days), so "Last 5 years" fills up with real days as history
+  builds up. Hour-by-hour detail is still kept for 400 days.
+- **Connected computers send the daily downtime** (six numbers per day) to a 1.3.0 server, only when history sharing
+  is on. Older servers never receive it.
+
+**Uptime and downtime on the server**
+
+- **Any dates on the server.** One date range control (Last 7 days to Last 5 years, All, or Custom; up to 10 years
+  at once, from 1971) drives a computer's **Awake time per day** (one bar per day, per week over 3 months, per month
+  over 2 years: the average of the days with a record), the **Overview** fleet totals (with how many computers
+  contributed), the **Energy** page (energy, cost, top consumers and groups; "after hours" stays the last 7 days) and
+  **Export report**. Days with no record stay empty, never zero.
+- **Uptime & downtime of one computer** (Devices, under Awake time per day): awake, asleep, off and unknown time,
+  restarts, clean shutdowns and unexpected stops, the awake share of the known time, awake time per unexpected stop,
+  where the data starts, and **availability in expected hours** from the server's own monitoring with the number of
+  outages and the longest one. Asleep, off and stops come only from computers with Lifetime 1.3.0; an older computer
+  shows its awake time and the rest of each day as Unknown.
+- **Fleet uptime bars** (Overview, "Uptime by computer"): one row per computer, one small bar per day (per week or
+  month for long periods), coloured by availability in expected hours: good (99 % or more), partial (75 to 99 %),
+  down (under 75 %), unknown (monitoring saw too little: under the coverage floor, 80 % by default) or an outline
+  (not expected online, such as a laptop without a schedule). Worst first, 50 at a time (**Show more computers**);
+  hover a bar for its numbers.
+- **Reports for any period, compared with the period before.** Server reports for a computer, a group or the fleet
+  have an "Uptime & downtime" section: awake, asleep, off and unknown hours, restarts, clean shutdowns, unexpected
+  stops, availability, outages and the longest outage, each as "value (previous period: value)". Group and fleet
+  reports list them per computer. "All history" has no comparison and says so.
+- **Keep detailed records for** (Administration > Data retention; default 400 days, 30 to 3,660): the server's raw
+  online/offline history, incident timelines and sent-alert records older than this are removed automatically.
+  Before 1.3.0 this was a fixed 180 days and removed whole incidents; incident summaries are now kept (up to 10 years).
+  Daily totals and the computers' awake-time records are never trimmed automatically. Availability older than this
+  setting shows as Unknown.
+- **"Delete records before" now also removes monitoring's history** before that date: online/offline history,
+  resolved incidents, sent alerts, maintenance windows and daily battery/disk readings. It refuses a date in the
+  future, and the confirmation lists what goes and what stays.
+
+**Finding connection problems**
+
+- **Diagnose connection** (desktop, Connect page: on the code step, and when connected or the server is offline).
+  One line per check, each Passed, Check, Problem, Info or Skipped, and every Check or Problem says what to do: which
+  address is checked, whether the name resolves, whether the port answers (and if not: refused, no answer or no
+  network path), whether a Lifetime Server answered the network search on port 5353, which local networks the search
+  covers, whether the certificate names the address and matches the code, the clock difference from the server, and
+  on Windows the network profile. **Copy report** copies it as text; a code shows as `LTS-****`.
+- **Self check** (server, Administration > Self check > **Run self check**): the address the server listens on, the
+  address computers are told to use and whether it resolves, whether the certificate names it and the server's own
+  IP, whether discovery is running, the firewall (Windows: the LifetimeServer-Connect rule and Public networks; Linux:
+  ufw or firewalld, for the server port and 5353/udp), the server time and certificate expiry. It finishes within 8
+  seconds, only reads and never changes anything. Also from the command line: `--operation self_check`.
+- **Copy diagnostics** (desktop Connect page, and server Self check): the version, the system, settings that are not
+  secret, the reporting service's state and last problem, the last Diagnose connection or Self check, recent server
+  log events and the last 200 lines of a setup or server log file when one exists and can be read. Connection codes, passwords, tokens,
+  webhook addresses, serial numbers and user names in folder paths are masked before anything is copied (the full
+  list is in SECURITY.md).
+
+**Installing and removing**
+
+- **Windows: uninstaller.** Lifetime is listed in **Settings > Apps > Installed apps**; *Uninstall* closes Lifetime and
+  removes its sign-in task, Start menu shortcut and program folder. Your history in `%APPDATA%\Lifetime` is kept unless
+  you run `uninstall_windows.ps1 -RemoveData`. A computer connected to a server keeps its machine agent: an
+  administrator removes it with `uninstall_agent_windows.ps1`. Versions before 1.3.0 are listed after installing 1.3.0
+  over them.
+- **Linux: Lifetime Server dashboard from the app menu.** `sudo ./install_server_linux.sh` makes the person who ran it
+  Admin (as `--admin USER` does; also a directory account such as AD/LDAP; if that fails the installer only warns) and
+  shows **Lifetime Server** in their app menu when Lifetime for Linux is installed. Installing Lifetime for Linux on a
+  computer that has the server shows it too, to members of `lifetime-admin` or `lifetime-console`. The dashboard finds
+  the server by itself. Sign out and back in once after installing.
 - **Linux AppImage on a computer with Lifetime Server:** started without arguments it asks whether to open the
-  **Lifetime Server** dashboard or Lifetime, in English or Vietnamese, and remembers the answer when *Remember my
-  choice* is ticked (`--run-tool Lifetime` always opens Lifetime; Settings > *Ask again which program the AppImage
-  opens* forgets it). *(not yet tried on a real machine)*
-- **Windows: uninstaller.** Lifetime is listed in **Settings > Apps > Installed apps**; *Uninstall* runs
-  `uninstall_windows.ps1`, which closes Lifetime and removes its sign-in task, Start menu shortcut and program folder.
-  Your history in `%APPDATA%\Lifetime` is kept unless you run it with `-RemoveData`. A computer connected to a server
-  keeps its machine agent: an administrator removes it with `uninstall_agent_windows.ps1`. Versions before this one
-  are listed after installing this version over them. *(tested in temporary folders only, not yet on a real install)*
-- **Windows: version information in every program** (product name Lifetime, the program's own description, JPL
-  Innovation, the version), which code signing requires. Checked on one test program built here; the release
-  programs are built by CI.
-- **Linux: `LifetimeAgent --connection-stdin` accepts a code without `--server`** and finds the server on the network,
-  as the Connect page does.
+  **Lifetime Server** dashboard or Lifetime, and remembers the answer when *Remember my choice* is ticked
+  (`--run-tool Lifetime` always opens Lifetime; Settings > *Ask again which program the AppImage opens* forgets it).
+- **Windows: version information in every program** (product Lifetime, the program's description, JPL Innovation, the
+  version), which code signing needs.
 
-### Tests that would have caught 1.2.1
+### What is fixed
 
-- **CI pairs a Linux computer with a Linux server by typing the code only**, in two Ubuntu containers whose own names
-  resolve to 127.0.1.1 as on Ubuntu, with a server name that does not resolve; a second client, whose discovery is
-  blocked, must find the server through the network search. *(new CI job; it runs at the next push)*
-- A test keeps the Windows Server installer using the ready-made server program (no Python) when no `-Mode` is given.
+- **Linux: `LifetimeAgent --connection-stdin` accepts a code without `--server`** and finds the server on the
+  network, as the Connect page does.
+- **The tracker no longer loses time when it cannot save.** If saving failed for more than five minutes (a full disk,
+  the record locked by another program), that time was dropped. Now the error is reported, and the next good save
+  counts the whole time as long as the computer was not restarted in between.
+- **An unexpected error no longer closes the desktop app.** It is shown once per distinct error and the app keeps
+  running. (An error before the window opens still stops the app, and the message then says Lifetime could not start.)
+
+### Upgrading
+
+- **Desktop:** run the new installer over the old version (Windows: **Install Lifetime.cmd**; Linux: the new AppImage
+  or `install_linux.sh`). History and settings are kept.
+- **Machine agent on a connected Windows computer:** in an elevated PowerShell,
+  `install_agent_windows.ps1 -Mode Packaged -Reinstall -Start` from the new package. The connection is kept.
+- **Server:** take and verify a backup first. On Windows, uninstall the old registration
+  (`uninstall_server_windows.ps1`; data is kept), then install the new version. On Linux, run the new
+  `install_server_linux.sh` over the old one. Make new connection codes after upgrading the server; codes made before
+  may no longer work.
+- **Older computers** keep working with a 1.3.0 server. They do not send downtime, so the server shows their asleep
+  and off time as Unknown.
+- **Going back to 1.2.1** on a computer: 1.2.1 opens the 1.3.0 record, but keeps only the last 400 days of daily
+  awake totals, so older days are deleted. Keep a copy of `ledger.json` before going back.
+
+### How this release was tested
+
+Automated tests only: the full test suite on Windows Server 2022 and 2025 and on Ubuntu, with Python 3.11 and 3.12;
+the Linux packages installed, started and connected to a server in containers on 11 distributions; and a new test in
+which a Linux computer in one container connects to a Linux server in another by typing the code only (the server's
+name does not resolve, the computer's own name points to 127.0.1.1 as on Ubuntu, and a second computer must find
+the server through the network search). Nothing in 1.3.0 has been tried on real computers yet: a test version,
+1.3.0-rc1, goes to the tester first.
+
+### Known issues
+
+Everything new in this release has passed automated tests only. Not yet checked on real machines:
+
+- **Installers:** the Linux app menu entry and the AppImage question on a real desktop; the Windows uninstaller on a
+  real installation (tested in temporary folders); version information was checked on one test program built here.
+- **Downtime on the computer:** archived System logs on a computer that really archives; non-English Windows (the
+  restart/shutdown type words of event 1074; there the 10-minute rule decides); real rotated and compressed Linux
+  login records; Fast Startup on other computers than the development PC; a record with years of real history.
+- **How far back:** Windows keeps only what fits in its System log (on the development PC about 4.5 months). Days
+  before that are unknown unless archived logs exist; Lifetime never changes the log size. A computer that cannot
+  read its System log (or a Linux user without journal access) has no downtime, and the line under the title says so.
+- **A boot logged with a wrong clock** (for example a reset BIOS clock) is recognised only when other evidence
+  contradicts it; then its start is not used and the time before it stays unknown.
+- **Computer and server together:** the computer's sending of downtime and the server's checking of it are each
+  tested, but a 1.3.0 computer has not yet sent downtime to a 1.3.0 server outside the tests.
+- **Server:** everything was tested with temporary databases and made-up data. Availability for days older than
+  "Keep detailed records for" is Unknown (no daily availability summary is kept). The Energy page's "after hours"
+  stays the last 7 days. The new dashboard connected to a server older than 1.3.0 shows the fleet totals for the
+  last 7 days only, and no fleet bars, long availability periods or energy for a period.
+- **Diagnose connection and Self check:** tested against a server on the same PC and with simulated discovery,
+  PowerShell, ufw and firewall-cmd output, not yet against a real network server, a blocked port, a Public network,
+  ufw or firewalld on a real server, or a non-English network name on a real adapter. On Linux the server runs as the
+  `lifetime` account, so Self check usually says that only an administrator can read the ufw rules (it shows the
+  command to run); whether firewalld can be read depends on the distribution.
+- **Copy diagnostics** rarely has a log file to add: the Linux desktop and the systemd server log to the journal, and
+  the Windows agent's `install.log` is readable by administrators only.
 
 ## Lifetime 1.2.1
 

@@ -95,7 +95,9 @@ only to computers that asked, so an older computer never meets an unknown reply
 field. A computer sends only advertised parts (a server without a list gets the 1.1
 format) and says on its Connect page when some details are not shared because the
 server is older. Server validation is unchanged: any field outside its allowed list
-still rejects the whole report.
+still rejects the whole report. Since 1.3.0 the list can contain `downtime`: only then
+does a computer add `history.downtime_daily` (below), so an older server never receives
+it, and an older computer never sends it.
 
 ## LAN attacker and guessing limits
 
@@ -202,7 +204,10 @@ A connected computer sends only what its owner allowed, and only after approval.
 beyond awake time, and turning one off stops that data at once:
 
 - **History** (on the Settings page and in Connect): the daily awake totals, plus the hour-of-day profile, the list of
-  recent sessions (start and length, at most 100), the boot count and the current and longest session.
+  recent sessions (start and length, at most 100), the boot count and the current and longest session. Since 1.3.0,
+  to a server that lists the `downtime` capability, also `downtime_daily`: six whole numbers per local date (seconds
+  asleep, off and unknown, and the number of restarts, shutdowns and unexpected stops), at most 3,660 days, nothing
+  else. Days that would break the server's rule are left out rather than sent.
 - **Readings** (computer performance): the specs and live readings, plus the hardware details shown on the System page
   (processor clock and temperature where reported, cooling fans, network cards, memory modules, disk model and health,
   motherboard and BIOS, graphics driver, displays, operating system build) and, with Health allowed, stability counts
@@ -210,6 +215,10 @@ beyond awake time, and turning one off stops that data at once:
   exist only so Wake-on-LAN can work.
 
 Not collected, ever: serial numbers, user names, file names, process or window lists, keystrokes or screen contents.
+One local exception, never saved and never sent: the desktop's **Uptime & downtime** page shows, from Windows event
+1074, the program and account that asked for a shutdown or restart (and the wake source of each wake). It reads them
+from the computer's own System log when the page is opened, keeps them only in memory while the window runs, and never
+writes them to the ledger, a status file, a report, a copied diagnostic or a message to the server.
 Hardware details are read with the operating system's own read-only queries. Lifetime installs no kernel driver and
 bundles no third-party sensor library, so a value the system does not expose shows "Not available" with a reason
 instead of being guessed. Totals and charts measure computer uptime, not human activity.
@@ -266,6 +275,66 @@ and runtime against recorded SHA-256 values, and never replace the files of a pu
 
 A role's SID must be a complete SID wherever it is read, including from a restored backup, and is the only thing
 written into the admin pipe's access list. The admin command and the Windows service log an error's kind, not its text.
+
+## Diagnose connection, Self check and Copy diagnostics
+
+**Diagnose connection** (desktop) does not weaken pinning or the code check. Before the server's certificate has
+matched the typed code it uses only a name lookup, TCP connects, one discovery query, and TLS handshakes that read the
+certificate and send no application data. Only then may it send one empty `HEAD /` to read the server's `Date` header
+for the clock check; the server refuses that request and it carries nothing. For a saved connection no request is
+sent, because the pinned certificate is in the administrators-only database. Names from discovery answers are
+untrusted: before they appear in a diagnosis or a copied report, control characters and new lines are removed and
+they are cut to 63 characters.
+
+**Self check** (server) is a read operation: every role that can read (Viewer and up) may run it, and the audit trail
+treats it like the other reads. It runs only fixed read-only commands (`Get-NetFirewallRule`,
+`Get-NetConnectionProfile`, `systemctl is-active`, `ufw status verbose`, `firewall-cmd --list-all-zones`); nothing
+typed by a person goes into them, and PowerShell output is read as UTF-8. It never changes a firewall and never
+reports the administration port. Only one run at a time, and its result is reused for 30 seconds, so a reader cannot
+start a stream of PowerShell processes.
+
+**Copy diagnostics** (both apps) copies only named fields (no computer identity fields, no computer names from the
+server log), then scrubs the whole text. Exactly what is masked:
+
+- Connection codes, upper or lower case, with O/I/L for 0/1/1: five groups of four characters with one kind of
+  separator (spaces, tabs, new lines, dots, dashes or underscores, 1-4 of them), or 20 characters in a row. With an
+  `LTS` prefix the code is always masked; without it, only when its check character is right. Also `LTS` followed by
+  4-20 code characters (a partial code).
+- Enrollment bundles (`lifetime-enrollment-v1:...`) and `Bearer` values.
+- The value after a key whose name contains token, pass, passw..., pwd, secret, credential, serial, webhook, api key,
+  authorization or username (for example "Serial Number", "smtp_pass"). The key may be followed by `:`, `=` or " is ".
+  The value may be a word, a quoted string, a JSON string with escaped quotes, or double-escaped JSON. When the key
+  ends a line, the value on the next line is masked too.
+- In URLs: the user name and password (`scheme://user:pass@`), and everything after the host (path, query,
+  fragment), which covers webhooks.
+- Long random tokens of 32 or more letters, digits, `_` or `-`. SHA-256 fingerprints (64 hex characters) and device
+  IDs (UUIDs) are kept.
+- The user name in home folder paths (`C:\Users\<name>\`, `/home/<name>/`).
+- Lines longer than 4,000 characters are cut, never leaving part of a token behind.
+
+Not masked: anything else, for example a secret written as free text with no key in front of it, or a short token
+below 32 characters with no key in front of it. A test plants a secret in every source, including fields the
+allow-lists keep, and checks that none is copied. The report goes only to the clipboard; Lifetime never sends it.
+
+## Downtime and retention (1.3.0)
+
+- **On the computer.** The ledger gains `downtime_daily` (numbers only: seconds and counts per local day) and
+  `downtime_sources` (which log was read, how many archived logs, from which date; no paths, names or accounts). Both
+  are dated history and follow the History consent: not written, shown, reported or sent when history is off;
+  removed from the machine agent's ledger when history sharing is turned off; removed by "Delete history" with the
+  rest of the ledger. The machine agent reads the power log only while its reporting loop runs and history sharing is
+  on. Older versions still open a 1.3.0 ledger (tested with the 1.2.1 validator).
+- **On the server.** `history.downtime_daily` is validated as strictly as the rest of the protocol: the whole sync is
+  refused for a wrong type, a missing or extra field, a negative or fractional value, a count over 10,000, a bad
+  date, more than 3,660 days, or a day whose asleep + off + unknown plus that day's awake time is over 90,000 seconds.
+  It is stored with the computer's history, removed with it when history sharing is turned off, trimmed by "Delete
+  records before" and checked when a backup is restored.
+- **New admin operations.** `uptime_bars`, `uptime_days`, `detail_retention` and `self_check` are reads (Viewer and
+  up); `set_detail_retention` is Admin only and audited like every other change. `fleet` and `insights` take an
+  optional `start`/`end`. Every reply stays under the 1 MiB admin reply limit.
+- **Ledger isolation is unchanged.** Monitoring never opens or writes an awake-time ledger, and automatic trimming
+  ("Keep detailed records for") never touches the awake-time records or daily totals in `server.sqlite`; only an
+  Admin's "Delete records before" removes them.
 
 ## Agent updates
 

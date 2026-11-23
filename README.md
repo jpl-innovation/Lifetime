@@ -134,16 +134,18 @@ Without systemd there is no journal, so **Verify** and **Add earlier usage** say
 ## What it shows
 
 - **Overview** – awake time ticking live to the second, with separate measured, reconstructed and manual-baseline amounts. **Earliest known date** names its source (OS installation, system-file timestamp, recovered log, first observation or unknown), not a claim of true first use. A **Verify** button cross-checks the current boot against the operating system's own records (the Windows event log or the Linux journal). Coverage stays unknown unless specific missing evidence supports a partial status.
-- **Activity** – calendar heatmap, daily hours with a 7-day average, cumulative lifetime hours, hour-of-day and weekday profiles, and a session-length histogram, for 30 days, 90 days, a year or everything. **Show data** reveals the numbers behind every chart.
+- **Activity** – calendar heatmap, daily hours with a 7-day average, cumulative lifetime hours, hour-of-day and weekday profiles, and a session-length histogram. **Show data** reveals the numbers behind every chart. One date picker, shared with Uptime & downtime and Reports and remembered, chooses the dates: Today, Last 7 days, Last 30 days, This month, Last month, This year, Last 12 months, Last 5 years, All, or Custom with From and To calendars (From goes back to 2 January 1970; To cannot be in the future). Days with no record are unknown, never zero, and a line under the title says where the data starts, for example "Data from 3 Jul 2026 (Windows log) · recorded by Lifetime since 6 Nov 2026 · no archived logs found".
+- **Uptime & downtime** (new in 1.3.0, shown when history is on) – for the chosen dates: time awake, asleep, off (shut down or restarting) and unknown, and the awake share of the known time; restarts, shutdowns and unexpected stops (crash or power loss), the average awake time between unexpected stops, the longest time awake and the longest time off; one row per day (up to a month) or one bar per day, with a red mark on days with an unexpected stop; and the power events, newest first, 50 at a time: started, shut down, restarted (with the program or account that asked, from Windows event 1074), slept, woke (with what woke it) and unexpected stop. The events are read from the system log when the page opens (at most every 10 minutes) and are never saved or sent.
 - **System** – live power and battery, network and Wi-Fi, graphics, CPU, memory and disks, each with a small five-minute trend next to its reading. A hardware section lists the computer's details in plain groups: processor (clock speed, and temperature where the computer reports it), cooling fans (count and speed where the firmware exposes them, otherwise it says so), network cards (name, Wi-Fi, Ethernet or virtual, link speed), memory modules, disks (model, SSD or HDD, health), motherboard and BIOS, graphics driver, displays and the operating system build. Anything a computer does not report shows "Not available" with a short reason; nothing is guessed. Serial numbers and user names are never collected.
 - **Health** – stability (unexpected shutdowns and crashes), battery wear and cycles, and sleep patterns, when you allow Health. A 0-100 health score with its parts (unknown parts are shown and left out), and a **Replacement forecast**: when the battery reaches 80 % health and when the system disk runs out of room, or "not enough data" with what it has.
 - **Reports** – export a PDF or CSV report, edit the computer identity, review coverage, and see **Energy and cost**:
   kWh and money today, this week and this month from the awake time, with a note when the computer was on after
   office hours. Power is *measured* only from this computer's own on-battery readings (Battery permission);
-  otherwise it is a typical or owner-set wattage and says *estimated*.
-- **Connect** – optional, for workplace computers: connect to your IT team's Lifetime Server with one code and manage sharing. Not needed for personal use. While connected, a **Server: Online / Offline** chip (also under the status in the sidebar) shows whether the server answers now, when it last did and why not; Offline is amber, not red, because awake time keeps counting and is sent when the server is back. A computer that is not connected shows no server status at all.
+  otherwise it is a typical or owner-set wattage and says *estimated*. Reports follow the chosen dates and include an
+  **Uptime and downtime** section with the same totals and counts as that page, and where the data starts.
+- **Connect** – optional, for workplace computers: connect to your IT team's Lifetime Server with one code and manage sharing. Not needed for personal use. While connected, a **Server: Online / Offline** chip (also under the status in the sidebar) shows whether the server answers now, when it last did and why not; Offline is amber, not red, because awake time keeps counting and is sent when the server is back. A computer that is not connected shows no server status at all. **Diagnose connection** (on the code step, and when connected or the server is offline) checks, one line each, the address, whether the name resolves, whether the port answers, whether a Lifetime Server answers the network search on port 5353, which local networks the search covers, the server's certificate (does it name the address, does it match the code, its dates), the clock difference and, on Windows, the network profile; each Check or Problem line says what to do, and **Copy report** copies it with any code shown as `LTS-****`. **Copy diagnostics** copies the version, system, non-secret settings, the reporting service's state, the last diagnosis and recent log lines, with codes, passwords, tokens and other secrets masked (see [SECURITY.md](SECURITY.md#diagnose-connection-self-check-and-copy-diagnostics)).
 - **Settings** – a page inside the app (not a pop-up window): language, appearance, what to track, adding earlier usage, **Start automatically with the computer** and deleting history. Every option is a sliding switch, green when on.
-- **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts. **Incidents** lists alerts (see below), **groups** sort computers by room or team, and **Energy** shows kWh and cost, time on after hours, a replacement forecast and a health score for the whole fleet or one group.
+- **Lifetime Server** – a fleet view of every connected computer: who is connected, reports overdue, awake time today, pending approvals, a searchable device list, daily totals and recent events. Open a computer to see the same Activity and Health charts and the same hardware details as on the computer itself, limited to what its owner chose to share. If a computer shares no history or no readings, the server says so instead of showing empty charts. **Incidents** lists alerts (see below), **groups** sort computers by room or team, and **Energy** shows kWh and cost, time on after hours, a replacement forecast and a health score for the whole fleet or one group. One date range control (Last 7 days to Last 5 years, All, or Custom, up to 10 years at once) drives a computer's **Awake time per day**, the Overview's fleet totals, Energy and Export report; see [Uptime and downtime on the server](#uptime-and-downtime-on-the-server).
 
 ### Appearance
 
@@ -171,6 +173,8 @@ On first run Lifetime asks, one question at a time, what you want to track. Awak
 The tracker samples every 30 seconds using an awake-only clock (`QueryUnbiasedInterruptTime` on Windows, `CLOCK_MONOTONIC` on Linux), so suspend and hibernation are excluded and wall-clock changes cannot distort the counter. Gaps over five minutes start a new session. Each newly seen boot credits its awake time so far once. Live intervals split across local dates; initial boot time uses retained sleep/resume evidence when available and estimated calendar allocation otherwise (never more than 24 h per date). Past history can be rebuilt only from retained, accessible OS observations. Missing sleep events, log rotation, restricted permissions, unclean ends and Windows Fast Startup can limit reconstruction accuracy.
 
 On the developer's laptop, the awake time reported by Lifetime matched the Windows event log to within a few minutes.
+
+**Downtime** (new in 1.3.0) never changes awake time. For each local day Lifetime keeps the time asleep (sleep or hibernation), off (shut down or restarting) and unknown (no record), and the number of restarts, shutdowns and unexpected stops. It reads them from the Windows System log (power events only) or the Linux journal in the background about once an hour, and **Add earlier usage** fills in the past from the same log, including archived System logs (`Archive-System-*.evtx`) and rotated Linux login records (`/var/log/wtmp.1`, `wtmp.*.gz`) when they exist. A clean stop followed by a start within 10 minutes is a restart and a longer gap a shutdown; when Windows logged who asked (event 1074) and the type is in English ("restart", "power off"), that type wins, and on other Windows languages the 10-minute rule decides. A "shut down" with Windows Fast Startup is really a hibernation: when a shutdown request is followed within two minutes by hibernation, that time counts as off and as a shutdown. An unexpected stop is Kernel-Power 41 or EventLog 6008 (the two describe the same stop and count once); it is counted at the next start, and the time until that start is unknown because nothing records when the computer really stopped. On Linux an end that neither the journal nor the login records show as a clean shutdown, or a "crash" login record, counts as an unexpected stop; boots known only from rotated login records have no sleep records, so their gaps count as off and their running time stays unknown. A boot logged with a wrong clock (for example a reset BIOS clock) is recognised only when other evidence contradicts it; its start is then not used and the time before it stays unknown. Windows keeps only what fits in its System log (on the development PC about 4.5 months), so earlier days are unknown unless archived logs exist; Lifetime never changes the log size. "Average awake time between unexpected stops" is the awake time in the range divided by the number of unexpected stops; the longest spans need the event list and otherwise say "Not available".
 
 ## Files and data
 
@@ -222,12 +226,13 @@ applies only to the time since the computer last started and does not prove comp
 
 Awake time does not measure human activity, productivity, component health or remaining
 lifespan. Missing dates are unavailable rather than assumed to be zero-use days.
-Daily retention remains 400 days and session retention remains 100 records. Historical
+Daily awake totals are kept for 10 years (400 days before 1.3.0), hour-by-hour detail for 400 days, and
+session retention remains 100 records. Historical
 calendar attribution can be estimated; changing timezone does not relabel saved dates.
 
 ## Local customer reports
 
-Choose **Export report**, select all available data or an inclusive local-date range,
+Choose **Export report** (it starts on the dates chosen on Activity and Reports), select all available data or an inclusive local-date range,
 choose optional fields individually, then **Preview** before saving PDF or CSV. The
 report includes version/build, creation time with UTC offset, requested range,
 available awake/session statistics, relevant record dates, sources and limitations.
@@ -264,7 +269,8 @@ Rerun the normal installer over the installed version; keep the existing data di
 tracker, replaces them and starts the tracker again if it starts automatically with the computer. A machine agent
 installed by Connect is replaced with `install_agent_windows.ps1 -Mode Packaged -Reinstall
 -Start` (elevated; the connection is kept) or by Disconnect and Connect; see the release
-notes. Data written by 1.1.0 is covered by `test_upgrade_from_1_1_0.py`. Existing consent,
+notes. 1.3.0 adds per-day downtime (`downtime_daily`) to the ledger; 1.2.1 still opens such a ledger, but going
+back to 1.2.1 keeps only the last 400 days of daily totals, so copy `ledger.json` first. Data written by 1.1.0 is covered by `test_upgrade_from_1_1_0.py`. Existing consent,
 settings extensions and history are retained. Malformed ledger fields fail visibly instead of resetting totals. Malformed
 settings still fail closed; identity updates refuse to overwrite damaged settings.
 Back up the file before manual repair/restoration. Imports remain idempotent and use
@@ -404,6 +410,58 @@ offline. Time zone names such as `Asia/Ho_Chi_Minh` use the `tzdata` package fro
 Network checks are not yet verified against real devices or websites. Not yet verified with a real mail server or webhook service
 (tests use a local SMTP stub and a fake webhook).
 
+### Uptime and downtime on the server
+
+New in 1.3.0. One date range control (Last 7 days, Last 30 days, This month, Last month, This year, Last 12 months,
+Last 5 years, All, or Custom with From and To calendars; at most 10 years at once, from 1971; To cannot be in the
+future) drives:
+
+- a computer's **Awake time per day**: one bar per day, per week over 3 months and per month over 2 years (the average
+  of the days that have a record);
+- the **Overview** fleet totals ("Daily awake hours"), with the total for the period and how many computers contributed;
+- the **Energy** page (energy, cost, top consumers and groups for the period; "after hours" stays the last 7 days);
+- the **Export report** dialog.
+
+Days with no record stay empty (unknown), never zero.
+
+- **Uptime & downtime of one computer** (Devices, the computer's detail, under Awake time per day): per day, week or
+  month the awake, asleep, off and unknown time; restarts, clean shutdowns and unexpected stops (Kernel-Power 41 /
+  EventLog 6008); the awake share of the known time; awake time per unexpected stop; where the data starts; and
+  **availability in expected hours** from the server's monitoring, with the number of outages and the longest one.
+  Asleep, off and stops come only from computers with Lifetime 1.3.0 or later that share history; an older computer
+  shows its awake time and the rest of each day as Unknown.
+- **Fleet uptime bars** (Overview, "Uptime by computer"): one row per computer, one small bar per day (per week over 3
+  months, per month over 2 years), coloured by availability in expected hours: good (99 % or more), partial (75 to
+  99 %), down (under 75 %), unknown (monitoring saw less than the coverage floor, 80 % by default) and an outline for
+  not expected online (for example a laptop without a schedule). Computers with enough evidence come first, lowest
+  availability first, then those with too little evidence, then those not expected online; 50 at a time (**Show more
+  computers**). Hover a bar for its numbers.
+- **Reports for any period**: server reports (PDF/CSV) for a computer, a group or the fleet have an "Uptime &
+  downtime" section (awake, asleep, off and unknown hours, restarts, clean shutdowns, unexpected stops, computers that
+  report their off time, availability in expected hours, outages and the longest outage), each shown as "value
+  (previous period: value)" for the period of the same length just before. Group and fleet reports add awake hours,
+  unexpected stops and availability per computer. "All history" has no comparison and says so.
+- An **outage** is one stretch of observed offline time that overlaps the expected hours; its length is the
+  expected-hours time it covers. Availability for days older than "Keep detailed records for" is Unknown, because the
+  raw online/offline history is gone.
+
+**Retention.** **Administration > Data retention > Keep detailed records for** (default 400 days, 30 to 3,660):
+monitoring's raw online/offline history, incident timelines and sent-alert records older than this are removed
+automatically (before 1.3.0 this was a fixed 180 days and removed whole incidents). Incident summaries are kept, for at
+most 10 years. Raw performance readings are still kept for 7 days and the daily battery/disk readings for forecasts 2
+years; neither follows this setting. Daily totals and the computers' awake-time records are never trimmed
+automatically. **Delete records before** removes the awake-time records, daily history and readings before a date
+and, since 1.3.0, also monitoring's history, resolved incidents, sent alerts, maintenance windows and daily readings
+before that date. It refuses a date in the future, and its confirmation lists what goes and what stays.
+
+**Self check** (Administration > Self check > **Run self check**) lists what computers need from the server: the
+address it listens on, the address computers are told to use and whether it resolves, whether the certificate names
+that address and the server's own IP, whether discovery is running (and why not), the firewall (Windows: the
+`LifetimeServer-Connect` rule and Public networks; Linux: ufw or firewalld, the server port and 5353/udp), the server
+time and certificate expiry. Each problem says what to do. It only reads, finishes within 8 seconds and needs a 1.3.0
+server. **Copy diagnostics** beside it copies the version, system, non-secret settings, the last Self check and recent
+server log events, masked as on the desktop; it also works with an older server. See [server operations](docs/SERVER_OPERATIONS.md#self-check).
+
 ### Named administrators, roles and the audit trail
 
 On Windows the dashboard signs in as the Windows account that opens it: the server reads that account from its
@@ -436,7 +494,7 @@ real GPO or Intune startup script.
 
 Lifetime knows each computer's true awake time, so the server's **Energy** page can say what others cannot:
 
-- **Energy and cost** per computer, group and fleet (today, 7 and 30 days, daily chart, top consumers): awake hours
+- **Energy and cost** per computer, group and fleet (today and the chosen dates: daily chart, top consumers, groups): awake hours
   x power draw, at your electricity price (default 2,500 VND per kWh; any currency). Power is **measured** only when a
   computer reported its own draw on battery (at least 3 readings); otherwise it is the wattage you set for the
   computer or its group, or a typical laptop (20 W) or desktop (80 W), and is labelled **estimated** with its source.

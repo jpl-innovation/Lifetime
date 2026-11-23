@@ -321,7 +321,7 @@ def _token(match):
 
 
 def scrub(text):
-    """``text`` without what scrub masks (see docs/notes/1.3.0-diagnostics.md): connection codes, enrollment bundles,
+    """``text`` without what scrub masks (see SECURITY.md, Copy diagnostics): connection codes, enrollment bundles,
     Bearer values, values of secret-looking keys, URL user names, passwords, paths and queries, long random tokens
     and user names in home folder paths. Lines longer than MAX_LINE are cut. Structured data is also limited to named
     fields by its callers."""

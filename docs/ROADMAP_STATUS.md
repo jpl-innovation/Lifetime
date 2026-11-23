@@ -132,3 +132,19 @@ done and tested here, and the gate still needs a real-world run.
   mutual-TLS). Today: the command line on the server, the dashboard on a Linux desktop, or the socket forwarded over SSH.
 - Publishing the container image to a registry (GHCR) and signing the AppImage are not set up.
 - The old Python-source `Lifetime-Linux.tar.gz` is no longer a release file (one Linux client version).
+
+## Lifetime 1.3.0: uptime from any date, downtime, diagnostics, installers
+
+Built on `release-1.3.0` (plan: [UPGRADE_PLAN.md](UPGRADE_PLAN.md)). Nothing here has been run on real machines yet; a
+test version, 1.3.0-rc1, goes to the tester first.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Installers: Linux server dashboard in the app menu (sudo user made Admin), AppImage asks which program to open, Windows uninstaller in Installed apps, version information in every Windows program | implemented, tested synthetic (uninstaller in temporary folders; version information on one test program). **needs real machines**: a real Linux desktop and a real Windows installation. |
+| 2 | CI pairing test: a Linux computer and a Linux server in two containers, code only, `127.0.1.1` host name, a second client through the network search | implemented. Runs in GitHub Actions; the release job needs it to pass. |
+| 3 | Diagnose connection (desktop), Self check (server, read only, 8 s, one at a time), Copy diagnostics with masking | implemented, tested synthetic (loopback server; simulated discovery, PowerShell, ufw and firewall-cmd output). **needs real machines**: a real LAN server, a blocked port, a Public network, ufw and firewalld on real servers, a non-English network name. |
+| 4 | Desktop: any date range, Uptime & downtime page, per-day downtime from the System log or journal (archived logs, rotated wtmp, event 1074, Fast Startup), report section, 10 years of daily totals | implemented, tested synthetic (recorded-shape and synthetic log data). **needs real machines**: archived logs on a computer that archives, non-English Windows, real rotated wtmp files, Fast Startup beyond the development PC, years of real history. |
+| 5 | Protocol: `history.downtime_daily` behind the `downtime` capability, strict server validation | implemented, tested synthetic. Client and server sides each tested; **needs real machines**: a 1.3.0 computer sending to a 1.3.0 server. |
+| 6 | Server: date range control, a computer's Uptime & downtime with availability and outages, fleet uptime bars, reports with the previous period, "Keep detailed records for", "Delete records before" also for monitoring | implemented, tested synthetic (temporary databases, offscreen Qt; fleet bars measured with 500 simulated computers). **needs real machines**: real fleets. Not done: a daily availability summary (older availability is Unknown). |
+| 7 | Docs and version 1.3.0 | implemented |
+| — | Owner decision recorded: "Delete records before" also removes monitoring history before that date (approved). | |
