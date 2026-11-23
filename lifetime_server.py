@@ -1024,6 +1024,7 @@ class ServerRuntime:
         threading.Thread(target=collect, daemon=True, name='lifetime-host-readings').start()
 
     def server_info(self):
+        from lifetime_availability import ENGINE
         from lifetime_protocol import CLIENT_VERSION
         self._refresh_host_readings()
         with self._lock:
@@ -1042,7 +1043,8 @@ class ServerRuntime:
                           reporting_interval=self._store.get_configuration()['reporting_interval'],
                           discovery=self._discovery is not None,
                           certificate=dict(self.certificate), key_fingerprint=self.certificate.get('key'),
-                          server_names=self._store.server_names()['names'])
+                          server_names=self._store.server_names()['names'],
+                          availability_engine=ENGINE)      # 'Python' or 'Rust accelerator' (docs/notes/1.3.0-rust.md)
             result.update(self._store.organisation())
             return result
 

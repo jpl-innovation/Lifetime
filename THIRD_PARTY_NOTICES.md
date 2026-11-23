@@ -33,6 +33,7 @@ the Linux packages (which use an older Qt) in `packaging/linux/build_linux.sh`.
 | tzdata (server) | IANA time zone data for schedules and availability | Apache-2.0 (data: public domain) | <https://github.com/python/tzdata> |
 | pywin32 (server on Windows) | Windows service support | PSF-2.0 | <https://github.com/mhammond/pywin32> |
 | Python | Runtime | PSF-2.0 | <https://www.python.org/> |
+| PyO3 with pyo3-ffi, libc, once_cell, memoffset, portable-atomic, indoc, unindent and the Rust standard library (server packages only) | The server's optional Rust accelerator `rust/lifetime_fast` (exact versions in its `Cargo.lock`) | MIT OR Apache-2.0 (memoffset: MIT) | <https://pyo3.rs/> |
 | PyInstaller (build tool; its start-up loader is part of every packaged program) | Packaging the Windows and Linux programs | GPL-2.0-or-later with an exception that leaves bundled programs under their own license | <https://pyinstaller.org/> |
 
 No fonts are bundled; Lifetime uses the operating system's own fonts.

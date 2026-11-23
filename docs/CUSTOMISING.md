@@ -48,7 +48,20 @@ Use a separate data folder while experimenting, so your own record is never touc
 - **New modules** must be added to the install lists (`install_windows_common.ps1`, `install_linux.sh`) and, if
   imported only inside a function, to the build scripts; `test_installed_modules` checks this.
 - **Stay in Python.** Rust or other native code only where a measurement shows Python is too slow, with a Python
-  fallback and only once releases are code-signed (see `docs/UPGRADE_PLAN.md`).
+  fallback (see `docs/UPGRADE_PLAN.md`). The one exception so far is the server's accelerator below; nothing native
+  goes into the desktop app or the agent until releases are code-signed.
+
+## The Rust accelerator (server only): you never need to touch it
+
+The server packages contain `lifetime_fast` (`rust/lifetime_fast/`), a Rust copy of one Python function,
+`_sums` in `lifetime_availability.py`, which works out the fleet's uptime bars faster for big fleets. The Python
+version is the reference and is always there: a source install, the container image and the desktop app use it, and
+`LIFETIME_NO_RUST=1` makes a packaged server use it too. `server_info` says which one runs (`availability_engine`).
+
+Change the Python as usual. `test_availability_engines` checks the Python against a slow, obvious computation; on
+GitHub it also builds the Rust copy and fails if its results differ from the Python's in any case, so the test tells
+you when the Rust copy must follow. The matching Rust function has the same name and the same lines, with comments.
+How to build it yourself is in `rust/lifetime_fast/README.md`.
 
 ## Tests
 

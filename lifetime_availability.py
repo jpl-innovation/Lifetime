@@ -14,12 +14,26 @@ and a result whose coverage is below the floor is "insufficient evidence". UNKNO
 
 Periods and day labels use the computer's calendar: the time zone of its expected-online schedule (the computer does
 not report its own zone), so a day is 23 or 25 hours long across a DST change. Pure functions, no I/O.
+
+The hot part for a whole fleet (_sums) has an optional Rust copy, rust/lifetime_fast, used when it is installed (the
+server packages) unless LIFETIME_NO_RUST=1. These Python functions stay the reference: test_availability_engines checks
+that both give identical results.
 """
 import datetime as dt
+import os
+
+try:
+    if os.environ.get('LIFETIME_NO_RUST') == '1':
+        raise ImportError('LIFETIME_NO_RUST=1')
+    import lifetime_fast
+except ImportError:
+    lifetime_fast = None
 
 UTC = dt.timezone.utc
 FIELDS = ('good_s', 'bad_s', 'unknown_s', 'excluded_s')
 DEFAULT_FLOOR = 80      # percent coverage below which a result is "insufficient evidence"
+ENGINE = 'Rust accelerator' if lifetime_fast else 'Python'     # shown by the server's server_info
+EPOCH, MICROSECOND = dt.datetime(1970, 1, 1, tzinfo=UTC), dt.timedelta(microseconds=1)
 
 
 def _merge(intervals):
@@ -171,6 +185,24 @@ def outages(counted, offline):
     return len(lengths), round(max(lengths, default=0))
 
 
+def _sums(scheduled, cuts, online, offline, edges):
+    """The hot part of device_availability: good, bad, expected and excluded seconds per bucket between ``edges``, and
+    (number, longest seconds) of outages. lifetime_fast.sums is a line-by-line Rust copy of this and its helpers."""
+    counted = _subtract(scheduled, cuts)
+    good, bad = _spread(_intersect(counted, online), edges), _spread(_intersect(counted, offline), edges)
+    expected, excluded = _spread(counted, edges), _spread(_intersect(scheduled, cuts), edges)
+    return (good, bad, expected, excluded, *outages(counted, offline))
+
+
+def _fast_sums(scheduled, cuts, online, offline, edges):
+    """_sums in Rust. Times go over as whole microseconds since 1970 (exact); the floats come back the same."""
+    def micro(intervals):
+        return [((start - EPOCH) // MICROSECOND, (end - EPOCH) // MICROSECOND) for start, end in intervals]
+    *seconds, number, longest = lifetime_fast.sums(micro(scheduled), micro(cuts), micro(online), micro(offline),
+                                                   [(edge - EPOCH) // MICROSECOND for edge in edges])
+    return (*seconds, number, round(longest))
+
+
 def device_availability(presence, schedule, laptop, maintenance, first_day, last_day, zone, now, floor=DEFAULT_FLOOR,
                         daily=True, since=None, spans=None):
     """One computer over local days first_day..last_day (inclusive) in ``zone``. ``presence``: (state, start, end)
@@ -188,9 +220,8 @@ def device_availability(presence, schedule, laptop, maintenance, first_day, last
     edges = [min(max(local_midnight(day, zone), start), max(start, end))
              for day in (*starts, last_day + dt.timedelta(days=1))]
     scheduled = _intersect(windows, [(start, end)]) if start < end else []
-    counted = _subtract(scheduled, cuts)
-    good, bad = _spread(_intersect(counted, states['online']), edges), _spread(_intersect(counted, states['offline']), edges)
-    expected, excluded = _spread(counted, edges), _spread(_intersect(scheduled, cuts), edges)
+    good, bad, expected, excluded, number, longest = (_fast_sums if lifetime_fast else _sums)(
+        scheduled, cuts, states['online'], states['offline'], edges)
     days, totals = [], dict.fromkeys(FIELDS, 0.0)
     for index in range(count):
         part = dict(good_s=good[index], bad_s=bad[index], unknown_s=max(0.0, expected[index] - good[index] - bad[index]),
@@ -201,7 +232,6 @@ def device_availability(presence, schedule, laptop, maintenance, first_day, last
             days.append([part[key] for key in FIELDS])
         elif daily:
             days.append(dict(date=starts[index].isoformat(), **{key: round(value) for key, value in part.items()}))
-    number, longest = outages(counted, states['offline'])
     result = dict(summarise(totals, floor), daily=[] if spans else days, outages=number, longest_outage_s=longest)
     if spans:
         result['spans_s'] = days
