@@ -58,12 +58,12 @@ echo "--- client ($image): pairs with the code only"
 docker run -d --name "$client" --hostname pc-01 --network "$network" -v "$work:/lifetime:ro" "$image" sleep infinity >/dev/null
 docker exec "$client" bash -c "$ubuntu_hosts"
 code="$(admin --operation invitation --field code)"
-# No --server: discovery, then the search of this computer's network. Waiting for approval is the expected state;
-# invalid input (exit 2), no server found (3) or a refused code (4) fails here.
+# No --server: discovery, then the search of this computer's network. Waiting for approval is the expected state
+# (exit 0); anything else fails here: invalid input (2), no server found (3), a refused code (4) or a crash.
 enrolled=0
 printf '%s' "$code" | docker exec -i "$client" "$agent" --directory /agent --connection-stdin --display-name pairing-client \
     || enrolled=$?
-case "$enrolled" in 2|3|4) echo "Pairing by code only failed (exit $enrolled)"; exit 1 ;; esac
+[[ "$enrolled" == 0 ]] || { echo "Pairing by code only failed: LifetimeAgent exit $enrolled (2 invalid input, 3 no server found, 4 code refused)"; exit 1; }
 request="$(admin --operation pending_enrollments --field request_id)"
 device="$(admin --operation pending_enrollments --field device_id)"
 admin --operation approve --arguments "{\"request_id\": \"$request\"}" >/dev/null
