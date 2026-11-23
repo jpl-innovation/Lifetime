@@ -143,7 +143,7 @@ def build_report(ledger, settings, start=None, end=None, system_fields=None,
     notes = list(info['notes']) + [
         'Awake time means the computer was running and awake. It does not measure human activity, productivity, component health or remaining lifespan.',
         'Live intervals are split across local days. Time since start-up is placed on days using saved sleep and wake records when available; otherwise it is estimated.',
-        'Daily history is retained for up to 400 days; only the last 100 sessions are retained. Previously saved dates are not relabeled after timezone changes.',
+        'Daily awake totals are retained for up to 10 years and hourly detail for 400 days; only the last 100 sessions are retained. Previously saved dates are not relabeled after timezone changes.',
         'Dates use saved local calendar labels; creation time includes the current UTC offset. Durations are seconds, not proof of continuous coverage.']
     if start is None:
         notes.append('The all-data awake total includes measured and imported counters, but excludes the separately listed manual baseline. Daily rows may cover a shorter retained span.')

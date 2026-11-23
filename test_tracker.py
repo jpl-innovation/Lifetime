@@ -181,6 +181,18 @@ def test_average():
     assert ledger['tracking_started'] == '2026-11-05'
 
 
+@fake_boot_history
+def test_daily_totals_kept_ten_years_hourly_detail_400_days():
+    ledger = tracker.new_ledger()
+    today = dt.date(2026, 11, 20)
+    ledger['daily'] = {(today-dt.timedelta(days=i)).isoformat(): 3600.0 for i in range(4000)}
+    ledger['dated_hourly'] = {(today-dt.timedelta(days=i)).isoformat(): [0.0]*24 for i in range(500)}
+    tracker.sample(ledger, 100, 'a', '2026-11-20T12:00:00+00:00')
+    assert min(ledger['daily']) == (today-dt.timedelta(days=tracker.DAILY_DAYS-1)).isoformat()
+    assert len(ledger['daily']) == tracker.DAILY_DAYS
+    assert min(ledger['dated_hourly']) == (today-dt.timedelta(days=399)).isoformat()
+
+
 def load_tests(loader, tests, pattern):
     import unittest
     return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in globals().items()

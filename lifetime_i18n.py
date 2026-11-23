@@ -2183,3 +2183,12 @@ for _key, _text in _SCORE_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+# --- 1.3.0 desktop uptime ---
+_UPTIME_VI = {
+    'Daily awake totals are retained for up to 10 years and hourly detail for 400 days; only the last 100 sessions are retained. Previously saved dates are not relabeled after timezone changes.':
+        'Tổng thời gian thức hằng ngày được lưu tối đa 10 năm, chi tiết theo giờ 400 ngày; chỉ giữ 100 phiên gần nhất. Các ngày đã lưu không được gắn nhãn lại khi đổi múi giờ.',
+}
+for _key, _text in _UPTIME_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)

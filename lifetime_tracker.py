@@ -19,6 +19,7 @@ import time
 INTERVAL = 30
 MAX_DELTA = 300
 MAX_BOOT_CREDIT = 366 * 24 * 3600  # Reject implausibly large initial uptimes.
+DAILY_DAYS = 3660  # days of daily awake totals kept (10 years; the server's limit too)
 
 
 def data_dir():
@@ -287,8 +288,11 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     if history:
         ledger['sessions'][-1]['seconds'] += added
     ledger['sessions'] = ledger['sessions'][-100:]
+    # Daily totals are one number a day: keep 10 years (the server's limit too), so a 5-year range shows real
+    # days. Dated hourly detail (24 numbers a day) stays at 400 days.
+    daily_cutoff = (local.date() - dt.timedelta(days=DAILY_DAYS-1)).isoformat()
+    ledger['daily'] = {key: value for key, value in ledger['daily'].items() if key >= daily_cutoff}
     cutoff = (local.date() - dt.timedelta(days=399)).isoformat()
-    ledger['daily'] = {key: value for key, value in ledger['daily'].items() if key >= cutoff}
     if 'dated_hourly' in ledger:
         ledger['dated_hourly'] = {key: value for key, value in ledger['dated_hourly'].items() if key >= cutoff}
     if ledger.get('last_update'):
