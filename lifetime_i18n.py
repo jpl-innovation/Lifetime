@@ -2183,3 +2183,107 @@ for _key, _text in _SCORE_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+
+# --- 1.3.0 diagnostics ---
+# Diagnose connection (desktop Connect page), Self check and Copy diagnostics (both apps): every check says its
+# cause and what to do.
+_DIAGNOSTICS_VI = {
+    'Passed': 'Đạt',
+    'Check': 'Cần xem',
+    'Info': 'Thông tin',
+    'Skipped': 'Bỏ qua',
+    'Connection diagnosis': 'Chẩn đoán kết nối',
+    'Copy report': 'Sao chép báo cáo',
+    'Diagnose connection': 'Chẩn đoán kết nối',
+    'Checking the connection…': 'Đang kiểm tra kết nối…',
+    'The diagnosis could not finish.': 'Không thể hoàn tất chẩn đoán.',
+    'Try again. If it keeps failing, tell your IT team.': 'Hãy thử lại. Nếu vẫn lỗi, hãy báo cho bộ phận IT.',
+    'What to do: {fix}': 'Cách xử lý: {fix}',
+    'Lifetime connection diagnosis': 'Chẩn đoán kết nối Lifetime',
+    'On the server, open Administration > Self check.': 'Trên máy chủ, mở Quản trị > Tự kiểm tra.',
+    'Check the date and time on this computer (set them automatically). If they are right, open Administration > Self check on the server.':
+        'Kiểm tra ngày giờ trên máy tính này (đặt tự động). Nếu ngày giờ đúng, hãy mở Quản trị > Tự kiểm tra trên máy chủ.',
+    'The code or connection line is not complete.': 'Mã hoặc dòng kết nối chưa đầy đủ.',
+    'Type the whole code from the server: LTS and 20 letters and numbers. 0 or O, either works.':
+        'Nhập đủ mã từ máy chủ: LTS và 20 chữ cái và chữ số. 0 hay O đều được.',
+    'Checking {address}, from the connection line.': 'Đang kiểm tra {address}, lấy từ dòng kết nối.',
+    'Checking: searching the network for the server (only a code was typed).':
+        'Đang kiểm tra: tìm máy chủ trong mạng (chỉ nhập mã).',
+    'Checking {address}, the saved connection.': 'Đang kiểm tra {address}, kết nối đã lưu.',
+    'Nothing to check yet.': 'Chưa có gì để kiểm tra.',
+    'Type the code from the server, then press Diagnose connection.': 'Nhập mã từ máy chủ, rồi bấm Chẩn đoán kết nối.',
+    'A Lifetime Server answered on this network: {servers}.': 'Có Lifetime Server trả lời trong mạng này: {servers}.',
+    'No Lifetime Server answered the network search (port 5353).': 'Không có Lifetime Server nào trả lời khi tìm trong mạng (cổng 5353).',
+    'On the server, allow 5353/udp in the firewall and set its network to Private. Guest and some office Wi-Fi block these answers: then type the connection line from the server (Add device) instead of only the code.':
+        'Trên máy chủ, cho phép 5353/udp trong tường lửa và đặt mạng của nó là Riêng tư (Private). Wi-Fi khách và một số Wi-Fi văn phòng chặn các câu trả lời này: khi đó hãy nhập dòng kết nối từ máy chủ (Thêm thiết bị) thay vì chỉ nhập mã.',
+    'The network search covers {networks} (port 8443).': 'Việc tìm trong mạng bao gồm {networks} (cổng 8443).',
+    'This computer has no local IPv4 network to search.': 'Máy tính này không có mạng IPv4 cục bộ nào để tìm.',
+    'Connect this computer to the office network (Wi-Fi or cable). Over a VPN, type the connection line from the server instead of only the code.':
+        'Hãy kết nối máy tính này vào mạng văn phòng (Wi-Fi hoặc cáp). Qua VPN, hãy nhập dòng kết nối từ máy chủ thay vì chỉ nhập mã.',
+    "This computer's name points to {address}, as on Ubuntu. Handled: the search uses the addresses of its network connections instead.":
+        'Tên của máy tính này trỏ đến {address}, như trên Ubuntu. Đã xử lý: việc tìm dùng địa chỉ của các kết nối mạng thay thế.',
+    'Name, port and certificate not checked: there is no server address to check.':
+        'Chưa kiểm tra tên, cổng và chứng chỉ: không có địa chỉ máy chủ để kiểm tra.',
+    'Type the connection line from the server (Add device shows it), or make the network search work (see above).':
+        'Nhập dòng kết nối từ máy chủ (Thêm thiết bị hiển thị dòng này), hoặc khắc phục việc tìm trong mạng (xem ở trên).',
+    '{host} is an IP address: no name lookup needed.': '{host} là địa chỉ IP: không cần tra tên.',
+    '{host} resolves to {addresses} on this network.': 'Trong mạng này, {host} được phân giải thành {addresses}.',
+    '{host} does not resolve on this network. Lifetime uses {source}, the address the server answered from.':
+        'Không phân giải được {host} trong mạng này. Lifetime dùng {source}, địa chỉ mà máy chủ đã trả lời từ đó.',
+    "If connecting fails, ask IT to add {host} to this network's DNS, or add the server's IP under Administration > Other server names and IPs.":
+        'Nếu kết nối thất bại, hãy nhờ IT thêm {host} vào DNS của mạng này, hoặc thêm IP của máy chủ ở Quản trị > Tên và IP khác của máy chủ.',
+    '{host} does not resolve on this network.': 'Không phân giải được {host} trong mạng này.',
+    "Type the connection line with the server's IP address instead (Administration on the server shows it), or ask IT to add {host} to this network's DNS.":
+        'Hãy nhập dòng kết nối có địa chỉ IP của máy chủ (trang Quản trị trên máy chủ hiển thị địa chỉ này), hoặc nhờ IT thêm {host} vào DNS của mạng này.',
+    'Port {port} on {host} is reachable.': 'Kết nối được tới cổng {port} trên {host}.',
+    'Port {port} on {host} refused the connection.': 'Cổng {port} trên {host} từ chối kết nối.',
+    'The computer answered, but Lifetime Server is not running there or uses another port. Start Lifetime Server, or check its port under Administration.':
+        'Máy đó có trả lời, nhưng Lifetime Server không chạy ở đó hoặc dùng cổng khác. Hãy khởi động Lifetime Server, hoặc kiểm tra cổng của nó trong trang Quản trị.',
+    'No answer from {host} on port {port}.': 'Không có trả lời từ {host} ở cổng {port}.',
+    'The server may be off, or its firewall blocks port {port}. On the server, open Administration > Self check.':
+        'Máy chủ có thể đang tắt, hoặc tường lửa của nó chặn cổng {port}. Trên máy chủ, mở Quản trị > Tự kiểm tra.',
+    'No network path to {host}.': 'Không có đường mạng tới {host}.',
+    'Check that this computer is on the same network as the server (Wi-Fi or cable, or the VPN).':
+        'Kiểm tra máy tính này có cùng mạng với máy chủ không (Wi-Fi hoặc cáp, hoặc VPN).',
+    'Port {port} not checked: the server name did not resolve.': 'Chưa kiểm tra cổng {port}: không phân giải được tên máy chủ.',
+    'The secure connection to {host} failed: it may not be Lifetime Server.': 'Kết nối an toàn tới {host} thất bại: đó có thể không phải Lifetime Server.',
+    'Check the address and port. Lifetime Server uses port 8443 unless it was installed with another.':
+        'Kiểm tra địa chỉ và cổng. Lifetime Server dùng cổng 8443 trừ khi được cài với cổng khác.',
+    'Certificate not checked: the server could not be reached.': 'Chưa kiểm tra chứng chỉ: không kết nối được máy chủ.',
+    'The server certificate names {host}.': 'Chứng chỉ của máy chủ có tên {host}.',
+    'The server certificate does not name {host}. It names: {names}.': 'Chứng chỉ của máy chủ không có tên {host}. Các tên trong chứng chỉ: {names}.',
+    'Use one of those names in the connection line, or on the server add {host} under Administration > Other server names and IPs.':
+        'Dùng một trong các tên đó trong dòng kết nối, hoặc trên máy chủ thêm {host} ở Quản trị > Tên và IP khác của máy chủ.',
+    'The server certificate matches the code.': 'Chứng chỉ của máy chủ khớp với mã.',
+    "This server's certificate does not match the code.": 'Chứng chỉ của máy chủ này không khớp với mã.',
+    'The code belongs to another server, or the server renewed its certificate after the code was made. Create a new code on the server (Add device).':
+        'Mã thuộc về máy chủ khác, hoặc máy chủ đã gia hạn chứng chỉ sau khi tạo mã. Hãy tạo mã mới trên máy chủ (Thêm thiết bị).',
+    'The server certificate is valid from {start} to {end}, less than 30 days left.':
+        'Chứng chỉ của máy chủ có hiệu lực từ {start} đến {end}, còn chưa đến 30 ngày.',
+    'Lifetime Server renews it 30 days before it ends. On the server, open Administration > Self check.':
+        'Lifetime Server gia hạn chứng chỉ 30 ngày trước khi hết hạn. Trên máy chủ, mở Quản trị > Tự kiểm tra.',
+    'The server certificate is valid from {start} to {end}.': 'Chứng chỉ của máy chủ có hiệu lực từ {start} đến {end}.',
+    "The server certificate is out of date, or this computer's clock is wrong.": 'Chứng chỉ của máy chủ đã hết hạn, hoặc đồng hồ của máy tính này bị sai.',
+    "The server certificate is not valid yet: this computer's clock may be behind.": 'Chứng chỉ của máy chủ chưa có hiệu lực: đồng hồ của máy tính này có thể bị chậm.',
+    'The server certificate could not be checked.': 'Không thể kiểm tra chứng chỉ của máy chủ.',
+    'Update Lifetime on this computer and on the server.': 'Hãy cập nhật Lifetime trên máy tính này và trên máy chủ.',
+    "This computer's clock is within {seconds} s of the server's.": 'Đồng hồ của máy tính này lệch không quá {seconds} giây so với máy chủ.',
+    "This computer's clock differs from the server's by {minutes} minutes.": 'Đồng hồ của máy tính này lệch {minutes} phút so với máy chủ.',
+    'Set the date and time automatically on both computers.': 'Hãy đặt ngày giờ tự động trên cả hai máy.',
+    "The server's clock could not be read.": 'Không đọc được đồng hồ của máy chủ.',
+    'Server clock not compared: Lifetime sends nothing to a server before the typed code proves it is the right one.':
+        'Chưa so sánh đồng hồ máy chủ: Lifetime không gửi gì tới máy chủ trước khi mã đã nhập chứng minh đó đúng là máy chủ cần kết nối.',
+    'Could not read the Windows network profile.': 'Không đọc được loại mạng (network profile) của Windows.',
+    'This computer runs Lifetime Server and its network {networks} is Public: Windows lets no other computer reach it.':
+        'Máy tính này chạy Lifetime Server và mạng {networks} của nó là Công cộng (Public): Windows không cho máy tính nào khác kết nối tới.',
+    'Set the network to Private: Settings > Network & internet > {networks} > Network profile type > Private.':
+        'Đặt mạng là Riêng tư: Cài đặt > Mạng và Internet > {networks} > Loại hồ sơ mạng > Riêng tư (Private).',
+    'Windows network {networks} is Public. That does not stop this computer from connecting out; it would only block computers if this computer were the server.':
+        'Mạng Windows {networks} là Công cộng (Public). Điều đó không ngăn máy tính này kết nối ra ngoài; nó chỉ chặn các máy tính khác nếu máy này là máy chủ.',
+    'Windows network profile: {networks}. None is Public.': 'Loại mạng Windows: {networks}. Không có mạng nào là Công cộng.',
+}
+for _key, _text in _DIAGNOSTICS_VI.items():
+    EN.setdefault(_key, _key)
+    VI.setdefault(_key, _text)
+    SERVER_DASHBOARD_VI.setdefault(_key, _text)

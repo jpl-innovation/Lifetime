@@ -131,9 +131,9 @@ def format_code(value):
     return 'LTS-' + '-'.join(raw[i:i+4] for i in range(0, len(raw), 4)) if raw else ''
 
 
-def certificate_names(host, port, pem, timeout):
-    """The DNS names and IP addresses of ``pem`` as served at host:port, read over a handshake that trusts
-    only ``pem`` (chain, validity, strict X.509) but not yet a name. No application data is sent."""
+def certificate_details(host, port, pem, timeout):
+    """``pem`` as served at host:port (names, dates), read over a handshake that trusts only ``pem`` (chain,
+    validity, strict X.509) but not yet a name. No application data is sent."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.verify_flags |= ssl.VERIFY_X509_STRICT
@@ -141,8 +141,12 @@ def certificate_names(host, port, pem, timeout):
     context.load_verify_locations(cadata=pem)
     with socket.create_connection((host, port), timeout=timeout) as raw:
         with context.wrap_socket(raw, server_hostname=host) as secured:
-            certificate = secured.getpeercert() or {}
-    names = certificate.get('subjectAltName', ())
+            return secured.getpeercert() or {}
+
+
+def certificate_names(host, port, pem, timeout):
+    """The DNS names and IP addresses of ``pem`` as served at host:port (see certificate_details)."""
+    names = certificate_details(host, port, pem, timeout).get('subjectAltName', ())
     return ([value for kind, value in names if kind == 'DNS'],
             [value.strip() for kind, value in names if kind == 'IP Address'])
 
@@ -231,3 +235,37 @@ def find_server(code):
                     pending.cancel()
                 return result
     raise ValueError('No matching server')
+
+
+# What a copied report or log line must never carry. Masking too much is harmless; missing one is not.
+_SCRUB = (
+    (re.compile(r'lifetime-enrollment-v1:[A-Za-z0-9_-]*'), 'lifetime-enrollment-v1:****'),
+    (re.compile(r'(?i)(?<![0-9A-Z])LTS(?:[-\s]?[0-9A-Z*~$=]){4,24}'), 'LTS-****'),
+    (re.compile(r'(?i)(?<![0-9A-Z-])(?:[0-9A-Z]{4}-){3,}[0-9A-Z*~$=]{1,4}(?![0-9A-Z])'), 'LTS-****'),
+    (re.compile(r'(?i)\bBearer\s+\S+'), 'Bearer ****'),
+    (re.compile(r'(?i)(["\']?[\w-]*(?:token|password|passwd|secret|credential|serial|webhook|api[_-]?key|authorization|username)'
+                r'[\w-]*["\']?\s*[:=]\s*)("[^"]*"|\'[^\']*\'|[^\s,;]+)'), r'\1****'),
+    (re.compile(r'(?i)\b(https?://[^\s/"\'<>]+)/[^\s"\'<>]+'), r'\1/****'),
+)
+
+
+def scrub(text):
+    """``text`` without connection codes, enrollment bundles, tokens, passwords, serial numbers or URL paths
+    (webhooks). For reports people copy; structured data is also limited to named fields by its callers."""
+    text = str(text)
+    for pattern, replacement in _SCRUB:
+        text = pattern.sub(replacement, text)
+
+    def code_or_token(match):
+        value = match.group(0)
+        if re.fullmatch('[0-9a-f]{64}', value):       # a certificate fingerprint: public
+            return value
+        if len(value) >= 32:
+            return '****'
+        try:
+            normalize(value)        # a 20-character code typed without LTS or dashes
+            return 'LTS-****'
+        except ValueError:
+            return value
+    return re.sub(r'(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_-]{32,}|[0-9A-Za-z]{19}[0-9A-Za-z*~$=])(?![A-Za-z0-9_-])',
+                  code_or_token, text)
