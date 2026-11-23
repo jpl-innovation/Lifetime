@@ -351,11 +351,24 @@ class EarlyDateTests(unittest.TestCase):
         with patch.object(gui.QMessageBox, 'warning') as warning, patch('sys.stderr'):
             hook = gui.install_excepthook()
             self.assertIs(sys.excepthook, hook)
-            try:
-                raise OSError(22, 'Invalid argument')
-            except OSError as error:
-                sys.excepthook(type(error), error, error.__traceback__)
-        self.assertIn('OSError', warning.call_args.args[2])
+            def fail(number):
+                try:
+                    raise OSError(number, 'Invalid argument')
+                except OSError as error:
+                    sys.excepthook(type(error), error, error.__traceback__)
+            fail(22)                                            # before the event loop: the app could not start
+            self.assertIn('could not start', warning.call_args.args[2])
+            from PyQt6.QtCore import QEventLoop, QTimer
+            loop = QEventLoop()
+            def inside():
+                fail(22)                                        # the same error again: logged only
+                fail(5)
+                loop.quit()
+            QTimer.singleShot(0, inside)
+            loop.exec()
+        self.assertEqual(warning.call_count, 2)
+        self.assertIn('OSError: [Errno 5]', warning.call_args.args[2])
+        self.assertIn('kept running', warning.call_args.args[2])
 
 
 if __name__ == '__main__':
