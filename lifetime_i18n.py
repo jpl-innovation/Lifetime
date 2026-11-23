@@ -2256,6 +2256,8 @@ _UPTIME_VI = {
     "Archived System logs read": "Số nhật ký System lưu trữ đã đọc",
     "Archived System logs": "Nhật ký System lưu trữ",
     "Uptime and downtime: asleep is sleep or hibernation, off is shut down or restarting, and unknown is time with no record. Days the system log no longer covers are unknown, never counted as zero. Longest spans need the power events of the system log and are not available without them.": "Thời gian hoạt động và ngừng hoạt động: ngủ là ngủ hoặc ngủ đông, tắt là đã tắt máy hoặc đang khởi động lại, chưa xác định là thời gian không có bản ghi. Những ngày nhật ký hệ thống không còn lưu là chưa xác định, không bao giờ tính là không. Khoảng dài nhất cần các sự kiện nguồn của nhật ký hệ thống và không có nếu thiếu chúng.",
+    "Something went wrong": "Đã xảy ra lỗi",
+    "Lifetime hit an unexpected error and kept running. Details: {error}": "Lifetime gặp lỗi không mong muốn và vẫn tiếp tục chạy. Chi tiết: {error}",
 }
 for _key, _text in _UPTIME_VI.items():
     EN.setdefault(_key, _key)

@@ -56,9 +56,9 @@ class PeriodPickerTests(unittest.TestCase):
         self.assertEqual(model.choice, 'custom')
         self.assertFalse(picker.from_edit.isHidden())
         self.assertEqual((model.start, model.end), (dt.date(2026, 10, 25), dt.date(2026, 11, 23)))
-        # No practical lower limit; To never in the future.
+        # No practical lower limit (2 Jan 1970, the first day Windows can place); To never in the future.
         picker.from_edit.setDate(picker.from_edit.minimumDate())
-        self.assertLessEqual(model.start.year, 1900)
+        self.assertEqual(model.start, dt.date(1970, 1, 2))
         self.assertEqual(picker.to_edit.maximumDate().toPyDate(), dt.date(2026, 11, 23))
         model.set('custom', dt.date(2021, 1, 1), dt.date(2030, 1, 1))
         self.assertEqual(model.bounds(), (dt.date(2021, 1, 1), dt.date(2026, 11, 23)))
@@ -308,6 +308,54 @@ class UptimePageTests(unittest.TestCase):
         self.assertLessEqual(len(page.timeline.columns()), page.timeline.area().width() + 1)
         self.assertLess(render, 3.0)
         self.assertLess(refresh, 3.0)
+
+
+class EarlyDateTests(unittest.TestCase):
+    """Review finding 3: a From date before 1970 crashed the app on Windows (local time before 1970 cannot be converted)."""
+    def setUp(self):
+        set_language('en')
+
+    def test_from_before_1970_is_clamped_and_the_page_still_works(self):
+        from PyQt6.QtCore import QDate
+        from lifetime_uptime_gui import UptimePage, FIRST_DAY
+        model = PeriodModel(today=dt.date(2026, 11, 23))
+        page = UptimePage(model, events_source=None)
+        self.addCleanup(page.deleteLater)
+        page.set_ledger({'daily': {'2026-11-20': 3600}})
+        page.show()
+        picker = PeriodPicker(model)
+        self.addCleanup(picker.deleteLater)
+        self.assertEqual(picker.from_edit.minimumDate().toPyDate(), FIRST_DAY)
+        model.set('custom')
+        picker.from_edit.setDate(QDate(1965, 1, 1))         # the calendar refuses it: the minimum wins
+        model.set('custom', dt.date(1965, 1, 1), dt.date(1970, 2, 1))
+        self.assertEqual(model.start, FIRST_DAY)
+        APP.processEvents()
+        self.assertEqual(page.summary['rows'][0]['day'], FIRST_DAY)
+        # A range saved by an older build is not trusted.
+        self.assertEqual(PeriodModel({'choice': 'custom', 'start': '1965-01-01', 'end': '1966-01-01'}).choice, '30d')
+
+    def test_early_days_are_unknown_not_a_crash(self):
+        summary = downtime.summarize({'daily': {}}, dt.date(1965, 1, 1), dt.date(1965, 1, 3))
+        self.assertEqual(summary['totals']['unknown'], 3 * 86400)
+        self.assertIsInstance(downtime.day_start(dt.date(1960, 1, 1)), (int, float))
+        import lifetime_reports as reports
+        report = reports.build_report({'daily': {'2026-11-20': 3600.0}, 'total_seconds': 3600.0}, dict(completed=True, history=True),
+                                      start='1960-01-01', end='1960-01-31')
+        self.assertEqual(report['uptime']['values']['unknown'], 31 * 86400)
+
+    def test_an_unexpected_error_is_shown_not_fatal(self):
+        import sys
+        previous = sys.excepthook
+        self.addCleanup(setattr, sys, 'excepthook', previous)
+        with patch.object(gui.QMessageBox, 'warning') as warning, patch('sys.stderr'):
+            hook = gui.install_excepthook()
+            self.assertIs(sys.excepthook, hook)
+            try:
+                raise OSError(22, 'Invalid argument')
+            except OSError as error:
+                sys.excepthook(type(error), error, error.__traceback__)
+        self.assertIn('OSError', warning.call_args.args[2])
 
 
 if __name__ == '__main__':

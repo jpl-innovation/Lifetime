@@ -6,8 +6,10 @@ Keys are local ISO dates; all six fields are integers >= 0; asleep + off + unkno
 exceed the day's length. A missing day means unknown, never zero. Awake time itself stays in ``daily`` and is never
 changed here: this module only reads it.
 """
+import calendar
 import datetime as dt
 import math
+import time
 
 FIELDS = ('asleep_s', 'off_s', 'unknown_s', 'restarts', 'shutdowns', 'unexpected_stops')
 COUNTS = ('restarts', 'shutdowns', 'unexpected_stops')
@@ -47,9 +49,15 @@ def problems(value):
 # --- local days ---
 
 def day_start(day, tz=None):
-    """Epoch seconds of local midnight (tz None = this computer's zone, with its historical rules)."""
+    """Epoch seconds of local midnight (tz None = this computer's zone, with its historical rules).
+
+    Windows cannot convert local times before 1970: such a day is placed with today's UTC offset. No record
+    reaches back that far, so those days are only ever shown as unknown."""
     moment = dt.datetime.combine(day, dt.time())
-    return moment.replace(tzinfo=tz).timestamp() if tz is not None else moment.timestamp()
+    try:
+        return moment.replace(tzinfo=tz).timestamp() if tz is not None else moment.timestamp()
+    except (OSError, OverflowError, ValueError):
+        return calendar.timegm(moment.timetuple()) + time.timezone
 
 
 def day_length(day, tz=None, now=None):

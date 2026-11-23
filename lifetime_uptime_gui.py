@@ -16,6 +16,7 @@ CHOICES = (('today', 'Today'), ('7d', 'Last 7 days'), ('30d', 'Last 30 days'), (
            ('last_month', 'Last month'), ('this_year', 'This year'), ('12m', 'Last 12 months'),
            ('5y', 'Last 5 years'), ('all', 'All'), ('custom', 'Custom…'))
 DEFAULT = '30d'
+FIRST_DAY = dt.date(1970, 1, 2)     # the earliest From: Windows cannot place local days before 1970
 
 
 def _date(value):
@@ -36,6 +37,8 @@ class PeriodModel(QObject):
         saved = saved if isinstance(saved, dict) else {}
         self.choice = saved.get('choice') if saved.get('choice') in downtime.PERIODS else DEFAULT
         self.start, self.end = _date(saved.get('start')), _date(saved.get('end'))
+        if self.start is not None and self.start < FIRST_DAY:
+            self.start = None       # a saved range from an older build: fall back to the default
         if self.choice == 'custom' and (self.start is None or self.end is None):
             self.choice = DEFAULT
         self.save = save
@@ -54,7 +57,8 @@ class PeriodModel(QObject):
             if start is None or end is None:
                 start, end = self.bounds()
             end = min(end, self.current_day())
-            start = min(start, end)
+            start = max(FIRST_DAY, min(start, end))
+            end = max(start, end)
             self.start, self.end = start, end
         if choice == self.choice and choice != 'custom':
             return
@@ -95,7 +99,7 @@ class PeriodPicker(QWidget):
             edit.setCalendarPopup(True)
             edit.setDisplayFormat('yyyy-MM-dd')
             edit.setMinimumHeight(36)
-            edit.setMinimumDate(QDate(1900, 1, 1))     # no practical lower limit
+            edit.setMinimumDate(QDate(FIRST_DAY.year, FIRST_DAY.month, FIRST_DAY.day))     # no practical lower limit
             row.addWidget(caption)
             row.addWidget(edit)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)

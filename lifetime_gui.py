@@ -1488,6 +1488,20 @@ class Window(QWidget):
             QMessageBox.warning(self, tr('Could not start tracker'), str(error))
 
 
+def install_excepthook():
+    """An unexpected error in a click or a timer is logged and shown; without this PyQt ends the whole app."""
+    import traceback
+    def report(kind, error, trace):
+        text = ''.join(traceback.format_exception(kind, error, trace))
+        print(text, file=sys.stderr, flush=True)
+        try:
+            QMessageBox.warning(None, tr('Something went wrong'), tr('Lifetime hit an unexpected error and kept running. Details: {error}', error=f'{kind.__name__}: {error}'))
+        except Exception:
+            pass
+    sys.excepthook = report
+    return report
+
+
 LINUX_QT_PLUGINS = ('platforms/libqxcb.so', 'platforms/libqwayland-generic.so', 'platforms/libqwayland-egl.so',
                     'platforms/libqoffscreen.so', 'wayland-shell-integration/libxdg-shell.so')
 
@@ -1529,6 +1543,7 @@ if __name__ == '__main__':
             pass
     configure_high_dpi()
     app = QApplication(sys.argv)
+    install_excepthook()
     app.setDesktopFileName('lifetime')  # Wayland app id: matches lifetime.desktop for the dock/taskbar icon
     here = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
     for candidate in (here / 'assets' / 'lifetime.png', here / 'lifetime.png'):
