@@ -160,5 +160,51 @@ class ServerDashboardMenuTests(unittest.TestCase):
         self.assertIn("[[ ! -f /etc/lifetime-server/server.conf ]] || hidden=''", desktop)
 
 
+class AppImageStartTests(unittest.TestCase):
+    """The AppImage on a computer with Lifetime Server installed asks which program to open, remembered per person."""
+
+    def setUp(self):
+        self.folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.server = self.folder / 'server.conf'
+        self.ask = Mock(return_value=('server', False))
+
+    def start(self, marked=True):
+        environ = {'LIFETIME_APPIMAGE_START': '1'} if marked else {}
+        choice = settings.appimage_start(self.ask, self.folder / 'data', environ, (str(self.server),))
+        self.assertNotIn('LIFETIME_APPIMAGE_START', environ)        # nothing started from here inherits it
+        return choice
+
+    def test_without_a_server_or_with_arguments_lifetime_opens_without_a_question(self):
+        self.assertEqual(self.start(), 'desktop')
+        self.server.touch()
+        self.assertEqual(self.start(marked=False), 'desktop')
+        self.ask.assert_not_called()
+
+    def test_the_choice_is_asked_until_remembered_and_a_closed_question_opens_nothing(self):
+        self.server.touch()
+        self.assertEqual(self.start(), 'server')
+        self.assertEqual(self.start(), 'server')
+        self.assertEqual(self.ask.call_count, 2)        # not remembered: asked again
+        self.ask.return_value = (None, True)
+        self.assertIsNone(self.start())
+        self.assertFalse((self.folder / 'data' / settings.START_CHOICE).exists())
+        self.ask.return_value = ('desktop', True)
+        self.assertEqual(self.start(), 'desktop')
+        self.ask.reset_mock()
+        self.assertEqual(self.start(), 'desktop')
+        self.ask.assert_not_called()
+
+    def test_only_a_start_without_arguments_is_marked_and_lifetime_asks_before_anything_else(self):
+        apprun = (Path(__file__).parent / 'packaging' / 'linux' / 'AppRun').read_text(encoding='utf-8')
+        marked = apprun[apprun.index('if [ $# -eq 0 ]; then'):apprun.index('elif [ "${1:-}" = "--run-tool" ]; then')]
+        self.assertIn('export LIFETIME_APPIMAGE_START', marked)
+        self.assertEqual(apprun.count('LIFETIME_APPIMAGE_START=1'), 1)
+        gui = (Path(__file__).parent / 'lifetime_gui.py').read_text(encoding='utf-8')
+        main = gui[gui.index("if __name__ == '__main__':"):]
+        self.assertLess(main.index('set_style('), main.index('appimage_start(ask_start_program)'))   # in its look
+        self.assertLess(main.index('appimage_start(ask_start_program)'), main.index("tell_running_instance('lifetime-gui')"))
+        self.assertIn("os.execve(program, [program, '--language', language]", gui)     # the AppImage stays mounted
+
+
 if __name__ == '__main__':
     unittest.main()

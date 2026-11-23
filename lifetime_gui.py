@@ -26,7 +26,7 @@ from lifetime_health_gui import HealthPage
 from lifetime_insights_gui import EnergyPanel
 from lifetime_glass import STYLES, set_style, active_style, desktop_sheet
 from lifetime_shell import install_glass_surfaces, attach_glass_all, ModeSwitch, theme_reveal, Sidebar, PageStack, DisclosureButton, PulseDot, install_tray, shut_down, tray_available, tell_running_instance, configure_tray_login
-from lifetime_settings import load_settings, save_settings, update_settings
+from lifetime_settings import appimage_start, load_settings, save_settings, update_settings
 from lifetime_setup import SetupDialog, SettingsPage, configure_login
 from lifetime_reports import coverage, SOURCES, FIRST_SEEN_SOURCES, source_totals
 from lifetime_technician import IdentityDialog, CoverageDialog, ExportDialog
@@ -1462,6 +1462,30 @@ def self_check():
     return 1 if problems else 0
 
 
+def ask_start_program():
+    """The AppImage on a computer with Lifetime Server: which program to open. Returns (choice, remember)."""
+    from PyQt6.QtWidgets import QCheckBox
+    box = QMessageBox()
+    box.setWindowTitle('Lifetime')
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(tr('Lifetime Server is installed on this computer. Which program do you want to open?'))
+    server = box.addButton(tr('Lifetime Server (dashboard)'), QMessageBox.ButtonRole.AcceptRole)
+    desktop = box.addButton(tr("Lifetime (this computer's awake time)"), QMessageBox.ButtonRole.AcceptRole)
+    box.setDefaultButton(server)
+    remember = QCheckBox(tr('Remember my choice'))
+    box.setCheckBox(remember)
+    box.exec()
+    clicked = box.clickedButton()
+    return ('server' if clicked is server else 'desktop' if clicked is desktop else None), remember.isChecked()
+
+
+def open_server_dashboard(language):
+    """Replace this process with the bundle's Lifetime Server dashboard (the AppImage stays mounted while it runs)."""
+    program = str(Path(sys.executable).with_name('LifetimeServerDashboard'))
+    environment = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT='1')     # its own start, not a child of this one
+    os.execve(program, [program, '--language', language], environment)
+
+
 if __name__ == '__main__':
     if '--self-check' in sys.argv:
         sys.exit(self_check())
@@ -1479,13 +1503,18 @@ if __name__ == '__main__':
         if candidate.exists():
             app.setWindowIcon(QIcon(str(candidate)))
             break
-    if tray_available() and tell_running_instance('lifetime-gui'):
-        sys.exit(0)
     settings = load_settings()
     set_language(settings['language'])
     set_theme(resolve_theme(settings.get('theme', 'auto')))
     set_style(settings.get('style', 'classic'))
     install_glass_surfaces()
+    start = appimage_start(ask_start_program)       # 'desktop' unless the AppImage meets an installed server
+    if start is None:
+        sys.exit(0)
+    if start == 'server':
+        open_server_dashboard(settings['language'])
+    if tray_available() and tell_running_instance('lifetime-gui'):
+        sys.exit(0)
     previous = dict(settings)
     if not settings['completed']:
         setup = SetupDialog(THEMES[active_theme()], settings)

@@ -103,6 +103,8 @@ chmod +x Lifetime-Linux-x86_64.AppImage
 ./Lifetime-Linux-x86_64.AppImage
 ```
 
+On a computer where Lifetime Server is installed, the AppImage first asks whether to open the **Lifetime Server** dashboard or Lifetime; tick *Remember my choice* to skip the question next time (`--run-tool Lifetime` always opens Lifetime; delete `~/.local/share/lifetime/appimage-opens.txt` to be asked again).
+
 **Install for your user** (menu entry, `~/.local/lib/lifetime`, no root): download **Lifetime-Linux-x86_64.tar.gz**, then
 
 ```sh

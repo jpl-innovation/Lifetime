@@ -26,6 +26,36 @@ def bundled_command(tool):
     return [str(Path(sys.executable).with_name(tool + ('.exe' if sys.platform == 'win32' else '')))]
 
 
+SERVER_INSTALLED = ('/etc/lifetime-server/server.conf', '/opt/lifetime-server')
+START_CHOICE = 'appimage-opens.txt'
+
+
+def appimage_start(ask, directory=None, environ=None, installed=SERVER_INSTALLED):
+    """What a plain start of the AppImage opens: 'desktop', 'server' (the Lifetime Server dashboard) or None (the
+    question was closed). Only when Lifetime Server is installed on this computer is the person asked, with
+    ``ask() -> (choice, remember)``; a remembered answer is kept in their own data folder. AppRun marks a start
+    without arguments, and the marker is removed so nothing this program starts inherits it."""
+    import os
+    environ = os.environ if environ is None else environ
+    if environ.pop('LIFETIME_APPIMAGE_START', None) != '1' or not any(os.path.exists(path) for path in installed):
+        return 'desktop'
+    path = Path(directory or data_dir()) / START_CHOICE
+    try:
+        remembered = path.read_text(encoding='utf-8').strip()
+    except (OSError, ValueError):
+        remembered = ''
+    if remembered in ('desktop', 'server'):
+        return remembered
+    choice, remember = ask()
+    if remember and choice in ('desktop', 'server'):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(choice, encoding='utf-8')
+        except OSError:
+            pass        # asked again next time
+    return choice
+
+
 def iso_date(value: str) -> dt.date:
     """Parse a calendar date in exact YYYY-MM-DD form; reject other ISO forms."""
     if not isinstance(value, str):

@@ -2183,3 +2183,14 @@ for _key, _text in _SCORE_VI.items():
     EN.setdefault(_key, _key)
     VI.setdefault(_key, _text)
     SERVER_DASHBOARD_VI.setdefault(_key, _text)
+
+# The AppImage on a computer where Lifetime Server is installed asks which program to open.
+_APPIMAGE_VI = {
+    'Lifetime Server is installed on this computer. Which program do you want to open?':
+        'Máy tính này có cài Lifetime Server. Bạn muốn mở chương trình nào?',
+    'Lifetime Server (dashboard)': 'Lifetime Server (bảng điều khiển)',
+    "Lifetime (this computer's awake time)": 'Lifetime (thời gian hoạt động của máy này)',
+    'Remember my choice': 'Ghi nhớ lựa chọn của tôi',
+}
+VI.update(_APPIMAGE_VI)
+EN.update({key: key for key in _APPIMAGE_VI})
