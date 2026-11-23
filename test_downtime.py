@@ -934,6 +934,45 @@ class TimeLimitTests(unittest.TestCase):
             self.assertIsInstance(tracker.read_power(None, lambda since: imp.command(['journalctl'])), ValueError)
 
 
+class SaveFailureTests(unittest.TestCase):
+    """Second review, finding 3: saves failing for longer than MAX_DELTA (a full disk) must not lose awake time."""
+    def run_tracker(self, failing, boots=lambda n: 'boot-a'):
+        import threading
+        import lifetime_settings as settings
+        directory = Path(tempfile.mkdtemp())
+        settings.save_settings(dict(settings.defaults(), completed=True, history=True), directory)
+        state = dict(tick=1000, calls=0, saves=0)
+        def awake_clock():
+            state['tick'] += 30
+            state['calls'] += 1
+            return state['tick']
+        real_save = tracker.save
+        def save(*args, **kwargs):
+            state['saves'] += 1
+            if state['saves'] in failing:
+                raise OSError(28, 'No space left on device')
+            return real_save(*args, **kwargs)
+        class Stopper(threading.Event):
+            waits = 0
+            def wait(self, timeout=None):
+                type(self).waits += 1
+                return type(self).waits > 20
+        with patch.object(tracker, 'save', side_effect=save), patch.object(tracker, 'awake_clock', side_effect=awake_clock),                 patch.object(tracker, 'boot_id', side_effect=lambda: boots(state['calls'])),                 patch.object(tracker, '_monotonic', side_effect=lambda: state['tick']),                 patch.object(tracker.threading, 'Event', Stopper), patch.object(tracker, 'read_power', return_value=ValueError('x')),                 patch('lifetime_daily.boot_history', return_value=(None, [], True)), patch('sys.stderr', io.StringIO()) as errors:
+            tracker.run(directory)
+        return tracker.read_ledger(directory), state, errors.getvalue()
+
+    def test_twelve_failed_saves_lose_nothing_and_count_nothing_twice(self):
+        ledger, state, errors = self.run_tracker(set(range(2, 14)))           # 12 failures x 30 s = 360 s > MAX_DELTA
+        self.assertEqual(ledger['total_seconds'], state['tick'])
+        self.assertFalse(ledger.get('coverage_gaps'))
+        self.assertIn('could not save, will retry (OSError: errno 28)', errors)
+
+    def test_a_new_boot_during_the_failures_is_counted_as_a_new_boot(self):
+        ledger, state, _ = self.run_tracker(set(range(2, 14)), boots=lambda calls: 'boot-a' if calls < 8 else 'boot-b')
+        self.assertEqual(ledger['boots'], 2)
+        self.assertEqual(ledger['total_seconds'], 1030 + state['tick'])       # first boot's first save, then boot-b's clock
+
+
 class OutboxSizeTests(unittest.TestCase):
     """Review finding 9: with 10 years of daily totals, one history copy per outbox row filled 16 MB in ~85 records."""
     def test_only_the_newest_row_keeps_a_history_snapshot_and_no_record_is_lost(self):

@@ -17,6 +17,7 @@ import threading
 import time
 
 INTERVAL = 30
+_monotonic = time.monotonic     # replaceable in tests
 MAX_DELTA = 300
 MAX_BOOT_CREDIT = 366 * 24 * 3600  # Reject implausibly large initial uptimes.
 DAILY_DAYS = 3660  # days of daily awake totals kept (10 years; the server's limit too)
@@ -198,8 +199,12 @@ def save(directory, ledger, running=None):
     atomic_json(Path(directory) / 'status.json', status)
 
 
-def sample(ledger, tick, identity, timestamp=None, credit_current=False, history=True, boot_evidence=None):
-    """Count awake deltas and credit initial uptime once for each observed boot."""
+def sample(ledger, tick, identity, timestamp=None, credit_current=False, history=True, boot_evidence=None,
+           max_delta=MAX_DELTA):
+    """Count awake deltas and credit initial uptime once for each observed boot.
+
+    ``max_delta`` may be raised only by a caller that watched the whole interval itself (the tracker after its
+    own saves failed, same process and boot); a longer delta otherwise stays an uncounted discontinuity."""
     if not math.isfinite(tick) or tick < 0:
         raise ValueError('Invalid awake clock')
     stamp = timestamp or dt.datetime.now(dt.timezone.utc).isoformat()
@@ -267,7 +272,7 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
         else:
             ledger['unattributed_seconds'] += credit
         ledger['boot_credited_for'] = token
-    elif delta is not None and 0 <= delta <= MAX_DELTA:
+    elif delta is not None and 0 <= delta <= max(MAX_DELTA, max_delta):
         # Only the tail above the highest observed counter is new evidence.
         added = max(0.0, tick - max(previous, high_water))
         ledger['total_seconds'] += added
@@ -582,7 +587,13 @@ def run(directory=None):
                 else:
                     health_results.clear()
                     health_pending = False
-                sample(ledger, awake_clock(), boot_id(), history=settings['history'])
+                identity = boot_id()
+                # After saves of our own failed in this boot, this process watched the whole interval: let the
+                # next sample credit it (bounded by the time this process measured since its last good save).
+                allowed = MAX_DELTA
+                if saves['failed'] and saves['boot'] == identity and saves['at'] is not None:
+                    allowed = _monotonic() - saves['at'] + INTERVAL
+                sample(ledger, awake_clock(), identity, history=settings['history'], max_delta=allowed)
                 if settings['history']:
                     if power_results:
                         refresh_downtime(ledger, power_results.pop())
@@ -596,13 +607,17 @@ def run(directory=None):
                     power_results.clear()
                     power_pending = False
                 save(directory, ledger, running)
+                saves.update(at=_monotonic(), boot=identity, failed=False, error=None)
+        saves = dict(at=None, boot=None, failed=False, error=None)
         def flush_or_retry(running):
             # Another program holding the ledger lock too long (Windows gives up after about 10 s) or a failed
-            # write must not end the tracker: the awake clock keeps counting and the next save credits the time.
+            # write (a full disk) must not end the tracker. The next good save credits the awake time since the last
+            # good one, even past MAX_DELTA, because this process watched that interval in the same boot.
             try:
                 flush(running)
-            except OSError:
-                pass
+            except OSError as error:
+                saves.update(failed=True, error=f'{type(error).__name__}: errno {getattr(error, "errno", None)}')
+                print(f'Lifetime tracker: could not save, will retry ({saves["error"]})', file=sys.stderr, flush=True)
         try:
             flush_or_retry(True)
             while not stop.wait(INTERVAL):
