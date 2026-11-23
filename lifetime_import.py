@@ -3,6 +3,7 @@
 import argparse
 import copy
 import datetime as dt
+import gzip
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 import lifetime_tracker as tracker
 
@@ -92,11 +94,57 @@ def _journal_boots():
     return boots, current
 
 
-def _wtmp_shutdowns():
+STAMP = r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w{3}\s+\d{1,2}\s+\d\d:\d\d:\d\d\s+\d{4}'
+
+
+def parse_wtmp(raw):
+    """Boots from C-locale `last -x -F` reboot lines, requested in UTC: start, end (None while running), crash."""
+    boots = []
+    for line in raw.splitlines():
+        if not line.startswith('reboot '):
+            continue
+        stamps = [dt.datetime.strptime(' '.join(s.split()), '%a %b %d %H:%M:%S %Y').replace(tzinfo=dt.timezone.utc).timestamp()
+                  for s in re.findall(STAMP, line)]
+        if stamps:
+            boots.append(dict(start=stamps[0], end=stamps[1] if len(stamps) > 1 else None, crash=' crash' in line))
+    return boots
+
+
+def read_wtmp(folder=Path('/var/log')):
+    """(shutdown times, reboot records, rotated files read) from wtmp and its rotated copies (wtmp.1, wtmp.*.gz).
+
+    Optional corroboration: a missing or unreadable file is skipped, never an error, and never invents an end."""
+    outputs, rotated = [], 0
     try:
-        return parse_shutdowns(command(['last', '-x', '-F', 'reboot', 'shutdown']))
+        outputs.append(command(['last', '-x', '-F', 'reboot', 'shutdown']))
     except (OSError, ValueError):
-        return []  # Optional corroboration; missing wtmp never invents an end.
+        pass
+    try:
+        names = sorted(path for path in Path(folder).glob('wtmp.*') if path.is_file())
+    except OSError:
+        names = []
+    for path in names:
+        temporary = None
+        try:
+            target = path
+            if path.suffix == '.gz':
+                with gzip.open(path) as source, tempfile.NamedTemporaryFile(delete=False, suffix='.wtmp') as copy_:
+                    shutil.copyfileobj(source, copy_)
+                    temporary = target = Path(copy_.name)
+            outputs.append(command(['last', '-x', '-F', '-f', str(target), 'reboot', 'shutdown']))
+            rotated += 1
+        except (OSError, ValueError, EOFError):
+            continue
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    shutdowns = sorted(stamp for raw in outputs for stamp in parse_shutdowns(raw))
+    boots = sorted((boot for raw in outputs for boot in parse_wtmp(raw)), key=lambda b: b['start'])
+    return shutdowns, boots, rotated
+
+
+def _wtmp_shutdowns():
+    return read_wtmp()[0]
 
 
 def _power_details(boot, shutdowns):
@@ -131,14 +179,25 @@ def linux_power(since=None):
     """Boots and downtime details for ``lifetime_downtime``: (boots, extras, info). On Linux an end that neither
     the journal nor wtmp shows as a clean shutdown counts as an unexpected stop (there is no Kernel-Power 41)."""
     boots, current = _journal_boots()
-    shutdowns = _wtmp_shutdowns()
+    shutdowns, records, rotated = read_wtmp()
     chosen = [boot for boot in sorted(boots, key=lambda b: b['start']) if since is None or boot['end'] >= since]
     for boot in chosen:
         _power_details(boot, shutdowns)
         if boot['id'] == current['id']:
             boot['clean'] = False
+    # Boots older than the journal, known only from wtmp: starts, ends and crashes, but no sleep. They add off
+    # time and counts; their running time stays unknown.
+    first = min((b['start'] for b in boots), default=None)
+    older = []
+    for record in records:
+        end = record['end'] if record['end'] is not None else record['start'] if record['crash'] else None
+        if end is None or end < record['start'] or first is None or end > first or (since is not None and end < since):
+            continue        # still running (the journal has it), damaged, or outside the range read
+        older.append(dict(id='wtmp', start=record['start'], end=end, events=[],
+                          clean=not record['crash'] and any(abs(t - end) <= 120 for t in shutdowns)))
+    chosen = sorted(older, key=lambda b: b['start']) + chosen
     stops = [after['start'] for before, after in zip(chosen, chosen[1:]) if not before['clean']]
-    return chosen, dict(requests=[], stops=stops, wakes=[]), dict(log='journal')
+    return chosen, dict(requests=[], stops=stops, wakes=[]), dict(log='journal', wtmp=rotated)
 
 
 GAP = 600  # seconds. A running desktop writes to the journal constantly; a longer silence means the

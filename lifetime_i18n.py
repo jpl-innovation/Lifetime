@@ -2207,7 +2207,7 @@ _UPTIME_VI = {
     "archived logs could not be read (access denied)": "không đọc được nhật ký lưu trữ (bị từ chối truy cập)",
     "no archived logs found": "không có nhật ký lưu trữ",
     "archived logs could not be read": "không đọc được nhật ký lưu trữ",
-    "{count} older login records read": "đã đọc {count} bản ghi đăng nhập cũ",
+    "{count} rotated login record files read": "đã đọc {count} tệp bản ghi đăng nhập cũ",
     "the system log could not be read": "không đọc được nhật ký hệ thống",
     "Exported reports use this period.": "Báo cáo xuất ra dùng khoảng thời gian này.",
 }

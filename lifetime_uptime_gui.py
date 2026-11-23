@@ -159,7 +159,7 @@ def coverage_line(ledger):
     if note and facts['log'] == 'windows-log':
         parts.append(str(tr(note)))
     if facts['log'] == 'journal' and facts['wtmp']:
-        parts.append(str(tr('{count} older login records read', count=facts['wtmp'])))
+        parts.append(str(tr('{count} rotated login record files read', count=facts['wtmp'])))
     if facts['note'] == 'unavailable':
         parts.append(str(tr('the system log could not be read')))
     return ' · '.join(parts)

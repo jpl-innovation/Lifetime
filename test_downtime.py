@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 import lifetime_downtime as downtime
@@ -327,6 +328,149 @@ class LinuxJournalTests(unittest.TestCase):
         with patch.object(imp, '_journal_boots', return_value=(boots, boots[2])), \
                 patch.object(imp, '_wtmp_shutdowns', return_value=[]), patch.object(imp, '_power_details', side_effect=details):
             self.assertEqual([b['id'] for b in imp.linux_power(since=at('2026-11-18T13:00'))[0]], ['b', 'c'])
+
+
+class DeeperImportTests(unittest.TestCase):
+    """Event 1074, archived System logs and rotated wtmp files, from recorded-shape synthetic data."""
+    event = staticmethod(WindowsLogTests.event)
+
+    @staticmethod
+    def record(provider, identity, when, record, **data):
+        fields = ''.join(f'<Data Name="{key}">{value}</Data>' for key, value in data.items())
+        return (f'<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><Provider Name="{provider}"/>'
+                f'<EventID>{identity}</EventID><TimeCreated SystemTime="{when}"/><EventRecordID>{record}</EventRecordID>'
+                f'</System><EventData>{fields}</EventData></Event>')
+
+    def test_1074_says_who_asked_and_english_type_only(self):
+        raw = '<Events>' + ''.join([
+            self.event('Microsoft-Windows-Kernel-General', 12, '2026-11-18T01:00:00Z'),
+            self.event('User32', 1074, '2026-11-18T10:00:00Z', param1='C:\\Windows\\System32\\shutdown.exe (TEST-PC)',
+                       param2='TEST-PC', param3='Operating System: Upgrade (Planned)', param4='0x80020003',
+                       param5='restart', param6='', param7='EXAMPLE\\someone'),
+            self.event('Microsoft-Windows-Kernel-General', 13, '2026-11-18T10:00:30Z'),
+            self.event('Microsoft-Windows-Kernel-General', 12, '2026-11-18T11:00:00Z'),
+            self.event('User32', 1074, '2026-11-18T12:00:00Z', param1='C:\\Windows\\explorer.exe (TEST-PC)',
+                       param3='Other (Unplanned)', param5='Neu starten', param7='EXAMPLE\\someone'),
+            self.event('Microsoft-Windows-Kernel-General', 13, '2026-11-18T12:00:10Z'),
+            self.event('Microsoft-Windows-Kernel-General', 12, '2026-11-18T14:00:00Z')]) + '</Events>'
+        extras = windows.new_extras()
+        boots, _ = windows._parse_events(windows._tap(windows._xml_events(io.StringIO(raw)), extras))
+        self.assertEqual([r[1]['kind'] for r in extras['requests']], ['restart', None])
+        self.assertEqual(extras['requests'][0][1]['by'], 'shutdown.exe (EXAMPLE\\someone)')
+        self.assertEqual(extras['requests'][0][1]['reason'], 'Operating System: Upgrade (Planned)')
+        result = downtime.from_boots(boots, extras, tz=UTC)
+        day = result['days']['2026-11-18']
+        # An hour off, but Windows was asked to restart; the localized type falls back to the 10-minute rule.
+        self.assertEqual((day['restarts'], day['shutdowns']), (1, 1))
+        restart = next(e for e in result['events'] if e['kind'] == 'restart')
+        self.assertEqual(restart['by'], 'shutdown.exe (EXAMPLE\\someone)')
+        # Names and accounts stay in the event list; the saved day has numbers only.
+        ledger = dict(daily={})
+        downtime.apply(ledger, result, now=at('2026-11-19T00:00:00+00:00'), tz=UTC)
+        self.assertNotIn('someone', json.dumps(ledger))
+        self.assertNotIn('TEST-PC', json.dumps(ledger))
+
+    @staticmethod
+    def fake_wevtutil(outputs):
+        def run(args, **kwargs):
+            code, out = outputs[Path(args[2]).name]
+            return subprocess.CompletedProcess(args, code, out.encode('utf-16-le'), b'Access is denied.' if code else b'')
+        return run
+
+    def test_archives_are_read_once_in_record_order_before_the_live_log(self):
+        folder = Path(tempfile.mkdtemp())
+        for name in ('Archive-System-2026-01-01.evtx', 'Archive-System-2026-03-01.evtx', 'Application.evtx'):
+            (folder / name).write_bytes(b'')
+        start = lambda when, record: self.record('Microsoft-Windows-Kernel-General', 12, when, record)
+        stop = lambda when, record: self.record('Microsoft-Windows-Kernel-General', 13, when, record)
+        outputs = {'Archive-System-2026-01-01.evtx': (0, '<Events>' + start('2026-01-02T08:00:00Z', 10) + stop('2026-01-02T18:00:00Z', 11) + '</Events>'),
+                   # the second archive repeats record 11 and holds one event already in the live log
+                   'Archive-System-2026-03-01.evtx': (0, '<Events>' + stop('2026-01-02T18:00:00Z', 11) + start('2026-03-02T08:00:00Z', 20)
+                                                       + stop('2026-03-02T09:00:00Z', 21) + start('2026-07-03T08:00:00Z', 30) + '</Events>')}
+        with patch.object(windows.subprocess, 'run', side_effect=self.fake_wevtutil(outputs)) as run:
+            events, info = windows.archive_events(before=at('2026-07-03T00:00:00+00:00'), folder=folder)
+        self.assertEqual(info, dict(archives=2, archive_note='read'))
+        self.assertEqual(run.call_count, 2)
+        self.assertTrue(all('/lf:true' in call.args[0] and 'EventID=1074' in ' '.join(call.args[0]) for call in run.call_args_list))
+        self.assertEqual([int(e.find('{*}System/{*}EventRecordID').text) for e in events], [10, 11, 20, 21])
+        boots, _ = windows._parse_events(iter(events))
+        self.assertEqual(len(boots), 2)
+        self.assertTrue(all(b['clean'] for b in boots))
+
+    def test_archives_absent_or_denied_never_fail(self):
+        empty = Path(tempfile.mkdtemp())
+        self.assertEqual(windows.archive_events(folder=empty), ([], dict(archives=0, archive_note='none')))
+        self.assertEqual(windows.archive_events(folder=empty / 'missing'), ([], dict(archives=0, archive_note='none')))
+        with patch.object(windows.os, 'listdir', side_effect=PermissionError('denied')):
+            self.assertEqual(windows.archive_events(folder=empty), ([], dict(archives=0, archive_note='denied')))
+        (empty / 'Archive-System-1.evtx').write_bytes(b'')
+        with patch.object(windows.subprocess, 'run', side_effect=self.fake_wevtutil({'Archive-System-1.evtx': (5, '')})):
+            self.assertEqual(windows.archive_events(folder=empty), ([], dict(archives=0, archive_note='denied')))
+
+    def test_windows_power_reads_archives_then_the_live_log(self):
+        archived = [ET.fromstring(self.record('Microsoft-Windows-Kernel-General', 12, '2026-01-02T08:00:00Z', 1)),
+                    ET.fromstring(self.record('Microsoft-Windows-Kernel-General', 13, '2026-01-02T18:00:00Z', 2))]
+        live = '<Events>' + self.event('Microsoft-Windows-Kernel-General', 12, '2026-07-03T08:00:00Z') + '</Events>'
+        original = subprocess.Popen
+        def popen(args, **kwargs):
+            self.assertTrue(any(str(a).startswith('/q:') for a in args))
+            return original([sys.executable, '-c', f'import sys; sys.stdout.buffer.write({live.encode()!r})'], **kwargs)
+        with patch.object(windows, 'archive_events', return_value=(archived, dict(archives=1, archive_note='read'))), \
+                patch.object(windows, '_first_live_event', return_value=None), \
+                patch.object(windows.subprocess, 'Popen', side_effect=popen):
+            boots, extras, info = windows.windows_power()
+        self.assertEqual(len(boots), 2)
+        self.assertEqual(info, dict(log='windows-log', archives=1, archive_note='read'))
+        result = downtime.from_boots(boots, extras, tz=UTC)
+        self.assertEqual(result['days']['2026-01-02']['shutdowns'], 1)
+        self.assertEqual(downtime.sources_for(result, tz=UTC, **info)['log_from'], '2026-01-02')
+
+    WTMP_OLD = ('reboot   system boot  6.8.0-45-generic Mon Nov  2 08:00:00 2026 - Mon Nov  2 17:00:00 2026  (09:00)\n'
+                'shutdown system down  6.8.0-45-generic Mon Nov  2 17:00:00 2026 - Tue Nov  3 08:00:00 2026  (15:00)\n'
+                'reboot   system boot  6.8.0-45-generic Tue Nov  3 08:00:00 2026 - crash                     (01:00)\n')
+    WTMP_NOW = 'reboot   system boot  6.8.0-45-generic Wed Nov  4 08:00:00 2026   still running\n'
+
+    def test_rotated_wtmp_including_gzip_is_read_with_last_f(self):
+        import gzip
+        folder = Path(tempfile.mkdtemp())
+        (folder / 'wtmp.1').write_bytes(b'one')
+        with gzip.open(folder / 'wtmp.2.gz', 'wb') as stream:
+            stream.write(b'two')
+        (folder / 'wtmp.3.gz').write_bytes(b'not gzip')       # damaged: skipped, never an error
+        seen, copies = [], []
+        def command(args, no_matches=False):
+            if '-f' not in args:
+                return self.WTMP_NOW
+            path = Path(args[args.index('-f') + 1])
+            seen.append(path.read_bytes())
+            copies.append(path)
+            return self.WTMP_OLD if path.read_bytes() == b'two' else ''
+        with patch.object(imp, 'command', side_effect=command):
+            shutdowns, records, rotated = imp.read_wtmp(folder)
+        self.assertEqual(seen, [b'one', b'two'])
+        self.assertEqual(rotated, 2)
+        self.assertFalse(copies[1].exists())          # the decompressed copy is removed
+        self.assertEqual(shutdowns, [at('2026-11-02T17:00:00+00:00')])
+        self.assertEqual([(r['crash'], r['end'] is None) for r in records], [(False, False), (True, True), (False, True)])
+        with patch.object(imp, 'command', side_effect=OSError('no last')):
+            self.assertEqual(imp.read_wtmp(folder), ([], [], 0))
+
+    def test_linux_boots_older_than_the_journal_come_from_wtmp(self):
+        journal = [dict(id='j', start=at('2026-11-04T08:00:00+00:00'), end=at('2026-11-04T12:00:00+00:00'), index=0)]
+        records = imp.parse_wtmp(self.WTMP_OLD + self.WTMP_NOW)
+        def details(item, shutdowns):
+            item.update(events=[], clean=False)
+        with patch.object(imp, '_journal_boots', return_value=(journal, journal[0])), \
+                patch.object(imp, 'read_wtmp', return_value=([at('2026-11-02T17:00:00+00:00')], records, 3)), \
+                patch.object(imp, '_power_details', side_effect=details):
+            boots, extras, info = imp.linux_power()
+        self.assertEqual(info, dict(log='journal', wtmp=3))
+        self.assertEqual([b['id'] for b in boots], ['wtmp', 'wtmp', 'j'])
+        result = downtime.from_boots(boots, extras, tz=UTC)
+        self.assertEqual(result['days']['2026-11-02']['shutdowns'], 1)
+        self.assertEqual(result['days']['2026-11-02']['off_s'], 7*H)
+        self.assertEqual(result['days']['2026-11-03']['off_s'], 8*H)
+        self.assertEqual(result['days']['2026-11-03']['unexpected_stops'], 1)      # the crash record
 
 
 if __name__ == '__main__':

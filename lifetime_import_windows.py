@@ -5,6 +5,10 @@ from collections import Counter
 import ctypes
 import datetime as dt
 import io
+from itertools import chain
+import os
+from pathlib import Path
+import re
 import subprocess
 import sys
 import threading
@@ -161,7 +165,15 @@ def _note(event, extras):
     identity = int(system.findtext('{*}EventID'))
     stamp = _timestamp(system.find('{*}TimeCreated').get('SystemTime'))
     data = {item.get('Name'): item.text or '' for item in event.findall('{*}EventData/{*}Data')}
-    if (provider, identity) in STOPS:
+    if provider == 'User32' and identity == 1074:
+        # Who or what asked for the shutdown or restart. param5 (the type) is localized on some Windows languages:
+        # only the English words are trusted, otherwise the restart rule falls back to the time until the next start.
+        process = re.split(r'[\\/]', re.sub(r'\s*\([^)]*\)\s*$', '', data.get('param1', '')))[-1]
+        user = data.get('param7', '')
+        kind = {'restart': 'restart', 'power off': 'shutdown', 'shutdown': 'shutdown'}.get(data.get('param5', '').strip().lower())
+        extras['requests'].append((stamp, dict(kind=kind, by=(f'{process} ({user})' if user else process)[:200],
+                                               reason=data.get('param3', '')[:200])))
+    elif (provider, identity) in STOPS:
         if not any(abs(stamp - other) < 120 for other in extras['stops'][-3:]):
             extras['stops'].append(stamp)
     elif provider == 'Microsoft-Windows-Power-Troubleshooter' and identity == 1 and data.get('WakeTime'):
@@ -191,11 +203,65 @@ def power_query(since=None):
     return '*[System[(' + ' or '.join(f'EventID={i}' for i in POWER_IDS) + ')' + when + ']]'
 
 
-def _query_system(extras=None, query=None):
+def _first_live_event():
+    """Time of the oldest event in the live System log, or None."""
+    try:
+        result = subprocess.run(['wevtutil', 'qe', 'System', '/c:1', '/rd:false', '/f:xml'], capture_output=True, timeout=30)
+        if result.returncode:
+            return None
+        event = ET.fromstring(result.stdout)
+        return _timestamp(event.find('{*}System/{*}TimeCreated').get('SystemTime'))
+    except (OSError, subprocess.SubprocessError, ET.ParseError, AttributeError, ValueError):
+        return None
+
+
+def archive_events(since=None, before=None, folder=None):
+    """Power events from archived System logs (Archive-System-*.evtx, kept when IT sets the log to archive when full).
+
+    Returns (events in record order, info). Events at or after ``before`` (the live log's first event) are left to
+    the live log, and duplicate record numbers are read once, so copies never double a boot. Missing archives or
+    denied access are reported in ``info['archive_note']``, never raised."""
+    folder = Path(folder or Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'winevt' / 'Logs')
+    try:
+        names = sorted(name for name in os.listdir(folder) if name.lower().startswith('archive-system-') and name.lower().endswith('.evtx'))
+    except PermissionError:
+        return [], dict(archives=0, archive_note='denied')
+    except OSError:
+        return [], dict(archives=0, archive_note='none')
+    found, read, denied, failed = {}, 0, False, False
+    for name in names:
+        try:
+            result = subprocess.run(['wevtutil', 'qe', str(folder / name), '/lf:true', f'/q:{power_query(since)}',
+                                     '/f:xml', '/e:Events', '/uni:true'], capture_output=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            failed = True
+            continue
+        if result.returncode:
+            message = result.stderr.decode('utf-16' if result.stderr.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8', errors='replace')
+            denied = denied or result.returncode == 5 or 'denied' in message.lower()
+            failed = True
+            continue
+        try:
+            root = ET.fromstring(result.stdout)
+            for event in root:
+                system = event.find('{*}System')
+                stamp = _timestamp(system.find('{*}TimeCreated').get('SystemTime'))
+                if before is None or stamp < before:
+                    found[int(system.findtext('{*}EventRecordID') or len(found))] = event
+        except (ET.ParseError, AttributeError, TypeError, ValueError):
+            failed = True
+            continue
+        read += 1
+    note = 'read' if read else 'denied' if denied else 'error' if failed else 'none'
+    return [found[key] for key in sorted(found)], dict(archives=read, archive_note=note)
+
+
+def _query_system(extras=None, query=None, before=()):
     # /uni:true avoids the active code page and localized message decoding.
     # /e:Events supplies a root for iterparse. No message rendering, elevation,
     # event count cap, or query of a restricted log such as Security is needed.
-    # ``extras`` (optional) also collects downtime details from the same stream; ``query`` filters by XPath.
+    # ``extras`` (optional) also collects downtime details from the same stream; ``query`` filters by XPath;
+    # ``before`` are older (archived) events read first, in record order.
     args = ['wevtutil', 'qe', 'System', '/f:xml', '/e:Events', '/rd:false', '/uni:true'] + ([f'/q:{query}'] if query else [])
     errors = bytearray()
     with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
@@ -208,7 +274,7 @@ def _query_system(extras=None, query=None):
         reader.start()
         parse_error = None
         try:
-            events = _xml_events(process.stdout)
+            events = chain(before, _xml_events(process.stdout))
             result = _parse_events(_tap(events, extras) if extras is not None else events)
         except (ET.ParseError, ValueError) as error:
             parse_error = error
@@ -244,16 +310,21 @@ def windows_power(since=None):
 
     Returns (boots, extras, info); raises ValueError when the log cannot be read."""
     extras = new_extras()
+    archived, info = archive_events(since, _first_live_event())
     try:
-        boots, _ = _query_system(extras, power_query(since))
+        boots, _ = _query_system(extras, power_query(since), archived)
     except (OSError, ET.ParseError) as error:
         raise ValueError(f'Cannot read the System event log. {error}') from error
-    return boots, extras, dict(log='windows-log', archives=0, archive_note='none')
+    return boots, extras, dict(log='windows-log', **info)
 
 
 def windows_boots():
     try:
-        boots, stats = _query_system()
+        # Archived System logs add older boots (power events only); the live log is read in full as before.
+        archived, info = archive_events(None, _first_live_event())
+        if info['archives']:
+            print(f"Archived System logs read: {info['archives']}")
+        boots, stats = _query_system(before=archived)
     except (OSError, ET.ParseError) as error:
         raise ValueError('Cannot read the System event log; no history was imported. '
                          f'Check event-log access for this account. {error}') from error
