@@ -179,7 +179,7 @@ class FleetBars(QWidget):
     def mouseMoveEvent(self, event):
         position = event.position()
         index = int((position.y() - self.HEADER) // self.ROW)
-        if self.rows and position.x() >= self.NAME and position.y() >= self.HEADER and index < len(self.rows):
+        if self.rows and self.labels and position.x() >= self.NAME and position.y() >= self.HEADER and index < len(self.rows):
             column = min(len(self.labels) - 1, int((position.x() - self.NAME) / max(1, self.width() - self.NAME) * len(self.labels)))
             bounded_tooltip(self, event.globalPosition().toPoint(), self.tip(index, column))
         else:
@@ -587,6 +587,14 @@ class UptimeUI:
         self.bars_more.setVisible(len(rows) < result['total'])
 
     # ---- Overview: fleet totals for the period ----
+
+    @staticmethod
+    def call_fleet(client, arguments):
+        """The fleet call with the chosen period; a server before 1.3 knows only its last 7 days."""
+        try:
+            return client.call('fleet', **arguments)
+        except ValueError:
+            return client.call('fleet', **{key: value for key, value in arguments.items() if key not in ('start', 'end')})
 
     def fleet_arguments(self):
         """start/end for the store's fleet call: the chosen period, All as the last ten years (trimmed on display)."""

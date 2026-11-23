@@ -217,6 +217,30 @@ class UptimeGuiTests(_Base):
         print(f'\n500 computers x 365 days: classified and painted in {took:.2f} s')
 
 
+    def test_an_older_server_still_gets_the_fleet_and_empty_bars_never_fail(self):
+        from PyQt6.QtCore import QPointF
+        from PyQt6.QtGui import QMouseEvent
+        from PyQt6.QtCore import QEvent, Qt
+        calls = []
+
+        class Old:
+            def call(self, operation, **arguments):
+                calls.append(arguments)
+                if 'start' in arguments:
+                    raise ValueError('Administrative request failed (HTTP 400)')
+                return dict(daily=[])
+        self.assertEqual(self.window.uptime.call_fleet(Old(), dict(day='2026-11-23', start='2026-11-17', end='2026-11-23')),
+                         dict(daily=[]))
+        self.assertEqual(calls[-1], dict(day='2026-11-23'))
+        bars = self.window.uptime.fleet_bars
+        bars.set_rows([dict(device_id='a', name='A', bars=[])], [], 80)
+        bars.resize(600, bars.height())
+        event = QMouseEvent(QEvent.Type.MouseMove, QPointF(400, 30), QPointF(400, 30), Qt.MouseButton.NoButton,
+                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+        bars.mouseMoveEvent(event)
+        bars.grab()
+
+
 def load_tests(loader, tests, pattern):
     return loader.loadTestsFromNames([f'{__name__}.UptimeGuiTests.{name}' for name in dir(UptimeGuiTests)
                                       if name.startswith('test_') and name not in dir(_Base)])

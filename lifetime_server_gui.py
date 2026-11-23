@@ -2747,7 +2747,7 @@ class ServerWindow(QMainWindow):
                          descending=header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder)
         revision, client = self._fleet_revision, self.client
         self._fleet_busy = True
-        if not self._submit(lambda: client.call('fleet', **arguments),
+        if not self._submit(lambda: self.uptime.call_fleet(client, arguments),
                             lambda result, ok: self._fleet_finished(result, ok, revision)):
             self._fleet_busy = False
 
