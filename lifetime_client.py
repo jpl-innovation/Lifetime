@@ -144,20 +144,22 @@ def _secret(value):
 DOWNTIME_CAPABILITY = 'downtime'
 
 
-def add_downtime(message, state, accepted):
+def add_downtime(message, state, accepted, tz=None):
     """1.3.0: add ``history.downtime_daily`` (lifetime_downtime contract) for a server that advertises ``downtime``,
     only while history sharing is allowed. Returns ``message`` itself when nothing is added.
 
     INTEGRATION POINT with worker 4 (server side): lifetime_protocol.validate_sync does not know this field yet, so it
     is added here, after the local outbox validation, never in lifetime_agent._history(). A server advertises the
-    capability only once its validation accepts the field; old servers never receive it. Oldest days are dropped
-    if the message would pass the transport limit."""
+    capability only once its validation accepts the field; old servers never receive it. Days are settled against
+    the history.daily of this same message and checked with the server's rule; oldest days are dropped if the
+    message would pass the transport limit."""
     if (DOWNTIME_CAPABILITY not in accepted or not isinstance(message, dict) or 'history' not in message
             or not (state.get('policy') or {}).get('history')):
         return message
     import lifetime_downtime as downtime
     try:
-        days = downtime.for_server(state.get('ledger') or {})
+        daily = message['history'].get('daily') if isinstance(message['history'].get('daily'), dict) else {}
+        days = downtime.for_server(state.get('ledger') or {}, daily, tz=tz)
     except (TypeError, ValueError, OverflowError, OSError):
         return message
     while days:
@@ -342,7 +344,9 @@ class SyncClient:
         with_downtime = add_downtime(message, state, accepted)
         if with_downtime is not message:
             message = with_downtime
-            self._full = add_downtime(self._full, state, accepted)
+            # the same days in both, worked out once: a second pass a moment later could differ and look like news
+            self._full = dict(self._full, history=dict(self._full['history'],
+                                                       downtime_daily=message['history']['downtime_daily']))
             self._sent_extended = True      # a 400 for it falls back to the 1.1 format for a day, as for other parts
         response = tls.request_json(state['bundle'], '/v1/sync', message,
                                     credential=state['credential'], timeout=self.timeout)

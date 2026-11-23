@@ -542,6 +542,13 @@ class CapabilityTests(SyncFixture):
         self.assertNotIn('downtime_daily', self.calls[-1][1]['history'])
         self.server_capabilities = (*protocol.CAPABILITIES, 'downtime')
         self.report()                                               # the reply brings the new list
+        # Worked out once per report: a second, different reading must not make the sent message look out of date.
+        real = downtime.for_server
+        readings = iter(range(1, 100))
+        def changing(*args, **kwargs):
+            days = real(*args, **kwargs)
+            return {k: dict(v, restarts=next(readings)) for k, v in days.items()}
+        self.enterContext(patch.object(downtime, 'for_server', side_effect=changing))
         status = self.report()
         self.assertEqual((status['status'], status['trimmed']), ('connected', False))
         self.assertEqual(set(self.calls[-1][1]['history']['downtime_daily']), {yesterday})

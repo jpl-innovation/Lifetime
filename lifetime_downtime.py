@@ -15,6 +15,7 @@ FIELDS = ('asleep_s', 'off_s', 'unknown_s', 'restarts', 'shutdowns', 'unexpected
 COUNTS = ('restarts', 'shutdowns', 'unexpected_stops')
 MAX_DAY = 90000          # seconds; a DST day can be 25 hours
 MAX_DAYS = 3660          # days kept and sent, the same limit as daily awake totals
+MAX_COUNT = 10000        # restarts, shutdowns or unexpected stops in one day (the shared contract's limit)
 RESTART_GAP = 600        # a clean stop followed by a start this soon is a restart (locale-free rule)
 FAST_STARTUP_GAP = 120   # a shutdown request followed this soon by hibernation is Windows Fast Startup's "shut down"
 STOP_WINDOW = 900        # Kernel-Power 41 / EventLog 6008 are written within minutes of the next start
@@ -32,6 +33,7 @@ def is_count(value):
 
 def valid_day(value):
     return (isinstance(value, dict) and set(value) == set(FIELDS) and all(is_count(value[k]) for k in FIELDS)
+            and all(value[k] <= MAX_COUNT for k in COUNTS)
             and value['asleep_s'] + value['off_s'] + value['unknown_s'] <= MAX_DAY)
 
 
@@ -209,7 +211,7 @@ def settle(downtime, daily, now=None, tz=None):
         asleep = min(max(0, int(round(_number(entry.get('asleep_s'))))), length - awake)
         off = min(max(0, int(round(_number(entry.get('off_s'))))), length - awake - asleep)
         value = dict(asleep_s=asleep, off_s=off, unknown_s=length - awake - asleep - off,
-                     **{k: max(0, int(_number(entry.get(k)))) for k in COUNTS})
+                     **{k: min(MAX_COUNT, max(0, int(_number(entry.get(k))))) for k in COUNTS})
         if valid_day(value):
             result[key] = value
     cutoff = (today - dt.timedelta(days=MAX_DAYS - 1)).isoformat()
@@ -275,9 +277,22 @@ def sources_for(result, log, archives=0, archive_note='none', now=None, tz=None,
     return value
 
 
-def for_server(ledger, now=None, tz=None):
-    """What a connected computer may send: valid entries only, unknown re-settled, at most MAX_DAYS days."""
-    return settle(ledger.get('downtime_daily') or {}, ledger.get('daily', {}), now, tz)
+def for_server(ledger, daily=None, now=None, tz=None):
+    """What a connected computer may send, settled against ``daily``: the awake totals that travel in the same
+    message (they can be an older snapshot than the ledger's). A day that would fail the server's rule is left out,
+    so one day can never get the whole report refused."""
+    daily = ledger.get('daily', {}) if daily is None else daily
+    days = settle(ledger.get('downtime_daily') or {}, daily, now, tz)
+    return {key: entry for key, entry in days.items() if server_day_ok(entry, daily.get(key, 0))}
+
+
+def server_day_ok(entry, awake):
+    """The server's rule for one day: the contract's shape, counts at most MAX_COUNT, and asleep + off + unknown plus
+    that message's awake seconds at most MAX_DAY."""
+    if not valid_day(entry):
+        return False
+    awake = awake if isinstance(awake, (int, float)) and not isinstance(awake, bool) and math.isfinite(awake) and awake >= 0 else 0
+    return entry['asleep_s'] + entry['off_s'] + entry['unknown_s'] + awake <= MAX_DAY
 
 
 # --- reading: ranges, totals and counts ---

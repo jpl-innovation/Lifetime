@@ -554,11 +554,32 @@ class SendingTests(unittest.TestCase):
         self.assertEqual(len(days), 3)
         self.assertEqual(downtime.problems(days), [])
         self.assertTrue(all(set(day) == set(downtime.FIELDS) for day in days.values()))
-        # unknown is re-settled against the day's awake time before sending: 24 h minus 1 h awake, 1 h asleep, 1 h off
-        self.assertEqual(next(iter(days.values()))['unknown_s'], 86400 - 3 * 3600)
+        # unknown is re-settled against the awake time in this message (none here): 24 h minus 1 h asleep, 1 h off
+        self.assertEqual(next(iter(days.values()))['unknown_s'], 86400 - 2 * 3600)
         self.assertNotIn('downtime_daily', message['history'])         # the original message is unchanged
         # An old server never gets it, even through the existing optional-part filter.
         self.assertNotIn('downtime_daily', protocol.without_extended(add_downtime(message, self.state(), []))['history'])
+
+    def test_days_sent_pass_the_server_rule_against_the_message_own_awake_snapshot(self):
+        """Review item 10: the message carries an older history.daily than the ledger; on a 25-hour day even a few
+        seconds more awake in that snapshot made asleep + off + unknown + awake pass 90,000 and the whole sync fail."""
+        from lifetime_client import add_downtime
+        zone = new_york()
+        state = self.state()
+        state['ledger']['daily']['2026-11-01'] = 2*H
+        state['ledger']['downtime_daily']['2026-11-01'] = entry(asleep_s=10*H, off_s=2*H, unknown_s=13*H, restarts=10001)
+        state['ledger']['downtime_daily']['2026-11-02'] = {'asleep_s': -1}          # damaged: never sent
+        message = self.message()
+        message['history']['daily'] = {**{k: v + 5 for k, v in state['ledger']['daily'].items()}, '2026-11-01': 3*H}
+        sent = add_downtime(message, state, ['downtime'], tz=zone)['history']
+        self.assertIn('2026-11-01', sent['downtime_daily'])
+        self.assertEqual(sent['downtime_daily']['2026-11-02']['asleep_s'], 0)      # repaired, never sent as it was
+        for key, day in sent['downtime_daily'].items():
+            self.assertTrue(downtime.server_day_ok(day, sent['daily'].get(key, 0)), key)
+            self.assertLessEqual(day['asleep_s'] + day['off_s'] + day['unknown_s'] + sent['daily'].get(key, 0), 90000)
+        self.assertEqual(sent['downtime_daily']['2026-11-01']['restarts'], downtime.MAX_COUNT)
+        self.assertFalse(downtime.valid_day(entry(restarts=10001)))
+        self.assertFalse(downtime.server_day_ok(entry(unknown_s=86400), 3601 + 86400 - 86400 + 3600))
 
     def test_stays_under_the_transport_limit_by_dropping_oldest_days(self):
         from lifetime_client import add_downtime
