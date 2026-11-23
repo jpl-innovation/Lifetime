@@ -2282,6 +2282,80 @@ _DIAGNOSTICS_VI = {
     'Windows network {networks} is Public. That does not stop this computer from connecting out; it would only block computers if this computer were the server.':
         'Mạng Windows {networks} là Công cộng (Public). Điều đó không ngăn máy tính này kết nối ra ngoài; nó chỉ chặn các máy tính khác nếu máy này là máy chủ.',
     'Windows network profile: {networks}. None is Public.': 'Loại mạng Windows: {networks}. Không có mạng nào là Công cộng.',
+    # Server Self check (Administration, and LifetimeServerRuntime admin --operation self_check).
+    'Self check': 'Tự kiểm tra',
+    'Checks the addresses, certificate, discovery, firewall and time that computers need. It only reads; nothing is changed.':
+        'Kiểm tra địa chỉ, chứng chỉ, tính năng tìm máy chủ, tường lửa và thời gian mà các máy tính cần. Chỉ đọc, không thay đổi gì.',
+    'Run self check': 'Chạy tự kiểm tra',
+    'Self check could not run.': 'Không thể chạy tự kiểm tra.',
+    'Update Lifetime Server: versions before 1.3.0 have no self check. Then try again.':
+        'Hãy cập nhật Lifetime Server: các phiên bản trước 1.3.0 không có tự kiểm tra. Sau đó thử lại.',
+    'Lifetime Server listens only on {host}: other computers cannot reach it.':
+        'Lifetime Server chỉ lắng nghe trên {host}: các máy tính khác không kết nối tới được.',
+    'Start Lifetime Server with --host 0.0.0.0 (the installer does this unless told otherwise).':
+        'Hãy khởi động Lifetime Server với --host 0.0.0.0 (trình cài đặt làm điều này trừ khi được chỉ định khác).',
+    'Lifetime Server listens on port {port} of every address of this computer: {addresses}.':
+        'Lifetime Server lắng nghe ở cổng {port} trên mọi địa chỉ của máy này: {addresses}.',
+    'Lifetime Server listens on {host}, port {port}.': 'Lifetime Server lắng nghe trên {host}, cổng {port}.',
+    'Computers are told to use {address}.': 'Các máy tính được hướng dẫn dùng {address}.',
+    '{host} means this computer itself: other computers cannot use it.':
+        '{host} nghĩa là chính máy này: các máy tính khác không dùng được tên này.',
+    'Computers still connect by the network search and the IP addresses in the certificate. To give them a name, install the server with --address https://<server name>:{port}.':
+        'Các máy tính vẫn kết nối được qua việc tìm trong mạng và các địa chỉ IP trong chứng chỉ. Để cho chúng một tên, hãy cài máy chủ với --address https://<tên máy chủ>:{port}.',
+    'Computers can still connect by the network search or the IP address. To use the name, ask IT to add {host} to the DNS.':
+        'Các máy tính vẫn kết nối được qua việc tìm trong mạng hoặc địa chỉ IP. Để dùng tên, hãy nhờ IT thêm {host} vào DNS.',
+    'Restart Lifetime Server: it renews the certificate with the names it needs.':
+        'Hãy khởi động lại Lifetime Server: nó sẽ gia hạn chứng chỉ với các tên cần thiết.',
+    "The certificate does not name this server's IP address {addresses}.": 'Chứng chỉ không có địa chỉ IP {addresses} của máy chủ này.',
+    'Computers that find the server by its IP address cannot use it. Add {addresses} under Other server names and IPs (the certificate is renewed with the same key).':
+        'Các máy tính tìm thấy máy chủ qua địa chỉ IP sẽ không dùng được. Hãy thêm {addresses} ở Tên và IP khác của máy chủ (chứng chỉ được gia hạn với cùng khóa).',
+    "The certificate also names this server's IP address {addresses}.": 'Chứng chỉ cũng có địa chỉ IP {addresses} của máy chủ này.',
+    'Discovery is answering on port 5353 (UDP): computers find this server with the code alone.':
+        'Tính năng tìm máy chủ đang trả lời ở cổng 5353 (UDP): các máy tính tìm thấy máy chủ này chỉ với mã.',
+    'Discovery is off: the server listens only on this computer.': 'Tính năng tìm máy chủ đang tắt: máy chủ chỉ lắng nghe trên máy này.',
+    'Discovery is off: port 5353 (UDP) could not be opened. Another program may be using it, such as Bonjour or Avahi.':
+        'Tính năng tìm máy chủ đang tắt: không mở được cổng 5353 (UDP). Có thể chương trình khác đang dùng cổng này, như Bonjour hoặc Avahi.',
+    'Computers can still connect with the connection line from Add device. To turn discovery on, stop the other program and restart Lifetime Server.':
+        'Các máy tính vẫn kết nối được bằng dòng kết nối từ Thêm thiết bị. Để bật tính năng tìm máy chủ, hãy dừng chương trình kia và khởi động lại Lifetime Server.',
+    'Server time: {time} UTC.': 'Giờ máy chủ: {time} UTC.',
+    'Lifetime Server could not renew its certificate. It works until {date}.':
+        'Lifetime Server không gia hạn được chứng chỉ. Chứng chỉ hiện tại dùng được đến {date}.',
+    'Check the server names under Administration > Other server names and IPs, then restart Lifetime Server.':
+        'Hãy kiểm tra tên máy chủ ở Quản trị > Tên và IP khác của máy chủ, rồi khởi động lại Lifetime Server.',
+    'The certificate ends on {date}, in {days} days.': 'Chứng chỉ hết hạn ngày {date}, còn {days} ngày.',
+    'Lifetime Server renews it 30 days before it ends. Restart Lifetime Server; if it still does not renew, look at the server log.':
+        'Lifetime Server gia hạn chứng chỉ 30 ngày trước khi hết hạn. Hãy khởi động lại Lifetime Server; nếu vẫn không gia hạn, hãy xem nhật ký máy chủ.',
+    'The certificate is valid until {date} ({days} days). Lifetime renews it 30 days before.':
+        'Chứng chỉ có hiệu lực đến {date} ({days} ngày). Lifetime gia hạn trước 30 ngày.',
+    'Could not read the Windows firewall and network profiles.': 'Không đọc được tường lửa và loại mạng của Windows.',
+    'The Windows firewall rule LifetimeServer-Connect is missing: other computers cannot reach port {port}.':
+        'Thiếu quy tắc tường lửa Windows LifetimeServer-Connect: các máy tính khác không kết nối được tới cổng {port}.',
+    'Run the Lifetime Server installer again; it adds the rule for the port the server uses.':
+        'Hãy chạy lại trình cài đặt Lifetime Server; nó sẽ thêm quy tắc cho cổng mà máy chủ dùng.',
+    'The Windows firewall rule LifetimeServer-Connect is turned off.': 'Quy tắc tường lửa Windows LifetimeServer-Connect đang tắt.',
+    'Turn it on in Windows Defender Firewall > Inbound rules, or run the Lifetime Server installer again.':
+        'Hãy bật nó trong Windows Defender Firewall > Inbound rules, hoặc chạy lại trình cài đặt Lifetime Server.',
+    'The Windows firewall rule LifetimeServer-Connect allows port {rule_port}, but the server uses port {port}.':
+        'Quy tắc tường lửa Windows LifetimeServer-Connect cho phép cổng {rule_port}, nhưng máy chủ dùng cổng {port}.',
+    'Run the Lifetime Server installer again with the port the server uses.': 'Hãy chạy lại trình cài đặt Lifetime Server với cổng mà máy chủ dùng.',
+    'The Windows firewall rule LifetimeServer-Connect allows port {port} from the local network.':
+        'Quy tắc tường lửa Windows LifetimeServer-Connect cho phép cổng {port} từ mạng nội bộ.',
+    'The network {networks} of this server is Public: Windows lets no computer reach it.':
+        'Mạng {networks} của máy chủ này là Công cộng (Public): Windows không cho máy tính nào kết nối tới.',
+    '{firewall} allows {port}/tcp.': '{firewall} cho phép {port}/tcp.',
+    '{firewall} does not allow {port}/tcp: other computers cannot reach the server.':
+        '{firewall} không cho phép {port}/tcp: các máy tính khác không kết nối được tới máy chủ.',
+    'Run: {command}': 'Chạy: {command}',
+    '{firewall} allows 5353/udp (discovery).': '{firewall} cho phép 5353/udp (tìm máy chủ).',
+    '{firewall} does not allow 5353/udp: computers cannot find the server with the code alone.':
+        '{firewall} không cho phép 5353/udp: các máy tính không tìm được máy chủ chỉ với mã.',
+    'ufw is on, but only an administrator can read its rules.': 'ufw đang bật, nhưng chỉ quản trị viên mới đọc được các quy tắc của nó.',
+    'Run: sudo ufw status. It must allow {port}/tcp and 5353/udp from the local network.':
+        'Chạy: sudo ufw status. Nó phải cho phép {port}/tcp và 5353/udp từ mạng nội bộ.',
+    'firewalld is on, but its rules could not be read.': 'firewalld đang bật, nhưng không đọc được các quy tắc của nó.',
+    'Run: sudo firewall-cmd --list-all. It must allow {port}/tcp and the mdns service from the local network.':
+        'Chạy: sudo firewall-cmd --list-all. Nó phải cho phép {port}/tcp và dịch vụ mdns từ mạng nội bộ.',
+    'No firewall (ufw or firewalld) is on: nothing blocks port {port}.': 'Không có tường lửa nào (ufw hoặc firewalld) đang bật: không gì chặn cổng {port}.',
 }
 for _key, _text in _DIAGNOSTICS_VI.items():
     EN.setdefault(_key, _key)

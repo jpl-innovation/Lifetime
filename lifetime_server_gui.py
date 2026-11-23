@@ -1392,6 +1392,57 @@ class ServerWindow(QMainWindow):
             value = values.get(key)
             label.setText(missing if value is None else str(value))
 
+    # Self check (1.3.0 diagnostics): what computers need from this server, one line each with what to do.
+    CHECK_WORDS = {'good': 'Passed', 'warning': 'Check', 'danger': 'Problem', 'info': 'Info', 'neutral': 'Skipped'}
+
+    def _make_self_check(self):
+        panel, layout = self._section('Self check')
+        self.access_ui.gate(panel, 'self_check')
+        note = self.label('Checks the addresses, certificate, discovery, firewall and time that computers need. It only reads; nothing is changed.')
+        note.setObjectName('muted')
+        layout.addWidget(note)
+        self.self_check_button = self.button('Run self check', self.run_self_check)
+        layout.addWidget(self.self_check_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.self_check_rows = QVBoxLayout()
+        self.self_check_rows.setSpacing(10)
+        layout.addLayout(self.self_check_rows)
+        self._self_check = None
+        self.admin_layout.addWidget(panel)
+
+    def run_self_check(self):
+        client = self.client
+        self._submit(lambda: client.call('self_check'), self._self_check_finished, self.self_check_button)
+
+    def _self_check_finished(self, result, success):
+        if success:
+            self._self_check = result
+            checks = result.get('checks') or []
+        else:
+            checks = [dict(state='danger', text='Self check could not run.', values={},
+                           fix='Update Lifetime Server: versions before 1.3.0 have no self check. Then try again.')]
+        while self.self_check_rows.count():
+            item = self.self_check_rows.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for check in checks:
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(StatusChip(check['state'], self.t(self.CHECK_WORDS.get(check['state'], 'Info'))), 0, Qt.AlignmentFlag.AlignTop)
+            words = QVBoxLayout()
+            words.setSpacing(2)
+            for key, muted in ((check['text'], False), (check.get('fix'), True)):
+                if key:
+                    label = QLabel(self.t(key, **check['values']) if not muted else
+                                   self.t('What to do: {fix}', fix=self.t(key, **check['values'])))
+                    label.setWordWrap(True)
+                    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                    if muted:
+                        label.setObjectName('muted')
+                    words.addWidget(label)
+            line.addLayout(words, 1)
+            self.self_check_rows.addWidget(row)
+
     def _make_admin(self):
         self.admin_layout = self._scroll_page('Administration')
         self.admin_layout.setContentsMargins(32, 24, 32, 24)
@@ -1493,6 +1544,7 @@ class ServerWindow(QMainWindow):
         organisation_row.addWidget(gate(self.button('Save organisation', lambda: self._mutate('organisation', dict(name=self.organisation_edit.text()))), 'organisation'))
         form.addRow(self.label('Organisation'), organisation_row)
         self.admin_layout.addWidget(server)
+        self._make_self_check()
         log_panel, log_layout = self._section('Server log')
         log_note = self.label('Recent server events: starts and stops, certificate renewals and refused requests. No report contents or codes are kept.')
         log_note.setObjectName('muted')
@@ -1812,6 +1864,8 @@ class ServerWindow(QMainWindow):
             self._render_fleet_detail(None)
         if self._admin_result:
             self._render_server_info(self._admin_result)
+        if getattr(self, '_self_check', None):
+            self._self_check_finished(self._self_check, True)
         self.detail_hint.set_state('off', self.t('Select a computer to see its details.'))
         self._detail_shown(bool(self._detail) or len(self.selected_device_ids()) == 1)
         if self._detail:
