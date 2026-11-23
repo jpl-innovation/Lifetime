@@ -135,6 +135,8 @@ class WindowPeriodTests(unittest.TestCase):
         self.assertEqual(len(w.history.daily.values), 7)
         self.assertEqual(w.reports_picker.choices.currentData(), '7d')
         self.assertEqual(json.loads((self.directory / 'settings.json').read_text())['period']['choice'], '7d')
+        settings.save_settings(w.settings, self.directory)         # a later save of the window's copy keeps it
+        self.assertEqual(settings.load_settings(self.directory)['period']['choice'], '7d')
         w.period.set('5y')
         start, end = downtime.period_bounds('5y', TODAY)
         self.assertEqual(w.history.daily.dates[0], start)

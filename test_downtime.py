@@ -418,14 +418,40 @@ class DeeperImportTests(unittest.TestCase):
             self.assertTrue(any(str(a).startswith('/q:') for a in args))
             return original([sys.executable, '-c', f'import sys; sys.stdout.buffer.write({live.encode()!r})'], **kwargs)
         with patch.object(windows, 'archive_events', return_value=(archived, dict(archives=1, archive_note='read'))), \
-                patch.object(windows, '_first_live_event', return_value=None), \
+                patch.object(windows, '_first_live_event', return_value=at('2026-07-03T08:00:00+00:00')), \
                 patch.object(windows.subprocess, 'Popen', side_effect=popen):
             boots, extras, info = windows.windows_power()
         self.assertEqual(len(boots), 2)
         self.assertEqual(info, dict(log='windows-log', archives=1, archive_note='read'))
+        # Without a known start of the live log, archives are skipped (they could repeat a boot).
+        with patch.object(windows, 'archive_events') as archives, patch.object(windows, '_first_live_event', return_value=None), \
+                patch.object(windows.subprocess, 'Popen', side_effect=popen):
+            only_live, _, skipped = windows.windows_power()
+        archives.assert_not_called()
+        self.assertEqual((len(only_live), skipped['archive_note']), (1, 'error'))
         result = downtime.from_boots(boots, extras, tz=UTC)
         self.assertEqual(result['days']['2026-01-02']['shutdowns'], 1)
         self.assertEqual(downtime.sources_for(result, tz=UTC, **info)['log_from'], '2026-01-02')
+
+    def test_a_damaged_archive_never_stops_the_import_or_the_hourly_read(self):
+        poisoned = [ET.fromstring(self.record('Microsoft-Windows-Kernel-General', 12, '2026-01-02T08:00:00Z', 1)),
+                    ET.fromstring(self.record('Microsoft-Windows-Power-Troubleshooter', 1, '2026-01-02T09:00:00Z', 2,
+                                              SleepTime='2026-01-02T12:00:00Z', WakeTime='2026-01-02T10:00:00Z'))]
+        live = ('<Events>' + self.event('Microsoft-Windows-Kernel-General', 12, '2026-07-03T08:00:00Z')
+                + self.event('Microsoft-Windows-Kernel-General', 13, '2026-07-03T18:00:00Z')
+                + self.event('Microsoft-Windows-Kernel-General', 12, '2026-07-04T08:00:00Z') + '</Events>')
+        original = subprocess.Popen
+        def popen(args, **kwargs):
+            return original([sys.executable, '-c', f'import sys; sys.stdout.buffer.write({live.encode()!r})'], **kwargs)
+        with patch.object(windows, 'archive_events', return_value=(poisoned, dict(archives=1, archive_note='read'))), \
+                patch.object(windows, '_first_live_event', return_value=at('2026-07-03T08:00:00+00:00')), \
+                patch.object(windows, '_native_boot_time', return_value=at('2026-07-04T08:00:00+00:00')), \
+                patch.object(windows.subprocess, 'Popen', side_effect=popen), contextlib.redirect_stdout(io.StringIO()):
+            boots, _, info = windows.windows_power()
+            self.assertEqual((len(boots), info['archives'], info['archive_note']), (2, 0, 'error'))
+            boots, current = windows.windows_boots()
+        result = imp.rebuild(boots, current, tracker.new_ledger(), tz=UTC)
+        self.assertEqual(result['seconds'], 10*H)            # the live log alone, imported as before
 
     WTMP_OLD = ('reboot   system boot  6.8.0-45-generic Mon Nov  2 08:00:00 2026 - Mon Nov  2 17:00:00 2026  (09:00)\n'
                 'shutdown system down  6.8.0-45-generic Mon Nov  2 17:00:00 2026 - Tue Nov  3 08:00:00 2026  (15:00)\n'

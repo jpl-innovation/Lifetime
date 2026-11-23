@@ -206,7 +206,8 @@ def power_query(since=None):
 def _first_live_event():
     """Time of the oldest event in the live System log, or None."""
     try:
-        result = subprocess.run(['wevtutil', 'qe', 'System', '/c:1', '/rd:false', '/f:xml'], capture_output=True, timeout=30)
+        result = subprocess.run(['wevtutil', 'qe', 'System', '/c:1', '/rd:false', '/f:xml', '/uni:true'],
+                                capture_output=True, timeout=30)
         if result.returncode:
             return None
         event = ET.fromstring(result.stdout)
@@ -305,14 +306,29 @@ def _native_boot_time():
     return stamp
 
 
+def _with_archives(read, since=None):
+    """``read(archived events)``, archives first. Archives are only an addition: without a known start of the live
+    log (needed to avoid reading a boot twice) they are skipped, and if anything in them breaks the read, the live
+    log is read alone. Returns (result, info)."""
+    first = _first_live_event()
+    archived, info = archive_events(since, first) if first is not None else ([], dict(archives=0, archive_note='error'))
+    try:
+        return read(archived), info
+    except ValueError:
+        if not archived:
+            raise
+        return read(()), dict(archives=0, archive_note='error')
+
+
 def windows_power(since=None):
     """Boots and downtime details from the power events in the System log, for ``lifetime_downtime``.
 
     Returns (boots, extras, info); raises ValueError when the log cannot be read."""
-    extras = new_extras()
-    archived, info = archive_events(since, _first_live_event())
+    def read(archived):
+        extras = new_extras()
+        return _query_system(extras, power_query(since), archived)[0], extras
     try:
-        boots, _ = _query_system(extras, power_query(since), archived)
+        (boots, extras), info = _with_archives(read, since)
     except (OSError, ET.ParseError) as error:
         raise ValueError(f'Cannot read the System event log. {error}') from error
     return boots, extras, dict(log='windows-log', **info)
@@ -321,10 +337,9 @@ def windows_power(since=None):
 def windows_boots():
     try:
         # Archived System logs add older boots (power events only); the live log is read in full as before.
-        archived, info = archive_events(None, _first_live_event())
+        (boots, stats), info = _with_archives(lambda archived: _query_system(before=archived))
         if info['archives']:
             print(f"Archived System logs read: {info['archives']}")
-        boots, stats = _query_system(before=archived)
     except (OSError, ET.ParseError) as error:
         raise ValueError('Cannot read the System event log; no history was imported. '
                          f'Check event-log access for this account. {error}') from error

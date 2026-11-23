@@ -700,7 +700,7 @@ class Window(QWidget):
         self.history.layout().itemAt(0).layout().itemAt(0).widget().setText(tr('Activity'))
         # One chosen date range for Activity, Uptime & downtime and Reports, remembered in settings. The Insights
         # range buttons stay (the server and Health use them) but the desktop drives Activity from the picker.
-        self.period = PeriodModel(self.settings.get('period'), lambda value: update_settings({'period': value}, data_dir()))
+        self.period = PeriodModel(self.settings.get('period'), self.save_period)
         self.period.changed.connect(lambda: self.apply_period())
         activity_header = self.history.layout().itemAt(0).layout()
         self.history.ranges.hide()
@@ -1005,6 +1005,11 @@ class Window(QWidget):
             self.refresh()
         except (OSError, ValueError, TypeError, RuntimeError) as error:
             QMessageBox.warning(self, tr('Could not open details'), str(error))
+
+    def save_period(self, value):
+        """Remember the range on disk and in this window's copy, so a later save of ``self.settings`` keeps it."""
+        update_settings({'period': value}, data_dir())
+        self.settings['period'] = value
 
     def prefill_period(self, dialog):
         """The export dialog starts on the period chosen in the app (All = all available history)."""

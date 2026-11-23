@@ -32,6 +32,7 @@ class DashboardShellTests(unittest.TestCase):
             p.start()
         settings = dict(load_settings(self.directory), completed=True, history=True, language='en')
         self.w = gui.Window(settings)
+        self.w.uptime.events_source = lambda: []      # Ctrl+7 opens Uptime: never read the real system log
         self.w.timer.stop()
         self.w.worker.timer.stop()
         self.w.show()
