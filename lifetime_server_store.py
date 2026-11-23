@@ -1141,7 +1141,7 @@ class Store:
     def _retained_history(value, before):
         result = dict(value)
         if before:
-            for field in ('daily', 'imported_daily', 'dated_hourly'):
+            for field in ('daily', 'imported_daily', 'dated_hourly', 'downtime_daily'):
                 if field in result:
                     result[field] = {day: seconds for day, seconds in result[field].items() if day >= before[:10]}
             if 'sessions' in result:

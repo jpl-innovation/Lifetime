@@ -1,4 +1,5 @@
 import copy
+import datetime as dt
 import unittest
 import uuid
 
@@ -11,6 +12,64 @@ def message():
                     seq=1, observed_at='2026-11-07T12:00:00+07:00', awake_seconds=10,
                     measured_seconds=10, imported_seconds=0,
                     totals=dict(measured_seconds=50, imported_seconds=0, baseline_seconds=100))])
+
+
+def day_off(**changes):
+    return dict(dict(asleep_s=25200, off_s=3600, unknown_s=0, restarts=1, shutdowns=1, unexpected_stops=0), **changes)
+
+
+class DowntimeTests(unittest.TestCase):
+    """history.downtime_daily (1.3): the contract shared with the computer that sends it."""
+
+    def with_downtime(self, days, daily=None):
+        value = message()
+        value['policy']['history'] = True
+        value['history'] = dict(daily=daily or {}, downtime_daily=days)
+        return value
+
+    def test_valid_shapes_pass(self):
+        validate_sync(self.with_downtime({'2026-11-20': day_off()}, {'2026-11-20': 57600}))
+        validate_sync(self.with_downtime({}))
+        validate_sync(self.with_downtime({'2026-11-20': day_off(asleep_s=0, off_s=0, unknown_s=90000)}))
+        many = {(dt.date(2016, 1, 1) + dt.timedelta(days=i)).isoformat(): day_off() for i in range(3660)}
+        validate_sync(self.with_downtime(many))
+
+    def test_each_invalid_case_is_refused(self):
+        bad = [
+            [], 'x', None, {'2026-11-20': []}, {'2026-11-20': None},
+            {'2026-11-20': {k: v for k, v in day_off().items() if k != 'restarts'}},     # a field missing
+            {'2026-11-20': day_off(extra=1)},                                         # an unknown field
+            {'2026-11-20': day_off(asleep_s=-1)}, {'2026-11-20': day_off(restarts=-1)},
+            {'2026-11-20': day_off(off_s=1.5)}, {'2026-11-20': day_off(off_s=True)}, {'2026-11-20': day_off(off_s='1')},
+            {'2026-11-20': day_off(unexpected_stops=None)}, {'2026-11-20': day_off(restarts=10001)},
+            {'2026-11-20': day_off(asleep_s=50000, off_s=40000, unknown_s=1)},       # over 90,000 s
+            {'2026-13-01': day_off()}, {'2026-11-1': day_off()}, {'20261120': day_off()}, {'': day_off()},
+            {(dt.date(2016, 1, 1) + dt.timedelta(days=i)).isoformat(): day_off() for i in range(3661)},
+        ]
+        for days in bad:
+            with self.subTest(days=str(days)[:60]), self.assertRaises(ProtocolError):
+                validate_sync(self.with_downtime(days))
+        with self.assertRaises(ProtocolError):      # with that day's awake time it no longer fits in a day
+            validate_sync(self.with_downtime({'2026-11-20': day_off(asleep_s=60000, off_s=0)}, {'2026-11-20': 30001}))
+        refused = self.with_downtime({'2026-11-20': day_off()})
+        refused['policy']['history'] = False        # history not shared: nothing dated may arrive
+        with self.assertRaises(ProtocolError):
+            validate_sync(refused)
+
+    def test_capability_is_advertised_and_gates_sending(self):
+        from lifetime_protocol import CAPABILITIES, without_extended
+        self.assertIn('downtime', CAPABILITIES)
+        value = self.with_downtime({'2026-11-20': day_off()})
+        self.assertNotIn('downtime_daily', without_extended(value, ('history.detail',))['history'])
+        self.assertNotIn('downtime_daily', without_extended(value)['history'])
+        self.assertEqual(without_extended(value, ('downtime',))['history'], value['history'])
+        self.assertIn('downtime_daily', value['history'])        # never mutated
+
+    def test_an_old_computer_without_the_field_still_passes(self):
+        value = message()
+        value['policy']['history'] = True
+        value['history'] = dict(daily={'2026-11-20': 3600})
+        self.assertNotIn('downtime_daily', validate_sync(value)['history'])
 
 
 class ReadingsV2Tests(unittest.TestCase):

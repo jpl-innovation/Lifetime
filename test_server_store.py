@@ -697,6 +697,50 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.ingest(newer['device_id'], secret,
                          message(newer['device_id'], [record(observed=old)]))['retired'], [1])
 
+    def test_downtime_is_stored_with_history_retained_and_checked_in_backups(self):
+        allowed = {'history': True, 'resources': False}
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        off = dict(asleep_s=25200, off_s=3600, unknown_s=0, restarts=1, shutdowns=1, unexpected_stops=0)
+        history = {'daily': {'2026-11-06': 60, '2026-11-07': 20},
+                   'downtime_daily': {'2026-11-06': off, '2026-11-07': dict(off, restarts=0)}}
+        self.store.ingest(device, credential, message(device, policy=allowed, history=history))
+        self.assertEqual(self.store.get_device(device)['history']['downtime_daily'], history['downtime_daily'])
+        # An older computer never sends it: nothing is invented for it.
+        old, old_secret = self.pair(policy=allowed)
+        self.store.ingest(old['device_id'], old_secret, message(old['device_id'], policy=allowed,
+                                                                history={'daily': {'2026-11-07': 20}}))
+        self.assertNotIn('downtime_daily', self.store.get_device(old['device_id'])['history'])
+        # "Delete records before" removes it like every other dated history.
+        self.store.retain('2026-11-07T00:00:00Z')
+        self.assertEqual(self.store.get_device(device)['history']['downtime_daily'], {'2026-11-07': dict(off, restarts=0)})
+        valid = self.root / 'downtime.sqlite'
+        self.store.backup(valid)
+        self.store.restore(valid)
+        self.assertEqual(self.store.get_device(device)['history']['downtime_daily'], {'2026-11-07': dict(off, restarts=0)})
+        bad = self.root / 'bad-downtime.sqlite'
+        bad.write_bytes(valid.read_bytes())
+        db = sqlite3.connect(bad)
+        broken = dict(history, downtime_daily={'2026-11-07': dict(off, off_s=-5)})
+        db.execute('UPDATE devices SET history=? WHERE device_id=?', (json.dumps(broken), device))
+        db.commit()
+        db.close()
+        with self.assertRaises(StoreError):
+            self.store.restore(bad)
+
+    def test_ten_years_of_daily_and_downtime_fit_one_admin_reply(self):
+        """The admin channel answers at most 1 MiB; a computer's detail must fit with the largest history allowed."""
+        from lifetime_protocol import MAX_BYTES, canonical
+        allowed = {'history': True, 'resources': False}
+        request, credential = self.pair(policy=allowed)
+        device = request['device_id']
+        days = [(dt.date(2016, 11, 15) + dt.timedelta(days=i)).isoformat() for i in range(3660)]
+        off = dict(asleep_s=28800, off_s=36000, unknown_s=7200, restarts=12, shutdowns=10, unexpected_stops=3)
+        history = {'daily': {day: 14399.5 for day in days}, 'downtime_daily': {day: off for day in days}}
+        self.store.ingest(device, credential, message(device, policy=allowed, history=history))
+        size = len(canonical(self.store.get_device(device)))
+        self.assertLess(size, MAX_BYTES * 0.6, size)
+
     def test_retention_keeps_latest_stock_but_does_not_invent_retained_usage(self):
         request, credential = self.pair()
         device = request['device_id']
