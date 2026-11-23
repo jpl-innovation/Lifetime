@@ -214,6 +214,32 @@ class UptimeGuiTests(_Base):
         self.window.retranslate()
         self.assertIn('kém nhất trước', self.window.uptime.bars_note.text())
 
+    def test_a_period_chosen_while_bars_load_is_asked_next_and_pages_keep_their_as_of(self):
+        import threading
+        today = dt.date.today()
+        row = dict(device_id='b', name='Flaky', group='', availability=50.0, coverage=100.0, status='ok', outages=1,
+                   longest_outage_s=0, bars=[[120, 120, 0]])
+        self.api.uptime_bars = dict(rows=[row], buckets=[[today.isoformat(), today.isoformat()]], total=3,
+                                    coverage_floor=80, as_of='2026-11-23T05:00:00+00:00')
+        self.load([device(0)])
+        uptime = self.window.uptime
+        gate = threading.Event()
+        self.api.block['uptime_bars'] = gate
+        uptime._bars = None
+        uptime.load_fleet_bars()                        # on its way...
+        self.window.fleet_range.set_key('12m')          # ...when another period is chosen
+        uptime.load_fleet_bars()
+        gate.set()
+        self.wait_idle()
+        import lifetime_uptime
+        wanted = lifetime_uptime.preset_range('12m', today)[0].isoformat()
+        self.assertEqual(self.arguments('uptime_bars')[-1]['start'], wanted)
+        self.assertEqual(uptime._bars[0][0], wanted)
+        del self.api.block['uptime_bars']
+        uptime.bars_more.click()
+        self.wait_idle()
+        self.assertEqual(self.arguments('uptime_bars')[-1]['as_of'], '2026-11-23T05:00:00+00:00')
+
     def test_five_hundred_computers_by_365_days_paint_quickly(self):
         import random
         import time

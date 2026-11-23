@@ -562,6 +562,7 @@ class UptimeUI:
         self._bars = None               # (request, rows, result) of the bars on screen
         self._bars_loaded_at = 0.0
         self._bars_busy = False
+        self._bars_again = None         # a request waiting while another is on its way: False, or True for "more"
         return panel
 
     def _bars_request(self):
@@ -571,30 +572,40 @@ class UptimeUI:
         return start.isoformat(), end.isoformat()
 
     def load_fleet_bars(self, more=False):
-        """Asked when the period changes and at most every five minutes otherwise; "Show more" pages on."""
-        if not hasattr(self, 'fleet_bars') or self._bars_busy:
+        """Asked when the period changes and at most every five minutes otherwise; "Show more" pages on with the
+        first page's "as of", so every page describes the same moment. A request made while one is on its way is
+        kept and sent when that one answers (the latest wins)."""
+        if not hasattr(self, 'fleet_bars'):
+            return
+        if self._bars_busy:
+            self._bars_again = bool(more) and self._bars_again is not False
             return
         request = self._bars_request()
         same = self._bars is not None and self._bars[0] == request
         if not more and same and time.monotonic() - self._bars_loaded_at < BARS_REFRESH_SECONDS:
             return
         offset = len(self._bars[1]) if more and same else 0
+        arguments = dict(start=request[0], end=request[1], offset=offset, limit=BARS_PAGE)
+        if offset and self._bars[2].get('as_of'):
+            arguments['as_of'] = self._bars[2]['as_of']
         client = self.w.client
         self._bars_busy = True
 
         def done(result, success):
             self._bars_busy = False
+            again, self._bars_again = self._bars_again, None
             if not success or not isinstance(result, dict):
                 if not same:
                     self.bars_note.setText(self.t('Uptime bars are unavailable.'))
-                return
-            rows = (self._bars[1] if offset else []) + result['rows']
-            self._bars = (request, rows, result)
-            if not offset:
-                self._bars_loaded_at = time.monotonic()
-            self.render_fleet_bars()
-        self.w._submit(lambda: client.call('uptime_bars', start=request[0], end=request[1], offset=offset, limit=BARS_PAGE),
-                       done, quiet=True)
+            elif request == self._bars_request():       # an answer for a period no longer chosen is not shown
+                rows = (self._bars[1] if offset else []) + result['rows']
+                self._bars = (request, rows, result)
+                if not offset:
+                    self._bars_loaded_at = time.monotonic()
+                self.render_fleet_bars()
+            if again is not None or request != self._bars_request():
+                self.load_fleet_bars(more=bool(again) and request == self._bars_request())
+        self.w._submit(lambda: client.call('uptime_bars', **arguments), done, quiet=True)
 
     def render_fleet_bars(self):
         if not getattr(self, '_bars', None):
