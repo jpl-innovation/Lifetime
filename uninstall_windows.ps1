@@ -39,7 +39,10 @@ $DataDir = Join-Path $env:APPDATA 'Lifetime'
 try {
     Assert-NotLinked $InstallDir
     if ($RemoveData) { Assert-NotLinked $DataDir }
-    Set-Location -LiteralPath $env:USERPROFILE      # never inside the folder being removed
+    # Never inside the folder being removed: PowerShell's location and the process's own working folder (Windows does
+    # not delete a folder a process works in, and Installed apps or a prompt may start this script inside it).
+    Set-Location -LiteralPath $env:USERPROFILE
+    [Environment]::CurrentDirectory = $env:USERPROFILE
 
     # Close this installation's own programs (never another copy elsewhere), as the installer does before an upgrade;
     # the Python version runs as python(w).exe with this folder's scripts. The ledger is saved by atomic replacement.
@@ -65,11 +68,20 @@ try {
 
     $Shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Lifetime.lnk'
     if (Test-Path -LiteralPath $Shortcut) { Assert-NotLinked $Shortcut; Remove-Item -LiteralPath $Shortcut -Force }
-    Remove-Folder $InstallDir
+    $Left = $null
+    try { Remove-Folder $InstallDir } catch { $Left = $_.Exception.Message }
+    # Installed apps lists Lifetime as long as this uninstaller is there to be run again; once it is gone, so is the entry.
+    $Uninstaller = Join-Path $InstallDir 'uninstall_windows.ps1'
     $Entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lifetime'
-    if (Test-Path -LiteralPath $Entry) { Remove-Item -LiteralPath $Entry -Recurse -Force }
+    if (-not (Test-Path -LiteralPath $Uninstaller) -and (Test-Path -LiteralPath $Entry)) { Remove-Item -LiteralPath $Entry -Recurse -Force }
     if ($Closed.Count) { Write-Host 'Lifetime was running and was closed.' }
-    Write-Host 'Lifetime is uninstalled for this Windows user.'
+    if (-not $Left) {
+        Write-Host 'Lifetime is uninstalled for this Windows user.'
+    } elseif (Test-Path -LiteralPath $Uninstaller) {
+        Write-Host "Lifetime could not be removed completely ($Left). Close any window or program using $InstallDir and uninstall again."
+    } else {
+        Write-Host "Lifetime is uninstalled, but some files are left in $InstallDir ($Left). Delete that folder yourself."
+    }
 
     if ($RemoveData) {
         Remove-Folder $DataDir

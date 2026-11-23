@@ -343,5 +343,71 @@ class ServerInstallerModeTests(unittest.TestCase):
             self.assertEqual(mode('-Mode', 'SourceTask'), 'SourceTask')      # named explicitly: kept
 
 
+def sandboxed_uninstaller(root):
+    """uninstall_windows.ps1 installed under ROOT, a temporary %LOCALAPPDATA%/%APPDATA%: the scheduled-task name, the
+    tray Run key and the Installed apps entry are pointed at names and folders that are not this PC's, so running it
+    touches nothing real (process matching is by the temporary folder, so it closes nothing either)."""
+    import uuid
+    text = (PROJECT / 'uninstall_windows.ps1').read_text(encoding='utf-8')
+    for old, new in (("'Lifetime Tracker'", f"'Lifetime Tracker sandbox-{uuid.uuid4().hex}'"),
+                     ("'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'", connect._ps_quote(root / 'run-key')),
+                     ("'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Lifetime'", connect._ps_quote(root / 'entry'))):
+        assert old in text, old
+        text = text.replace(old, new)
+    local, roaming = root / 'local', root / 'roaming'
+    install = local / 'Lifetime'
+    (install / 'assets').mkdir(parents=True)
+    for name in ('Lifetime.exe', 'LifetimeTracker.exe', 'assets/lifetime.ico'):
+        (install / name).write_bytes(b'x')
+    (install / 'uninstall_windows.ps1').write_text(text, encoding='utf-8')
+    (roaming / 'Lifetime').mkdir(parents=True)
+    (roaming / 'Lifetime' / 'ledger.json').write_text('{}')
+    (root / 'entry').mkdir()
+    environment = dict(__import__('os').environ, LOCALAPPDATA=str(local), APPDATA=str(roaming))
+    return install, roaming / 'Lifetime', root / 'entry', environment
+
+
+class UninstallRunTests(unittest.TestCase):
+    """The uninstaller itself, run in temporary folders the way Installed apps or a prompt starts it."""
+
+    def run_uninstaller(self, install, environment, *arguments):
+        return RUN(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                    str(install / 'uninstall_windows.ps1'), *arguments],
+                   cwd=install, env=environment, capture_output=True, text=True,       # working folder inside it
+                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+
+    @WINDOWS
+    def test_started_inside_its_folder_it_removes_the_folder_and_the_installed_apps_entry_and_keeps_the_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install, data, entry, environment = sandboxed_uninstaller(Path(directory))
+            result = self.run_uninstaller(install, environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(install.exists(), result.stdout)
+            self.assertFalse(entry.exists())
+            self.assertTrue((data / 'ledger.json').exists())         # kept without -RemoveData
+            self.assertIn('Lifetime is uninstalled for this Windows user.', result.stdout)
+            self.assertIn('uninstall_agent_windows.ps1', result.stdout)
+
+    @WINDOWS
+    def test_remove_data_also_deletes_the_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install, data, entry, environment = sandboxed_uninstaller(Path(directory))
+            result = self.run_uninstaller(install, environment, '-RemoveData')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(install.exists() or entry.exists() or data.exists())
+
+    @WINDOWS
+    def test_a_file_in_use_leaves_lifetime_listed_while_its_uninstaller_can_still_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install, data, entry, environment = sandboxed_uninstaller(Path(directory))
+            with (install / 'LifetimeTracker.exe').open('rb'):        # Windows refuses to delete an open file
+                result = self.run_uninstaller(install, environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            again = (install / 'uninstall_windows.ps1').exists()
+            self.assertEqual(entry.exists(), again)                  # listed exactly while it can be run again
+            self.assertIn('could not be removed completely' if again else 'some files are left', result.stdout)
+            self.assertTrue((data / 'ledger.json').exists())
+
+
 if __name__ == '__main__':
     unittest.main()
