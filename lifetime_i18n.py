@@ -2241,6 +2241,25 @@ _SERVER_UPTIME_VI = {
         'Mức sẵn sàng trong giờ dự kiến: {value} (độ phủ {coverage})',
     'no outages': 'không có lần mất kết nối',
     '{count} outages, longest {longest}': '{count} lần mất kết nối, lâu nhất {longest}',
+    'Good (99 % or more)': 'Tốt (từ 99 %)',
+    'Partial (75 to 99 %)': 'Một phần (75 đến 99 %)',
+    'Down (under 75 %)': 'Ngừng (dưới 75 %)',
+    'Not expected online': 'Không dự kiến trực tuyến',
+    '{count} computers, worst first; hover a bar for its numbers':
+        '{count} máy, kém nhất trước; di chuột lên một cột để xem số liệu',
+    'Available {percent} of the observed expected hours': 'Sẵn sàng {percent} số giờ dự kiến đã quan sát',
+    'Online {online} · offline {offline} · unknown {unknown}':
+        'Trực tuyến {online} · ngoại tuyến {offline} · chưa xác định {unknown}',
+    'Uptime by computer': 'Thời gian hoạt động theo máy',
+    'Show more computers': 'Hiện thêm máy',
+    'Uptime bars are unavailable.': 'Không lấy được biểu đồ thời gian hoạt động.',
+    'Availability in expected hours per day, worst first. A bar is unknown when monitoring saw less than {floor} % of the expected time.':
+        'Mức sẵn sàng trong giờ dự kiến theo ngày, kém nhất trước. Một cột là chưa xác định khi giám sát thấy ít hơn {floor} % thời gian dự kiến.',
+    'Availability in expected hours per week, worst first. A bar is unknown when monitoring saw less than {floor} % of the expected time.':
+        'Mức sẵn sàng trong giờ dự kiến theo tuần, kém nhất trước. Một cột là chưa xác định khi giám sát thấy ít hơn {floor} % thời gian dự kiến.',
+    'Availability in expected hours per month, worst first. A bar is unknown when monitoring saw less than {floor} % of the expected time.':
+        'Mức sẵn sàng trong giờ dự kiến theo tháng, kém nhất trước. Một cột là chưa xác định khi giám sát thấy ít hơn {floor} % thời gian dự kiến.',
+    'Showing {shown} of {total} computers': 'Đang hiện {shown} trên {total} máy',
 }
 for _key, _text in _SERVER_UPTIME_VI.items():
     EN.setdefault(_key, _key)

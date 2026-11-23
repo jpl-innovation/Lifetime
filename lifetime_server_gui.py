@@ -571,6 +571,7 @@ class ServerWindow(QMainWindow):
         left.addWidget(self.state_strip)
         left.addWidget(self.chart_panel)
         left.addWidget(self.fleet_panel)
+        left.addWidget(self.uptime.fleet_bars_panel())       # one row of daily availability bars per computer
         left.addStretch()
         right = QVBoxLayout(self.overview_right)
         right.setContentsMargins(0, 0, 0, 0)

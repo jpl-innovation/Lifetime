@@ -234,6 +234,8 @@ class FakeAdmin:
             return copy.deepcopy(self.insight_config)
         if operation == 'set_coverage_floor':
             return dict(coverage_floor=arguments['percent'])
+        if operation == 'uptime_bars':
+            return copy.deepcopy(getattr(self, 'uptime_bars', dict(rows=[], buckets=[], total=0, coverage_floor=80)))
         if operation == 'availability':
             return copy.deepcopy(getattr(self, 'availability', dict(devices=[])))
         if operation in ('detail_retention', 'set_detail_retention'):     # 1.3 "Keep detailed records for"

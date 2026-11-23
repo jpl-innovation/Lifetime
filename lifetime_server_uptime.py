@@ -95,6 +95,101 @@ class StackedDays(QWidget):
         super().leaveEvent(event)
 
 
+BAR_COLOR = {'good': 'good', 'partial': 'accent', 'down': 'danger', 'unknown': 'track', 'none': None}
+BAR_TEXT = {'good': 'Good (99 % or more)', 'partial': 'Partial (75 to 99 %)', 'down': 'Down (under 75 %)',
+            'unknown': 'Unknown', 'none': 'Not expected online'}
+BARS_PAGE = 50
+BARS_REFRESH_SECONDS = 300      # the fleet bars cost the server a pass over every computer's presence history
+
+
+class FleetBars(QWidget):
+    """One row per computer, one small bar per day, week or month coloured by availability in expected hours.
+    Paints only the rows in view, so 500 computers x 365 days stay cheap; hover shows the numbers."""
+    ROW, HEADER, NAME = 18, 24, 170
+
+    def __init__(self, translate):
+        super().__init__()
+        self.t = translate
+        self.rows, self.labels, self.floor = [], [], 80
+        self.setMouseTracking(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(self.HEADER + self.ROW)
+
+    def set_rows(self, rows, labels, floor):
+        """rows: the uptime_bars rows (bars of [good, bad, unknown] minutes); labels: one text per bar."""
+        self.rows, self.labels, self.floor = rows, labels, floor
+        self.kinds = [[uptime.bar_status(*bar, floor) for bar in row['bars']] for row in rows]
+        self.setFixedHeight(self.HEADER + self.ROW * max(1, len(rows)))
+        self.setAccessibleDescription(self.t('{count} computers, worst first; hover a bar for its numbers', count=len(rows)))
+        self.update()
+
+    def paintEvent(self, event):
+        palette = tokens()
+        p = QPainter(self)
+        metrics = QFontMetrics(p.font())
+        x = 0.0
+        for kind in ('good', 'partial', 'down', 'unknown', 'none'):
+            box = QRectF(x, 7, 10, 10)
+            if BAR_COLOR[kind]:
+                p.fillRect(box, QColor(palette[BAR_COLOR[kind]]))
+            else:
+                p.setPen(QPen(QColor(palette['line']), 1))
+                p.drawRect(box.adjusted(0.5, 0.5, -0.5, -0.5))
+            words = self.t(BAR_TEXT[kind])
+            p.setPen(QColor(palette['muted']))
+            p.drawText(QRectF(x + 14, 0, metrics.horizontalAdvance(words) + 4, self.HEADER), Qt.AlignmentFlag.AlignVCenter, words)
+            x += 14 + metrics.horizontalAdvance(words) + 14
+        if not self.rows:
+            return
+        area = event.rect()
+        top = max(0, (area.top() - self.HEADER) // self.ROW)
+        bottom = min(len(self.rows), (area.bottom() - self.HEADER) // self.ROW + 1)
+        width = max(1, self.width() - self.NAME)
+        count = max(1, len(self.rows[0]['bars']))
+        pitch = width / count
+        gap = 1 if pitch >= 4 else 0
+        for index in range(top, bottom):
+            y = self.HEADER + index * self.ROW
+            p.setPen(QColor(palette['text']))
+            p.drawText(QRectF(0, y, self.NAME - 8, self.ROW), Qt.AlignmentFlag.AlignVCenter,
+                       metrics.elidedText(self.rows[index]['name'] or self.rows[index]['device_id'],
+                                          Qt.TextElideMode.ElideRight, self.NAME - 8))
+            for column, kind in enumerate(self.kinds[index]):
+                cell = QRectF(self.NAME + column * pitch, y + 3, max(1.0, pitch - gap), self.ROW - 6)
+                if BAR_COLOR[kind]:
+                    p.fillRect(cell, QColor(palette[BAR_COLOR[kind]]))
+                elif pitch >= 3:
+                    p.setPen(QPen(QColor(palette['line']), 1))
+                    p.drawRect(cell.adjusted(0.5, 0.5, -0.5, -0.5))
+
+    def tip(self, index, column):
+        row, (good, bad, unknown) = self.rows[index], self.rows[index]['bars'][column]
+        kind = self.kinds[index][column]
+        lines = [row['name'] or row['device_id'], self.labels[column], self.t(BAR_TEXT[kind])]
+        if good + bad:
+            lines.append(self.t('Available {percent} of the observed expected hours', percent=f'{100 * good / (good + bad):.1f} %'))
+        if kind != 'none':
+            lines.append(self.t('Online {online} · offline {offline} · unknown {unknown}', online=self.w_hours(good),
+                                offline=self.w_hours(bad), unknown=self.w_hours(unknown)))
+        return '\n'.join(lines)
+
+    def w_hours(self, minutes):
+        return self.t('{hours} h {minutes:02} m', hours=minutes // 60, minutes=minutes % 60)
+
+    def mouseMoveEvent(self, event):
+        position = event.position()
+        index = int((position.y() - self.HEADER) // self.ROW)
+        if self.rows and position.x() >= self.NAME and position.y() >= self.HEADER and index < len(self.rows):
+            column = min(len(self.labels) - 1, int((position.x() - self.NAME) / max(1, self.width() - self.NAME) * len(self.labels)))
+            bounded_tooltip(self, event.globalPosition().toPoint(), self.tip(index, column))
+        else:
+            hide_tooltip(self)
+
+    def leaveEvent(self, event):
+        hide_tooltip(self)
+        super().leaveEvent(event)
+
+
 def _qdate(day):
     return QDate(day.year, day.month, day.day)
 
@@ -415,6 +510,82 @@ class UptimeUI:
     def _percent(self, value):
         return self.t('Not available') if value is None else f'{value:g} %'
 
+    # ---- Overview: fleet uptime bars ----
+
+    def fleet_bars_panel(self):
+        w = self.w
+        panel, layout = w._panel()
+        title = w.label('Uptime by computer')
+        title.setObjectName('sectionTitle')
+        layout.addWidget(title)
+        self.bars_note = QLabel()
+        self.bars_note.setObjectName('muted')
+        self.bars_note.setWordWrap(True)
+        layout.addWidget(self.bars_note)
+        self.fleet_bars = FleetBars(self.t)
+        layout.addWidget(self.fleet_bars)
+        footer = QHBoxLayout()
+        self.bars_count = QLabel()
+        self.bars_count.setObjectName('muted')
+        footer.addWidget(self.bars_count, 1)
+        self.bars_more = w.button('Show more computers', lambda: self.load_fleet_bars(more=True))
+        self.bars_more.hide()
+        footer.addWidget(self.bars_more)
+        layout.addLayout(footer)
+        self._bars = None               # (request, rows, result) of the bars on screen
+        self._bars_loaded_at = 0.0
+        self._bars_busy = False
+        return panel
+
+    def _bars_request(self):
+        start, end = (dt.date.fromisoformat(day) for day in self.fleet_arguments().values())
+        if self.w.fleet_range.key() == 'all' and getattr(self, '_fleet_first', None):
+            start = max(start, self._fleet_first)
+        return start.isoformat(), end.isoformat()
+
+    def load_fleet_bars(self, more=False):
+        """Asked when the period changes and at most every five minutes otherwise; "Show more" pages on."""
+        if not hasattr(self, 'fleet_bars') or self._bars_busy:
+            return
+        request = self._bars_request()
+        same = self._bars is not None and self._bars[0] == request
+        if not more and same and time.monotonic() - self._bars_loaded_at < BARS_REFRESH_SECONDS:
+            return
+        offset = len(self._bars[1]) if more and same else 0
+        client = self.w.client
+        self._bars_busy = True
+
+        def done(result, success):
+            self._bars_busy = False
+            if not success or not isinstance(result, dict):
+                if not same:
+                    self.bars_note.setText(self.t('Uptime bars are unavailable.'))
+                return
+            rows = (self._bars[1] if offset else []) + result['rows']
+            self._bars = (request, rows, result)
+            if not offset:
+                self._bars_loaded_at = time.monotonic()
+            self.render_fleet_bars()
+        self.w._submit(lambda: client.call('uptime_bars', start=request[0], end=request[1], offset=offset, limit=BARS_PAGE),
+                       done, quiet=True)
+
+    def render_fleet_bars(self):
+        if not getattr(self, '_bars', None):
+            return
+        request, rows, result = self._bars
+        spans = [(dt.date.fromisoformat(a), dt.date.fromisoformat(b)) for a, b in result['buckets']]
+        kind = 'day' if all(a == b for a, b in spans) else 'month' if any((b - a).days > 7 for a, b in spans) else 'week'
+        self.fleet_bars.set_rows(rows, [self.bucket_text(a, kind) for a, _ in spans], result['coverage_floor'])
+        self.bars_note.setText(self.t(
+            'Availability in expected hours per day, worst first. A bar is unknown when monitoring saw less than {floor} % '
+            'of the expected time.' if kind == 'day' else
+            'Availability in expected hours per week, worst first. A bar is unknown when monitoring saw less than {floor} % '
+            'of the expected time.' if kind == 'week' else
+            'Availability in expected hours per month, worst first. A bar is unknown when monitoring saw less than {floor} % '
+            'of the expected time.', floor=result['coverage_floor']))
+        self.bars_count.setText(self.t('Showing {shown} of {total} computers', shown=len(rows), total=result['total']))
+        self.bars_more.setVisible(len(rows) < result['total'])
+
     # ---- Overview: fleet totals for the period ----
 
     def fleet_arguments(self):
@@ -443,6 +614,8 @@ class UptimeUI:
                 samples = grouped
         w.daily_chart.day_label = lambda day, kind=kind: self.bucket_text(dt.date.fromisoformat(day), kind)
         w.daily_chart.set_samples(samples, self.t('No dated reports yet'), self.t('h'))
+        self._fleet_first = dt.date.fromisoformat(samples[0]['day']) if samples else None
+        self.load_fleet_bars()
         total = result.get('range')
         if total and total.get('seconds') is not None:
             w.fleet_range_total.setText(self.t('{period}: {hours} awake on {count} computers', period=w.fleet_range.label(),
@@ -497,6 +670,7 @@ class UptimeUI:
         locale = QLocale('vi_VN' if self.w.language == 'vi' else 'en_GB')
         for control in self.controls:
             control.retranslate(locale)
+        self.render_fleet_bars()
         if hasattr(self, 'detail_days'):
             self.detail_days.setSuffix(' ' + self.t('days'))
             self.detail_days.setAccessibleName(self.t('Keep detailed records for'))

@@ -40,7 +40,7 @@ READ = frozenset({
     'whoami', 'live', 'overview', 'devices', 'device', 'configuration', 'invitations', 'fleet', 'server_info',
     'pending_enrollments', 'server_log', 'presence', 'alert_rules', 'incidents', 'incident', 'schedules',
     'maintenance', 'alert_summary', 'notifications', 'deliveries', 'time_zones', 'availability', 'coverage_floor',
-    'checks', 'check_scopes', 'updates', 'insights', 'groups', 'detail_retention'})
+    'checks', 'check_scopes', 'updates', 'insights', 'groups', 'detail_retention', 'uptime_bars'})
 AUDIT_READ = frozenset({'audit', 'verify_audit'})
 OPERATE = frozenset({'acknowledge', 'add_maintenance', 'delete_maintenance', 'refresh', 'send_command',
                      'cancel_command', 'wake'})

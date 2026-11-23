@@ -247,6 +247,44 @@ class MonitorAvailabilityTests(MonitorCase):
         with self.assertRaises(Exception):
             self.monitor.availability([ID], start='2016-01-01', end='2026-11-16')          # over 3,660 days
 
+    def test_fleet_uptime_bars_are_worst_first_bucketed_and_small(self):
+        import uuid
+        from lifetime_protocol import MAX_BYTES, canonical
+        laptop, flaky, steady = (str(uuid.UUID(int=n)) for n in (7, 8, 9))
+        self.fleet.add(laptop, name='Laptop', laptop=True)       # no schedule: never expected online
+        self.fleet.add(flaky, name='Flaky')
+        self.fleet.add(steady, name='Steady')
+        for device_id in (flaky, steady):
+            self.monitor.set_schedule('device', 'always', key=device_id, timezone='UTC')
+        self.monitor.tick()                                       # 09:00 Monday 16 November, all online
+        self.clock.advance(hours=1)
+        self.fleet.offline(self.clock.now, flaky)
+        self.monitor.tick()
+        self.clock.advance(hours=2)
+        self.fleet.online(self.clock.now, flaky)
+        self.monitor.tick()
+        self.clock.advance(hours=1)
+        self.monitor.tick()                                       # 13:00
+        result = self.monitor.uptime_bars('2026-11-15', '2026-11-16', kind='day')
+        self.assertEqual([row['name'] for row in result['rows']], ['Flaky', 'Steady', 'Laptop'])
+        self.assertEqual(result['buckets'], [['2026-11-15', '2026-11-15'], ['2026-11-16', '2026-11-16']])
+        flaky_row = result['rows'][0]
+        self.assertEqual(flaky_row['bars'], [[0, 0, 1440], [120, 120, 540]])     # minutes: good, bad, unknown
+        self.assertEqual((flaky_row['outages'], flaky_row['longest_outage_s']), (1, 7200))
+        self.assertEqual(result['rows'][2]['bars'], [[0, 0, 0], [0, 0, 0]])     # not expected: no bars to colour
+        self.assertEqual(self.monitor.uptime_bars('2025-11-17', '2026-11-16')['buckets'][0], ['2025-11-17', '2025-11-23'])
+        page = self.monitor.uptime_bars('2026-11-15', '2026-11-16', kind='day', offset=1, limit=1)
+        self.assertEqual(([row['name'] for row in page['rows']], page['total']), (['Steady'], 3))
+        for arguments in (dict(start='2026-11-16', end='2026-11-15'), dict(start=None, end=None),
+                          dict(start='2026-11-15', end='2026-11-16', kind='hour'),
+                          dict(start='2026-11-15', end='2026-11-16', limit=101)):
+            with self.subTest(arguments=arguments), self.assertRaises(Exception):
+                self.monitor.uptime_bars(**arguments)
+        # The largest page the dashboard can ask for still fits the 1 MiB admin reply.
+        row = dict(flaky_row, name='x' * 64, bars=[[1440, 1440, 1440]] * 366)
+        self.assertLess(len(canonical(dict(result, rows=[row] * 100, buckets=[['2026-01-01', '2026-01-01']] * 366))),
+                        MAX_BYTES * 0.8)
+
 
 if __name__ == '__main__':
     unittest.main()

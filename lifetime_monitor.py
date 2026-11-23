@@ -298,6 +298,7 @@ class Monitor:
         self.started_at = None
         self.checker, self.blocked_ports = None, set()
         self._housekeeping_at = None
+        self._bars_cache = None      # (request, rows): the last fleet uptime bars, reused while paging
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(path), timeout=15, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -1194,6 +1195,45 @@ class Monitor:
                     timezone=f'local (UTC{offset[:3]}:{offset[3:]})' if name == 'local' else name,
                     zone_source=schedule['scope'], zone_ok=zone_ok, schedule=schedule['kind'],
                     laptop=device.get('laptop'), incidents=incidents)
+
+    def uptime_bars(self, start, end, kind=None, offset=0, limit=50, as_of=None):
+        """Every monitored computer's availability over start..end in day, week or month bars (lifetime_uptime.buckets;
+        by default as many as keep a chart readable), worst first: lowest availability, then too little evidence, then
+        not expected online. Each bar is [good, bad, unknown] minutes of expected-online time, so the reply for 100
+        computers x 366 days stays small. The computation is reused while the same range is paged within a minute."""
+        first, last = self._period(start, end)
+        if (first is None or kind not in (None, 'day', 'week', 'month') or type(offset) is not int or offset < 0
+                or type(limit) is not int or not 1 <= limit <= 100):
+            raise MonitorError('Invalid uptime bars request')
+        now = min(_time(as_of), self.clock()) if as_of is not None else self.clock()
+        floor = self.coverage_floor()
+        spans = uptime.buckets(first, last, kind)
+        key = (first, last, kind, floor, _stamp(now)[:16])
+        if self._bars_cache and self._bars_cache[0] == key:
+            rows = self._bars_cache[1]
+        else:
+            devices = self.store.monitor_snapshot() if self.store is not None else []
+            rows = []
+            with self._lock:
+                for device in devices:
+                    found = self._device_availability(self._db, device, first, last, now, floor, True)
+                    days, bars, index = found['daily'], [], 0
+                    for span_start, span_end in spans:
+                        width = (span_end - span_start).days + 1
+                        part = days[index:index + width]
+                        index += width
+                        bars.append([round(sum(day[field] for day in part) / 60) for field in ('good_s', 'bad_s', 'unknown_s')])
+                    rows.append(dict(device_id=device['device_id'], name=device.get('name', ''),
+                                     group=device.get('group', ''), availability=found['availability'],
+                                     coverage=found['coverage'], status=found['status'], outages=found['outages'],
+                                     longest_outage_s=found['longest_outage_s'], bars=bars))
+            order = {'ok': 0, 'insufficient': 1, 'not-scheduled': 2}
+            rows.sort(key=lambda row: (order[row['status']], 101 if row['availability'] is None else row['availability'],
+                                       row['name'].casefold(), row['device_id']))
+            self._bars_cache = (key, rows)
+        return dict(as_of=_stamp(now), coverage_floor=floor, start=first.isoformat(), end=last.isoformat(),
+                    buckets=[[a.isoformat(), b.isoformat()] for a, b in spans], total=len(rows),
+                    rows=rows[offset:offset + limit])
 
     def presence(self, device_id, limit=100):
         if type(limit) is not int or not 1 <= limit <= 500:

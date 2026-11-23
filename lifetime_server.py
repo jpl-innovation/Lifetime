@@ -316,6 +316,7 @@ _ADMIN = {
     'set_coverage_floor': ('monitor.set_coverage_floor', ('percent',), ()),
     'coverage_floor': ('monitor.coverage_floor', (), ()),
     'detail_retention': ('monitor.detail_retention', (), ()),
+    'uptime_bars': ('monitor.uptime_bars', ('start', 'end'), ('kind', 'offset', 'limit', 'as_of')),
     'set_detail_retention': ('monitor.set_detail_retention', ('days',), ()),
     'checks': ('monitor.checks', (), ()),
     'save_check': ('monitor.save_check', ('check',), ('check_id',)),

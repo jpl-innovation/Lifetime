@@ -22,7 +22,7 @@ OPERATIONS = frozenset((
     'set_check_scopes', 'whoami', 'roles', 'set_role', 'delete_role', 'audit', 'verify_audit', 'backup_archive',
     'verify_backup', 'stage_restore', 'updates', 'upload_update', 'set_update', 'rollback_update',
     'insights', 'set_insight_settings', 'set_sleep_policy', 'groups', 'add_group', 'remove_group', 'rename_group',
-    'detail_retention', 'set_detail_retention'))
+    'detail_retention', 'set_detail_retention', 'uptime_bars'))
 
 
 class NotAllowed(ValueError):

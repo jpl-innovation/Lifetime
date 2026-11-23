@@ -167,6 +167,55 @@ class UptimeGuiTests(_Base):
         self.window._render_daily(self.window._detail)
         self.assertIn('Lifetime trước 1.3', uptime.downtime_coverage.text())
 
+    def test_fleet_uptime_bars_on_the_overview(self):
+        today = dt.date.today()
+        days = [(today - dt.timedelta(days=offset)).isoformat() for offset in (1, 0)]
+        rows = [dict(device_id='b', name='Flaky', group='', availability=50.0, coverage=100.0, status='ok', outages=1,
+                     longest_outage_s=7200, bars=[[120, 120, 0], [600, 0, 0]]),
+                dict(device_id='c', name='Laptop', group='', availability=None, coverage=None, status='not-scheduled',
+                     outages=0, longest_outage_s=0, bars=[[0, 0, 0], [0, 0, 0]])]
+        self.api.uptime_bars = dict(rows=rows, buckets=[[day, day] for day in days], total=3, coverage_floor=80)
+        self.window.uptime._bars = None         # the window's first load (no computers) is otherwise kept five minutes
+        self.load([device(0)])
+        call = self.arguments('uptime_bars')[-1]
+        self.assertEqual((call['end'], call['offset'], call['limit']), (today.isoformat(), 0, 50))
+        bars = self.window.uptime.fleet_bars
+        self.assertEqual(bars.kinds, [['down', 'good'], ['none', 'none']])
+        tip = bars.tip(0, 0)
+        self.assertIn('Flaky', tip)
+        self.assertIn('Down (under 75 %)', tip)
+        self.assertIn('Available 50.0 % of the observed expected hours', tip)
+        self.assertIn('offline 2 h 00 m', tip)
+        self.assertIn('Not expected online', bars.tip(1, 1))
+        self.assertTrue(self.window.uptime.bars_more.isVisibleTo(self.window))
+        self.assertEqual(self.window.uptime.bars_count.text(), 'Showing 2 of 3 computers')
+        self.window.uptime.bars_more.click()
+        self.wait_idle()
+        self.assertEqual(self.arguments('uptime_bars')[-1]['offset'], 2)
+        self.assertEqual(len(bars.rows), 4)                     # the fake answers the same page again
+        bars.grab()                                              # paints in either theme without error
+        self.window.language = 'vi'
+        self.window.retranslate()
+        self.assertIn('kém nhất trước', self.window.uptime.bars_note.text())
+
+    def test_five_hundred_computers_by_365_days_paint_quickly(self):
+        import random
+        import time
+        from lifetime_server_uptime import FleetBars
+        chance = random.Random(3)
+        rows = [dict(device_id=str(n), name=f'PC-{n:03}', bars=[[chance.choice((1440, 1300, 700, 0)), chance.choice((0, 60, 700)),
+                                                                   chance.choice((0, 0, 1440))] for _ in range(365)])
+                for n in range(500)]
+        bars = FleetBars(lambda key, **values: key.format(**values))
+        bars.resize(1000, 100)
+        began = time.perf_counter()
+        bars.set_rows(rows, [str(n) for n in range(365)], 80)
+        image = bars.grab()                                      # every row: the worst case, nothing scrolled away
+        took = time.perf_counter() - began
+        self.assertEqual(image.height(), FleetBars.HEADER + 500 * FleetBars.ROW)
+        self.assertLess(took, 10)
+        print(f'\n500 computers x 365 days: classified and painted in {took:.2f} s')
+
 
 def load_tests(loader, tests, pattern):
     return loader.loadTestsFromNames([f'{__name__}.UptimeGuiTests.{name}' for name in dir(UptimeGuiTests)
