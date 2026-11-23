@@ -1,3 +1,35 @@
+## Next release
+
+Not released yet. Items marked *(not yet tried on a real machine)* passed the automatic tests only.
+
+### Installing and setting up
+
+- **Linux: Lifetime Server dashboard from the app menu.** `sudo ./install_server_linux.sh` makes the person who ran
+  it Admin (as `--admin USER` did) and shows **Lifetime Server** in their app menu when Lifetime for Linux is
+  installed; installing Lifetime for Linux on a computer that has the server shows it too. The dashboard finds the
+  server by itself (no `--directory` or `--admin-port`). Sign out and back in once after installing.
+  *(not yet tried on a real machine)*
+- **Linux AppImage on a computer with Lifetime Server:** started without arguments it asks whether to open the
+  **Lifetime Server** dashboard or Lifetime, in English or Vietnamese, and remembers the answer when *Remember my
+  choice* is ticked (`--run-tool Lifetime` always opens Lifetime). *(not yet tried on a real machine)*
+- **Windows: uninstaller.** Lifetime is listed in **Settings > Apps > Installed apps**; *Uninstall* runs
+  `uninstall_windows.ps1`, which closes Lifetime and removes its sign-in task, Start menu shortcut and program folder.
+  Your history in `%APPDATA%\Lifetime` is kept unless you run it with `-RemoveData`. A computer connected to a server
+  keeps its machine agent: an administrator removes it with `uninstall_agent_windows.ps1`. Versions before this one
+  are listed after installing this version over them. *(tested in temporary folders only, not yet on a real install)*
+- **Windows: version information in every program** (product name Lifetime, the program's own description, JPL
+  Innovation, the version), which code signing requires. Checked on one test program built here; the release
+  programs are built by CI.
+- **Linux: `LifetimeAgent --connection-stdin` accepts a code without `--server`** and finds the server on the network,
+  as the Connect page does.
+
+### Tests that would have caught 1.2.1
+
+- **CI pairs a Linux computer with a Linux server by typing the code only**, in two Ubuntu containers whose own names
+  resolve to 127.0.1.1 as on Ubuntu, with a server name that does not resolve. *(new CI job; it runs at the next
+  push)*
+- A test keeps the Windows Server installer using the ready-made server program (no Python) when no `-Mode` is given.
+
 ## Lifetime 1.2.1
 
 Fixes for connecting computers to a server, and a Windows Server install that needs no Python. Made by JPL Innovation.
