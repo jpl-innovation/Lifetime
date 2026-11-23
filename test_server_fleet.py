@@ -224,6 +224,12 @@ class FleetGuiTests(unittest.TestCase):
         self.wait()
         self.assertEqual(self.window.kpis['Awake today'].text(), 'Not available')
         self.assertTrue(all(r['today'] is None for r in self.window._fleet_result['rows']))
+        # Since 1.3.0 the chart follows the chosen period, not the selected day: a period a year back has no
+        # history, and its days stay empty instead of becoming zero.
+        last = self.window.fleet_date.date().toPyDate()
+        self.window.fleet_range.set_custom(last - dt.timedelta(days=29), last)
+        self.wait()
+        self.assertEqual(len(self.window.daily_chart.samples), 30)
         self.assertFalse(any(s['seconds'] is not None for s in self.window.daily_chart.samples))
 
     def test_pending_approval_and_invitation_revocation_from_admin(self):

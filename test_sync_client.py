@@ -226,7 +226,9 @@ class SyncTests(SyncFixture):
 
     def test_retired_sequences_are_acknowledged_and_removed(self):
         self.pair()
-        self.store.retain('2027-01-01T00:00:00+00:00')
+        # Everything the fake clock records is older than now, so a boundary of now retires it (the server
+        # refuses a boundary in the future since 1.3.0).
+        self.store.retain(dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat())
         self.sample()
         self.assertEqual(self.client.step(force=True)['status'], 'connected')
         self.assertEqual(self.machine.status()['pending'], 0)
@@ -536,7 +538,7 @@ class CapabilityTests(SyncFixture):
                 received.append(days)
             return protocol.validate_sync(message)
         self.enterContext(patch.object(storage, 'validate_sync', side_effect=server_1_3))
-        self.server_capabilities = protocol.CAPABILITIES            # a 1.2 server: no downtime capability
+        self.server_capabilities = tuple(c for c in protocol.CAPABILITIES if c != 'downtime')   # a 1.2 server
         self.report()
         self.report()
         self.assertNotIn('downtime_daily', self.calls[-1][1]['history'])
