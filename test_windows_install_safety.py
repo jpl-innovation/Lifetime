@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -407,6 +408,55 @@ class UninstallRunTests(unittest.TestCase):
             self.assertEqual(entry.exists(), again)                  # listed exactly while it can be run again
             self.assertIn('could not be removed completely' if again else 'some files are left', result.stdout)
             self.assertTrue((data / 'ledger.json').exists())
+
+
+class InstalledAppsBehaviourTests(unittest.TestCase):
+    """Behaviour of the uninstall pieces that the source checks above only read."""
+
+    @WINDOWS
+    def test_the_uninstaller_closes_this_installations_running_python_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install, data, entry, environment = sandboxed_uninstaller(Path(directory))
+            (install / 'lifetime_tracker.py').write_text('import time\ntime.sleep(120)\n', encoding='utf-8')
+            tracker = subprocess.Popen([sys.executable, str(install / 'lifetime_tracker.py')], cwd=directory,
+                                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            try:
+                time.sleep(1)
+                result = UninstallRunTests.run_uninstaller(self, install, environment)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIsNotNone(tracker.poll(), 'the tracker of this installation kept running')
+                self.assertIn('Lifetime was running and was closed.', result.stdout)
+                self.assertFalse(install.exists() or entry.exists())
+            finally:
+                if tracker.poll() is None:
+                    tracker.kill()
+
+    @WINDOWS
+    def test_the_installer_writes_the_installed_apps_entry_with_the_version_and_the_uninstaller(self):
+        import json
+        import uuid
+        from lifetime_reports import VERSION
+        install = (PROJECT / 'install_windows_common.ps1').read_text(encoding='utf-8').replace('\r\n', '\n')
+        block = install[install.index('# Windows "Installed apps" entry'):install.index('if ($Admin) {\n    $Owner')]
+        root = f'HKCU:\\Software\\LifetimeTest-{uuid.uuid4().hex}'      # a throwaway key, removed below
+        real = '"Registry::HKEY_USERS\\$Sid\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Lifetime"'
+        self.assertIn(real, block)
+        block = block.replace(real, connect._ps_quote(root + '\\Lifetime')).replace('$PSScriptRoot', connect._ps_quote(PROJECT))
+        script = ("$ErrorActionPreference = 'Stop'; $Sid = 'S-1-5-21-0'; $ExePackage = $true\n"
+                  "$InstallDir = 'C:\\Users\\A\\AppData\\Local\\Lifetime'; $Gui = Join-Path $InstallDir 'Lifetime.exe'\n"
+                  + block + '\nGet-ItemProperty -LiteralPath ' + connect._ps_quote(root + '\\Lifetime') + ' | ConvertTo-Json\n')
+        try:
+            result = powershell(script)
+        finally:
+            powershell(f'Remove-Item -LiteralPath {connect._ps_quote(root)} -Recurse -Force -ErrorAction SilentlyContinue')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('not listed in Installed apps', result.stdout)
+        values = json.loads(result.stdout[result.stdout.index('{'):])
+        self.assertEqual((values['DisplayName'], values['DisplayVersion'], values['Publisher']), ('Lifetime', VERSION, 'JPL Innovation'))
+        self.assertEqual(values['UninstallString'], 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File '
+                         '"C:\\Users\\A\\AppData\\Local\\Lifetime\\uninstall_windows.ps1" -Pause')
+        self.assertEqual(values['DisplayIcon'], 'C:\\Users\\A\\AppData\\Local\\Lifetime\\Lifetime.exe')
+        self.assertEqual((values['NoModify'], values['NoRepair']), (1, 1))
 
 
 if __name__ == '__main__':

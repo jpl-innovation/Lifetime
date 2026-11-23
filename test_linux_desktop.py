@@ -297,5 +297,59 @@ class AppImageStartTests(unittest.TestCase):
         self.assertIn("os.execve(program, [program, '--language', language]", gui)     # the AppImage stays mounted
 
 
+class ShellBehaviourTests(unittest.TestCase):
+    """The shell code itself, run in bash with stand-ins for what needs root or an AppImage."""
+
+    @WITH_BASH
+    def test_apprun_marks_only_a_start_without_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'usr' / 'lib' / 'lifetime').mkdir(parents=True)
+            for name in ('Lifetime', 'LifetimeServerDashboard'):
+                program = root / 'usr' / 'lib' / 'lifetime' / name
+                program.write_text('#!/bin/sh\necho "' + name + ' ${LIFETIME_APPIMAGE_START:-unmarked} $*"\n', newline='\n')
+                program.chmod(0o755)
+            apprun = root / 'AppRun'
+            apprun.write_bytes((PROJECT / 'packaging' / 'linux' / 'AppRun').read_bytes().replace(b'\r\n', b'\n'))
+            environment = {key: value for key, value in os.environ.items() if key != 'LIFETIME_APPIMAGE_START'}
+
+            def start(*arguments):
+                return subprocess.run([BASH, apprun.as_posix(), *arguments], capture_output=True, text=True,
+                                      env=environment, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            self.assertEqual(start().stdout.strip(), 'Lifetime 1')                      # may ask
+            self.assertEqual(start('--tray').stdout.strip(), 'Lifetime unmarked --tray')
+            self.assertEqual(start('--run-tool', 'Lifetime').stdout.strip(), 'Lifetime unmarked')     # never asks
+            self.assertEqual(start('--run-tool', 'LifetimeServerDashboard').stdout.strip(),
+                             'LifetimeServerDashboard unmarked')
+            self.assertEqual(start('--run-tool', 'Other').returncode, 2)
+
+    @WITH_BASH
+    def test_the_server_installer_shows_the_admins_menu_entry_editing_it_as_them(self):
+        server = (PROJECT / 'install_server_linux.sh').read_text(encoding='utf-8').replace('\r\n', '\n')
+        block = server[server.index('# Lifetime for Linux already installed for that person'):
+                       server.index("printf 'Group membership takes effect")]
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            # /etc/passwd separates fields with ':', so Git for Windows' bash gets /c/... for C:/...
+            passwd_home = home.as_posix()
+            if sys.platform == 'win32' and passwd_home[1:2] == ':':
+                passwd_home = '/' + passwd_home[0].lower() + passwd_home[2:]
+            stubs = ('set -euo pipefail\n'
+                     'getent() { echo "alice:x:1000:1000::$HOME_DIR:/bin/bash"; }\n'
+                     'runuser() { echo "as $2" >&2; shift 3; "$@"; }\n'      # runuser -u USER -- COMMAND...
+                     'extra_admin=alice\n')
+            result = run_bash(stubs + block, HOME_DIR=passwd_home)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('install Lifetime for Linux as alice', result.stdout)       # no entry yet
+            entry = home / '.local' / 'share' / 'applications' / 'lifetime-server.desktop'
+            entry.parent.mkdir(parents=True)
+            entry.write_text('[Desktop Entry]\nName=Lifetime Server\nNoDisplay=true\nCategories=Utility;\n', newline='\n')
+            result = run_bash(stubs + block, HOME_DIR=passwd_home)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr.strip(), 'as alice')                       # edited as that person
+            self.assertNotIn('NoDisplay', entry.read_text(encoding='utf-8'))
+            self.assertIn('alice signs out and back in once', result.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

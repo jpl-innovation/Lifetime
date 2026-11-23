@@ -347,5 +347,34 @@ class PairingScriptTests(unittest.TestCase):
         self.assertIn('linux-pairing, linux-docker]', workflow)          # a release waits for it
 
 
+class PairingHostsTests(unittest.TestCase):
+    """The pairing test's /etc/hosts rewrite, run in bash on temporary files with a stand-in for getent."""
+
+    def test_the_computers_own_name_is_left_with_127_0_1_1_only(self):
+        from test_linux_desktop import BASH, run_bash
+        if not BASH:
+            self.skipTest('bash (Git for Windows on Windows)')
+        script = (Path(__file__).parent / 'packaging' / 'linux' / 'pairing_test.sh').read_text(encoding='utf-8')
+        snippet = script[script.index("ubuntu_hosts='") + len("ubuntu_hosts='"):script.index("'\n\ndocker network create")]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hosts, name = root / 'hosts', root / 'hostname'
+            name.write_text('pc-01\n', newline='\n')
+            # What Docker writes: the container's real address for its name, which a 1.2.1 client would have used.
+            hosts.write_text('127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n'
+                             'fe00::0\tip6-localnet\n172.18.0.3\tpc-01\n', newline='\n')
+            for old, new in (('/etc/hosts', hosts.as_posix()), ('/tmp/hosts', (root / 'new').as_posix()),
+                             ('/proc/sys/kernel/hostname', name.as_posix())):
+                self.assertIn(old, snippet)
+                snippet = snippet.replace(old, new)
+            getent = 'getent() { awk -v n="$2" \'{for (i = 2; i <= NF; i++) if ($i == n) print $1}\' "$HOSTS"; }\n'
+            result = run_bash(getent + snippet + '\n', HOSTS=hosts.as_posix())
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            lines = hosts.read_text(encoding='utf-8').splitlines()
+            self.assertEqual([line for line in lines if 'pc-01' in line], ['127.0.1.1 pc-01'])
+            self.assertIn('127.0.0.1 localhost', lines)
+            self.assertNotIn('172.18.0.3', hosts.read_text(encoding='utf-8'))
+
+
 if __name__ == '__main__':
     unittest.main()
