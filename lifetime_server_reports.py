@@ -247,6 +247,7 @@ UPTIME_NOTE = ('Uptime & downtime: awake time comes from each computer’s recor
                'restarts and stops only from computers with Lifetime 1.3 or later that share their history (older ones '
                'count as unknown, never as zero). Each figure is shown with the previous period of the same length.')
 UPTIME_NO_COMPARISON = 'Uptime & downtime: comparison with the previous period needs a chosen period, not all history.'
+UPTIME_TOO_EARLY = 'Uptime & downtime: the previous period would start before 1971, so there is nothing to compare with.'
 
 
 def _history(device):
@@ -285,11 +286,12 @@ def uptime_rows(devices, start, end, current, previous, as_of, language):
         first = min(min(dated, default=last.isoformat()), last.isoformat())
         first = max(dt.date.fromisoformat(first), last - dt.timedelta(days=lifetime_uptime.MAX_DAYS - 1))
     now = _uptime_figures(devices, first, last, current, as_of)
-    before = _uptime_figures(devices, *lifetime_uptime.previous_period(first, last), previous, as_of) if start else None
     earlier = lifetime_uptime.previous_period(first, last)
+    compare = bool(start) and earlier[0] >= lifetime_uptime.EARLIEST
+    before = _uptime_figures(devices, *earlier, previous, as_of) if compare else None
     heading = (tr('{first} to {last}, compared with {previous_first} to {previous_last}', language).format(
         first=first.isoformat(), last=last.isoformat(), previous_first=earlier[0].isoformat(),
-        previous_last=earlier[1].isoformat()) if start else
+        previous_last=earlier[1].isoformat()) if compare else
         tr('{first} to {last}', language).format(first=first.isoformat(), last=last.isoformat()))
     rows = [('uptime', 'Uptime & downtime', heading)]
 
@@ -330,7 +332,9 @@ def add_uptime(report, devices, start, end, current, previous, as_of, language, 
             rows.extend(('uptime-by-computer', *row[1:]) for row in figures[1:] if row[1] in ('Awake (hours)', 'Unexpected stops',
                                                                    'Availability in expected hours'))
     report['extra_rows'] = [*report.get('extra_rows', ()), *rows]
-    report['notes'] = [*report['notes'], UPTIME_NOTE if start else UPTIME_NO_COMPARISON]
+    too_early = bool(start) and lifetime_uptime.previous_period(*(
+        dt.date.fromisoformat(day) for day in (start, end)))[0] < lifetime_uptime.EARLIEST
+    report['notes'] = [*report['notes'], UPTIME_TOO_EARLY if too_early else UPTIME_NOTE if start else UPTIME_NO_COMPARISON]
 
 
 def device_report(device, start=None, end=None, selected_identity=(), system_fields=(), language='en',

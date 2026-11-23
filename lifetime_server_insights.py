@@ -39,6 +39,7 @@ class InsightsUI:
     def __init__(self, window):
         self.w = window
         self.result = None
+        self._period, self._filled = None, False      # the period self.result answers; settings filled once
         self._busy = self._again = False
         self._make_page()
 
@@ -343,30 +344,37 @@ class InsightsUI:
         client = self.w.client
         first, last = self.w.uptime.resolve(self.period.period(), '0001-01-01')
         period = dict(start=first.isoformat(), end=last.isoformat())
-
-        def work():
-            try:
-                return client.call('insights', **period)
-            except ValueError:      # a server before 1.3 knows only the last 7 and 30 days
-                return client.call('insights')
-        if not self.w._submit(work, self._loaded, quiet=True):
+        if not self.w._submit(lambda: client.call('insights', **period),
+                              lambda result, success: self._loaded(result, success, period), quiet=True):
             self._busy = False
 
     def _period_changed(self):
+        """Figures of another period are never shown under this period's name: cleared until the answer arrives."""
+        self._period = None
+        for card, value in self.cards.values():
+            card.set_headline('—')
+            value.setText('')
+        self.chart.set_data([], [], message=self.t('Loading…'))
         self.retranslate()
         self.load()
 
-    def _loaded(self, result, success):
+    def _loaded(self, result, success, period=None):
         self._busy = False
+        current = self.period.period()
+        wanted = self.w.uptime.resolve(current, '0001-01-01')
+        fresh = period is None or period == dict(start=wanted[0].isoformat(), end=wanted[1].isoformat())
         self.error.setVisible(not success)
-        self.error.setText('' if success else self.t('Energy figures are unavailable. Showing the last data received, if any.'))
-        if success:
-            first, same = self.result is None, result == self.result
-            self.result = result
+        self.error.setText('' if success else self.t('Energy figures are unavailable. Showing the last data received, if any.')
+                           if self._period is not None else self.t('Energy figures for this period are not available.'))
+        if success and fresh:
+            first, same = not self._filled, result == self.result and self._period == period
+            self.result, self._period, self._filled = result, period, True
             if first:
                 self._fill_settings()
             if not same:
                 self.render()
+        elif success:
+            self._again = True          # an answer for a period no longer chosen: ask again
         if self._again:
             self._again = False
             self.load()
@@ -514,7 +522,7 @@ class InsightsUI:
 
     def render(self, *unused):
         result = self.result
-        if not result:
+        if not result or self._period is None:      # nothing yet, or waiting for the chosen period
             return
         t, config = self.t, result['settings']
         currency = config['currency']

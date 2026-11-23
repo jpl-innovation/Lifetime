@@ -70,8 +70,12 @@ class ServerExportDialog(ExportDialog):
         devices = [self.client.call('device', device_id=identifier, limit=1) for identifier in ids]
         # The off-time days are not in a computer's detail (reply size): ask for the report's period and the one before.
         today = dt.datetime.fromisoformat(as_of).astimezone().date()
-        low = (uptime.previous_period(*(dt.date.fromisoformat(options[key]) for key in ('start', 'end')))[0]
-               if options['start'] else today - dt.timedelta(days=uptime.MAX_DAYS - 1))
+        earlier = (uptime.previous_period(*(dt.date.fromisoformat(options[key]) for key in ('start', 'end')))
+                   if options['start'] else None)
+        if earlier and earlier[0] < uptime.EARLIEST:      # nothing to compare with before 1971
+            earlier = None
+        low = (earlier[0] if earlier else dt.date.fromisoformat(options['start']) if options['start']
+               else today - dt.timedelta(days=uptime.MAX_DAYS - 1))
         high = dt.date.fromisoformat(options['end']) if options['start'] else today
         low = max(low, high - dt.timedelta(days=uptime.MAX_DAYS - 1))
         for device in devices:
@@ -80,8 +84,6 @@ class ServerExportDialog(ExportDialog):
                     'uptime_days', device_id=device['device_id'], start=low.isoformat(), end=high.isoformat())['downtime_daily']
         single = self.device_ids is not None and len(devices) == 1
         measured, previous = [], []
-        earlier = (uptime.previous_period(*(dt.date.fromisoformat(options[key]) for key in ('start', 'end')))
-                   if options['start'] else None)
         for index in range(0, len(ids), 100):
             arguments = dict(device_ids=list(ids[index:index + 100]), as_of=as_of, daily=single)
             if options['start']:

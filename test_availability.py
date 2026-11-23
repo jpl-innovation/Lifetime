@@ -257,6 +257,15 @@ class MonitorAvailabilityTests(MonitorCase):
         self.assertEqual(ten['start'], '2016-11-19')
         with self.assertRaises(Exception):
             self.monitor.availability([ID], start='2016-01-01', end='2026-11-16')          # over 3,660 days
+        # Local times before 1970 cannot be computed on Windows: refused as a bad request, never a server error.
+        import lifetime_monitor
+        for start, end in (('1969-12-31', '1970-01-05'), ('1970-01-02', '1970-01-02')):
+            with self.assertRaises(lifetime_monitor.MonitorError):
+                self.monitor.availability([ID], start=start, end=end)
+            with self.assertRaises(lifetime_monitor.MonitorError):
+                self.monitor.uptime_bars(start, end)
+        self.assertEqual(self.monitor.availability([ID], start='1971-01-01', end='1971-01-02')['devices'][0]['status'],
+                         'insufficient')
 
     def test_fleet_uptime_bars_are_worst_first_bucketed_and_small(self):
         import uuid

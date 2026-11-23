@@ -49,8 +49,9 @@ class UptimeGuiTests(_Base):
         self.assertTrue(control.from_date.calendarPopup())
         self.assertEqual(control.period(), (today - dt.timedelta(days=29), today))     # starts from what was shown
         self.assertEqual(control.to_date.maximumDate(), QDate.currentDate())           # never in the future
-        control.from_date.setDate(QDate(1990, 1, 1))                                   # no lower limit
+        control.from_date.setDate(QDate(1990, 1, 1))                                   # years back
         self.assertEqual(control.from_date.date(), QDate(1990, 1, 1))
+        self.assertEqual(control.from_date.minimumDate(), QDate(1971, 1, 1))           # not before 1971
         self.assertEqual(control.period()[0], today - dt.timedelta(days=3659))        # at most ten years at once
         control.from_date.setDate(QDate(today.year, today.month, today.day))
         control.to_date.setDate(QDate(2020, 1, 1))                                     # To before From moves From
@@ -231,21 +232,33 @@ class UptimeGuiTests(_Base):
         print(f'\n500 computers x 365 days: classified and painted in {took:.2f} s')
 
 
-    def test_an_older_server_still_gets_the_fleet_and_empty_bars_never_fail(self):
+    def test_a_refused_period_is_shown_as_not_available_never_as_other_figures(self):
         from PyQt6.QtCore import QPointF
         from PyQt6.QtGui import QMouseEvent
         from PyQt6.QtCore import QEvent, Qt
-        calls = []
-
-        class Old:
-            def call(self, operation, **arguments):
-                calls.append(arguments)
-                if 'start' in arguments:
-                    raise ValueError('Administrative request failed (HTTP 400)')
-                return dict(daily=[])
-        self.assertEqual(self.window.uptime.call_fleet(Old(), dict(day='2026-11-23', start='2026-11-17', end='2026-11-23')),
-                         dict(daily=[]))
-        self.assertEqual(calls[-1], dict(day='2026-11-23'))
+        self.load([device(0)])
+        self.window.fleet_range.set_key('12m')
+        self.api.fail.add('fleet')
+        self.window._load_fleet()
+        self.wait_idle()
+        self.assertEqual([op for op, arguments, _ in self.api.calls if op == 'fleet'][-1:], ['fleet'])
+        self.assertEqual(self.window.daily_chart.samples, [])
+        self.assertEqual(self.window.daily_chart.missing, 'Fleet totals for this period are not available.')
+        self.assertEqual(self.window.fleet_range_total.text(), 'Last 12 months: not available')
+        self.api.fail.discard('fleet')
+        ui = self.window.insights
+        today = dt.date.today().isoformat()
+        self.api.insight_items = [dict(device_id='a', name='Lab PC', group='Lab', kind='desktop',
+                                       history=dict(daily={today: 36000}))]
+        self.window.tabs.setCurrentIndex(ui.index)
+        self.wait_idle()
+        self.assertEqual(ui.cards['range'][0].headline.text(), '0.80 kWh')
+        self.api.fail.add('insights')
+        ui.period.set_key('7d')
+        self.wait_idle()
+        self.assertEqual(ui.cards['range'][0].headline.text(), '—')       # not the 30 days under "Last 7 days"
+        self.assertIn('not available', ui.error.text())
+        self.assertEqual(len([op for op, arguments, _ in self.api.calls if op == 'insights' and 'start' not in arguments]), 0)
         bars = self.window.uptime.fleet_bars
         bars.set_rows([dict(device_id='a', name='A', bars=[])], [], 80)
         bars.resize(600, bars.height())

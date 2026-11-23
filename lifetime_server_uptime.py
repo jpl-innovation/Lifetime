@@ -227,6 +227,8 @@ class RangeControl(QWidget):
             layout.addWidget(editor)
             editor.dateChanged.connect(self._dates_changed)
         self.to_date.setMaximumDate(QDate.currentDate())
+        for editor in (self.from_date, self.to_date):       # no Lifetime data is older; Windows cannot go before 1970
+            editor.setMinimumDate(_qdate(uptime.EARLIEST))
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.choice.setCurrentIndex(uptime.PRESETS.index(default))
         self.choice.currentIndexChanged.connect(self._choice_changed)
@@ -260,7 +262,7 @@ class RangeControl(QWidget):
         if key != 'custom':
             return uptime.preset_range(key, today)
         first, last = _date(self.from_date.date()), min(_date(self.to_date.date()), today)
-        first = min(first, last)
+        first = max(min(first, last), uptime.EARLIEST)
         return max(first, last - (uptime.MAX_DAYS - 1) * uptime.DAY), last      # at most ten years at once
 
     def label(self):
@@ -615,11 +617,14 @@ class UptimeUI:
 
     @staticmethod
     def call_fleet(client, arguments):
-        """The fleet call with the chosen period; a server before 1.3 knows only its last 7 days."""
-        try:
-            return client.call('fleet', **arguments)
-        except ValueError:
-            return client.call('fleet', **{key: value for key, value in arguments.items() if key not in ('start', 'end')})
+        """The fleet call with the chosen period. A refusal is shown as such (fleet_failed), never replaced by another
+        period's figures under the chosen period's name."""
+        return client.call('fleet', **arguments)
+
+    def fleet_failed(self):
+        w = self.w
+        w.daily_chart.set_samples([], self.t('Fleet totals for this period are not available.'), self.t('h'))
+        w.fleet_range_total.setText(self.t('{period}: not available', period=w.fleet_range.label()))
 
     def fleet_arguments(self):
         """start/end for the store's fleet call: the chosen period, All as the last ten years (trimmed on display)."""

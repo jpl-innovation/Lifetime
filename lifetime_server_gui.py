@@ -2763,6 +2763,8 @@ class ServerWindow(QMainWindow):
         if success and revision == self._fleet_revision:
             self._fleet_result = result
             self._render_fleet(result)
+        elif revision == self._fleet_revision:
+            self.uptime.fleet_failed()       # no figures from another period under this period's name
         if self._fleet_again or revision != self._fleet_revision:
             self._fleet_again = False
             self._load_fleet()

@@ -1142,6 +1142,8 @@ class Monitor:
             raise MonitorError('Expected dates as YYYY-MM-DD') from None
         if first and not dt.timedelta(0) <= last - first < dt.timedelta(days=uptime.MAX_DAYS):
             raise MonitorError('A period runs forwards and lasts at most 3660 days')
+        if first and first < uptime.EARLIEST:
+            raise MonitorError('A period starts on 1 January 1971 or later')
         return first, last
 
     def availability(self, device_ids, start=None, end=None, as_of=None, daily=False):

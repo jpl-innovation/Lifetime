@@ -9,6 +9,7 @@ import datetime as dt
 DAY = dt.timedelta(days=1)
 DAY_SECONDS = 86400
 MAX_DAYS = 3660                 # ten years: as far back as computers send daily totals
+EARLIEST = dt.date(1971, 1, 1)  # local times before 1970 cannot be computed on Windows; no Lifetime data is that old
 PRESETS = ('7d', '30d', 'this-month', 'last-month', 'this-year', '12m', '5y', 'all', 'custom')
 PRESET_TEXT = {'7d': 'Last 7 days', '30d': 'Last 30 days', 'this-month': 'This month', 'last-month': 'Last month',
                'this-year': 'This year', '12m': 'Last 12 months', '5y': 'Last 5 years', 'all': 'All',

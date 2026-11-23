@@ -92,6 +92,14 @@ class UptimeReportTests(unittest.TestCase):
         self.assertEqual(rows['Awake (hours)'], '17.0')
         self.assertIn('needs a chosen period', ' '.join(everything['notes']))
 
+    def test_no_comparison_before_1971(self):
+        new, _ = self.computers()
+        report = device_report(new, '1971-01-01', '1971-12-31', uptime=dict(current=[], previous=None, as_of=self.AS_OF))
+        rows = self.rows(report)
+        self.assertEqual(rows['Uptime & downtime'], '1971-01-01 to 1971-12-31')
+        self.assertEqual(rows['Awake (hours)'], 'Not available')
+        self.assertIn('before 1971', ' '.join(report['notes']))
+
     def test_vietnamese_and_csv(self):
         new, _ = self.computers()
         report = device_report(new, '2026-11-08', '2026-11-14', language='vi',

@@ -2281,6 +2281,13 @@ _SERVER_UPTIME_VI = {
     'Sleep and off time: loading…': 'Thời gian ngủ và tắt: đang tải…',
     "Delete everything recorded before this date permanently? This removes, from before the date: usage records, daily awake and off-time totals, readings, monitoring history, resolved incidents, sent alerts, maintenance windows and daily readings. It keeps each computer's latest totals (with their original time), open incidents and everything from the date on. This cannot be undone.":
         'Xóa vĩnh viễn mọi dữ liệu ghi nhận trước ngày này? Việc này xóa, trước ngày đó: bản ghi sử dụng, tổng thời gian thức và thời gian tắt theo ngày, số liệu đo, lịch sử giám sát, sự cố đã xử lý, cảnh báo đã gửi, khung bảo trì và số liệu đo hằng ngày. Giữ lại tổng mới nhất của từng máy (với thời điểm gốc), các sự cố đang mở và mọi dữ liệu từ ngày đó trở đi. Không thể hoàn tác.',
+    'Fleet totals for this period are not available.':
+        'Không có tổng của cả hệ thống cho khoảng thời gian này.',
+    '{period}: not available': '{period}: không có',
+    'Energy figures for this period are not available.':
+        'Không có số liệu điện năng cho khoảng thời gian này.',
+    'Uptime & downtime: the previous period would start before 1971, so there is nothing to compare with.':
+        'Thời gian hoạt động & ngừng: khoảng thời gian trước sẽ bắt đầu trước năm 1971 nên không có gì để so sánh.',
 }
 for _key, _text in _SERVER_UPTIME_VI.items():
     EN.setdefault(_key, _key)
