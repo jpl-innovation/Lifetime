@@ -401,7 +401,7 @@ class UptimeUI:
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addWidget(label)
         self.downtime_coverage.setObjectName('muted')
-        self._availability = {}         # (device id, first, last) -> (monotonic time, result or None)
+        self._availability = {}         # (device id, period) -> (monotonic time, availability or None, days or None)
         self._availability_wanted = None
 
     def hours(self, seconds):
@@ -416,10 +416,16 @@ class UptimeUI:
         allowed = (device.get('policy') or {}).get('history') is True
         history = (device.get('history') or {}) if allowed else {}
         daily = history.get('daily') or {}
-        earliest = min([*daily, *(history.get('downtime_daily') or {})], default=None)
+        reports = device.get('downtime')            # where its off-time days start and end; None: it sends none
+        earliest = min([*daily, *([reports['first']] if reports else [])], default=None)
         period = w.detail_range.period()
         first, last = self.resolve(period, earliest)
-        days = uptime.day_breakdown(history, first, last)
+        # The off-time days of the period come from uptime_days (the detail reply leaves them out: size limit).
+        key = (device.get('device_id'), period and (first, last), (first, last))
+        cached = self._availability.get(key)
+        fetched = cached[2] if cached else None
+        days = uptime.day_breakdown(dict(daily=daily, downtime_daily=(fetched or {}).get('downtime_daily') or {}),
+                                    first, last)
         kind = uptime.bucket_kind(first, last)
         items = []
         for row in uptime.breakdown_buckets(days, first, last, kind):
@@ -443,9 +449,11 @@ class UptimeUI:
                 parts += ' · ' + self.t('{hours} awake per unexpected stop', hours=self.hours(total['awake_per_stop']))
         self.downtime_summary.setText(parts if allowed else '')
         coverage = []
-        if allowed and not history.get('downtime_daily'):
+        if allowed and not reports:
             coverage.append(self.t('This computer does not report sleep and off time (Lifetime before 1.3): only awake '
                                    'time is known and the rest is Unknown.'))
+        elif allowed and fetched is None:
+            coverage.append(self.t('Sleep and off time: loading…'))
         elif allowed:
             coverage.append(self.t('Sleep and off time reported for {known} of {days} days.', known=total['reported'],
                                    days=total['days']))
@@ -456,13 +464,12 @@ class UptimeUI:
             coverage.append(self.t('recorded by Lifetime since {date}', date=w._date(history['recording_started'])))
         self.downtime_coverage.setText(' · '.join(coverage))
         self.downtime_coverage.setVisible(bool(coverage))
-        self._load_availability(device['device_id'] if device.get('device_id') else None,
-                                None if period is None else (first, last))
+        self._load_uptime(key, allowed and bool(reports))
 
-    def _load_availability(self, device_id, period):
-        """Availability in expected hours over the period (All: everything monitoring kept), asked again at most once
-        a minute while the detail refreshes."""
-        key = (device_id, period)
+    def _load_uptime(self, key, days_wanted):
+        """Availability in expected hours over the period (All: everything monitoring kept) and the computer's off-time
+        days of the period, asked again at most once a minute while the detail refreshes."""
+        device_id, period, (first, last) = key
         self._availability_wanted = key
         cached = self._availability.get(key)
         if cached and time.monotonic() - cached[0] < AVAILABILITY_CACHE_SECONDS:
@@ -475,18 +482,36 @@ class UptimeUI:
             self.availability_text.setText(self.t('Availability in expected hours: loading…'))
         arguments = dict(device_ids=[device_id])
         if period:
-            arguments.update(start=period[0].isoformat(), end=period[1].isoformat())
+            arguments.update(start=first.isoformat(), end=last.isoformat())
         client = self.w.client
 
+        def work():
+            found = {}
+            try:
+                found['availability'] = client.call('availability', **arguments)
+            except ValueError:
+                found['availability'] = None
+            if days_wanted:
+                try:
+                    found['days'] = client.call('uptime_days', device_id=device_id, start=first.isoformat(),
+                                                end=last.isoformat())
+                except ValueError:
+                    found['days'] = None
+            return found
+
         def done(result, success):
-            devices = (result.get('devices') or ()) if success and isinstance(result, dict) else ()
+            result = result if success and isinstance(result, dict) else {}
+            devices = (result.get('availability') or {}).get('devices') or ()
             found = next((item for item in devices if item.get('device_id') == device_id), None)
-            self._availability[key] = (time.monotonic(), found)
+            days = result.get('days') if days_wanted else {}
+            self._availability[key] = (time.monotonic(), found, days if isinstance(days, dict) else None)
             while len(self._availability) > 16:
                 del self._availability[next(iter(self._availability))]
             if self._availability_wanted == key:
                 self.render_availability(found)
-        self.w._submit(lambda: client.call('availability', **arguments), done, quiet=True)
+                if days_wanted and self.w._detail and self.w._detail.get('device_id') == device_id:
+                    self.render_downtime(self.w._detail)       # now with its off-time days
+        self.w._submit(work, done, quiet=True)
 
     def render_availability(self, result):
         """The existing availability model (lifetime_availability): observed online share of the expected hours."""

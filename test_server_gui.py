@@ -105,8 +105,17 @@ class FakeAdmin:
                         groups=sorted({r['group'] for r in rows}), recent_events=[
                             dict(device_id=r['device_id'], name=r['name'], kind='report-received', time=r['last']) for r in rows[:20]],
                         updated_at='2026-11-08T12:00:00Z', date=arguments.get('day'))
-        if operation == 'device':
-            return copy.deepcopy(next(row for row in self.rows if row['device_id'] == arguments['device_id']))
+        if operation == 'device':     # as the store: the off-time days are left out, only where they start and end
+            found = copy.deepcopy(next(row for row in self.rows if row['device_id'] == arguments['device_id']))
+            days = (found.get('history') or {}).pop('downtime_daily', None)
+            found['downtime'] = dict(first=min(days), last=max(days), days=len(days)) if days else None
+            return found
+        if operation == 'uptime_days':
+            row = next(row for row in self.rows if row['device_id'] == arguments['device_id'])
+            history = row.get('history') or {}
+            return dict(device_id=row['device_id'], start=arguments['start'], end=arguments['end'], history=bool(history),
+                        **{field: {day: value for day, value in (history.get(field) or {}).items()
+                                   if arguments['start'] <= day <= arguments['end']} for field in ('daily', 'downtime_daily')})
         if operation == 'overview':
             counts = dict.fromkeys(('total', 'reporting', 'report-overdue', 'pending', 'approved', 'revoked', 'denied', 'unavailable'), 0)
             counts['total'] = len(self.rows)

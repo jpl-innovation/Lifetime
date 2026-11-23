@@ -38,6 +38,7 @@ LIVE_SILENCE_SECONDS = 30   # a computer that has been reporting live and goes q
 MAX_PAGE = 500
 DELTA_FIELDS = ('awake_seconds', 'measured_seconds', 'imported_seconds')
 MAX_LOG = 500
+MAX_DETAIL_SAMPLES = 400    # readings in one computer's detail reply, thinned evenly (the 1 MiB admin reply limit)
 SAMPLE_TRIM_SECONDS = 3600  # how often week-old performance samples of computers that stopped reporting are removed
 # Server log: what happened, never request bodies, codes or credentials. Refusals carry only a category.
 LOG_KINDS = {'server-started': (None,), 'server-stopped': (None,), 'names-changed': (None,),
@@ -929,9 +930,13 @@ class Store:
             result['attention'].append('pending_command')
         if detail:
             result['specs'], result['performance'] = specs or None, perf or None
-            result['performance_history'] = [dict(r) for r in db.execute(
+            samples = [dict(r) for r in db.execute(
                 'SELECT observed_at,cpu_percent,ram_percent,disk_free_percent,battery_percent,power_watts,temperature_c FROM performance_samples WHERE device_id=? AND observed_at>=? ORDER BY observed_at',
                 (row['device_id'], _stamp(_now()-dt.timedelta(hours=hours))))] if policy.get('resources') else []
+            if len(samples) > MAX_DETAIL_SAMPLES:       # evenly thinned, always ending with the newest reading
+                step = len(samples) / MAX_DETAIL_SAMPLES
+                samples = [samples[int(index * step)] for index in range(MAX_DETAIL_SAMPLES - 1)] + [samples[-1]]
+            result['performance_history'] = samples
             result['commands'] = [dict(r) for r in db.execute('SELECT * FROM commands WHERE device_id=? ORDER BY created_at DESC,rowid DESC LIMIT 20', (row['device_id'],))]
             history = json.loads(row['history']) if row['history'] and policy['history'] else {}
             result['today'] = history.get('daily', {}).get(_now().astimezone().date().isoformat())
@@ -955,7 +960,29 @@ class Store:
                                  for record in records[:limit]]
             result['records_truncated'] = len(records) > limit
             result['records_next_seq'] = result['records'][-1]['seq'] if result['records_truncated'] else None
+            # Ten years of off-time days (about 400 KB) would push the reply past the 1 MiB admin limit: the detail
+            # says only which days exist; uptime_days serves the days of a chosen period.
+            downtime = (result['history'] or {}).pop('downtime_daily', None) or {}
+            result['downtime'] = dict(first=min(downtime), last=max(downtime), days=len(downtime)) if downtime else None
         return result
+
+    def uptime_days(self, device_id, start, end):
+        """A computer's awake (history.daily) and off-time (history.downtime_daily) days over start..end (ISO dates,
+        both included, at most 3,660 days), only while it shares its history (``history`` False otherwise)."""
+        try:
+            first, last = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+        except (TypeError, ValueError):
+            raise StoreError('Invalid period') from None
+        if not 0 <= (last - first).days < 3660:
+            raise StoreError('Invalid period')
+        with self._transaction() as db:
+            row = self._device_row(db, device_id)
+            shared = bool(json.loads(row['policy']).get('history') and row['history'])
+            history = json.loads(row['history']) if shared else {}
+        low, high = first.isoformat(), last.isoformat()
+        return dict(device_id=row['device_id'], start=low, end=high, history=shared,
+                    **{field: {day: value for day, value in (history.get(field) or {}).items() if low <= day <= high}
+                       for field in ('daily', 'downtime_daily')})
 
     def list_devices(self, limit=100, offset=0, search='', group='', status='', sort=None, descending=False):
         """Return a stable bounded page, filtering before applying its offset."""

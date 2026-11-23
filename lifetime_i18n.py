@@ -2278,6 +2278,7 @@ _SERVER_UPTIME_VI = {
     'Availability in expected hours': 'Mức sẵn sàng trong giờ dự kiến',
     'Outages in expected hours': 'Số lần mất kết nối trong giờ dự kiến',
     'Longest outage (hours)': 'Lần mất kết nối lâu nhất (giờ)',
+    'Sleep and off time: loading…': 'Thời gian ngủ và tắt: đang tải…',
 }
 for _key, _text in _SERVER_UPTIME_VI.items():
     EN.setdefault(_key, _key)

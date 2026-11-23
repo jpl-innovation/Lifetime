@@ -155,6 +155,9 @@ class UptimeGuiTests(_Base):
         self.assertIn('recorded by Lifetime since', uptime.downtime_coverage.text())
         self.assertEqual(uptime.availability_text.text(),
                          'Availability in expected hours: 90.909 % (coverage 91.667 %) · 3 outages, longest 1 h 30 m')
+        self.assertNotIn('downtime_daily', self.window._detail['history'])     # never in the detail reply
+        days_call = self.arguments('uptime_days')[-1]
+        self.assertEqual((days_call['device_id'], days_call['end']), (new['device_id'], today.isoformat()))
         call = self.arguments('availability')[-1]
         self.assertEqual((call['device_ids'], call['end']), ([new['device_id']], today.isoformat()))
         self.select(old['device_id'])

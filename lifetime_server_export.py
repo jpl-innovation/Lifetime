@@ -68,6 +68,16 @@ class ServerExportDialog(ExportDialog):
                 if offset >= 10000:
                     raise ValueError('Fleet selection exceeds the supported limit')
         devices = [self.client.call('device', device_id=identifier, limit=1) for identifier in ids]
+        # The off-time days are not in a computer's detail (reply size): ask for the report's period and the one before.
+        today = dt.datetime.fromisoformat(as_of).astimezone().date()
+        low = (uptime.previous_period(*(dt.date.fromisoformat(options[key]) for key in ('start', 'end')))[0]
+               if options['start'] else today - dt.timedelta(days=uptime.MAX_DAYS - 1))
+        high = dt.date.fromisoformat(options['end']) if options['start'] else today
+        low = max(low, high - dt.timedelta(days=uptime.MAX_DAYS - 1))
+        for device in devices:
+            if device.get('downtime') and device.get('history'):
+                device['history']['downtime_daily'] = self.client.call(
+                    'uptime_days', device_id=device['device_id'], start=low.isoformat(), end=high.isoformat())['downtime_daily']
         single = self.device_ids is not None and len(devices) == 1
         measured, previous = [], []
         earlier = (uptime.previous_period(*(dt.date.fromisoformat(options[key]) for key in ('start', 'end')))
