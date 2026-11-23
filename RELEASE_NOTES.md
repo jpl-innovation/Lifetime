@@ -127,7 +127,7 @@ Run anyway**. Check your download against `SHA256SUMS.txt`.
   network, as the Connect page does.
 - **The tracker no longer loses time when it cannot save.** If saving failed for more than five minutes (a full disk,
   the record locked by another program), that time was dropped. Now the error is reported, and the next good save
-  counts the whole time as long as the computer was not restarted in between.
+  counts the whole time, as long as neither the computer nor the tracker was restarted in between.
 - **An unexpected error no longer closes the desktop app.** It is shown once per distinct error and the app keeps
   running. (An error before the window opens still stops the app, and the message then says Lifetime could not start.)
 
@@ -163,7 +163,8 @@ Everything new in this release has passed automated tests only. Not yet checked 
   real installation (tested in temporary folders); version information was checked on one test program built here.
 - **Downtime on the computer:** archived System logs on a computer that really archives; non-English Windows (the
   restart/shutdown type words of event 1074; there the 10-minute rule decides); real rotated and compressed Linux
-  login records; Fast Startup on other computers than the development PC; a record with years of real history.
+  login records; Fast Startup on other computers than the development PC; a record with years of real history; how
+  long the Linux event list takes to read on a computer with many boots.
 - **How far back:** Windows keeps only what fits in its System log (on the development PC about 4.5 months). Days
   before that are unknown unless archived logs exist; Lifetime never changes the log size. A computer that cannot
   read its System log (or a Linux user without journal access) has no downtime, and the line under the title says so.

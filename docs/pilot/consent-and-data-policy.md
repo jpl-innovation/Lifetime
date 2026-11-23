@@ -40,7 +40,7 @@ keystrokes, screen contents, serial numbers, or where the computer is (only a ro
 **Who can see it.** Only [named IT staff/roles] on the server, through the Lifetime dashboard. Every change and remote
 command is recorded with the Windows account that did it.
 
-**How long it is kept.** [For example: usage records 12 months; monitoring history 180 days (Lifetime's default);
+**How long it is kept.** [For example: usage records 12 months; detailed monitoring history 400 days (Lifetime's default);
 detailed performance readings 7 days.] At the end of the pilot, if we do not continue, the server data and its
 backups are deleted by [date].
 
@@ -83,7 +83,7 @@ phím bấm, nội dung màn hình, số sê-ri, hay vị trí của máy (chỉ
 **Ai được xem.** Chỉ [nhân viên/vai trò IT được chỉ định] trên máy chủ, qua bảng điều khiển Lifetime. Mọi thay đổi và
 lệnh từ xa đều được ghi lại kèm tài khoản Windows đã thực hiện.
 
-**Thời gian lưu giữ.** [Ví dụ: bản ghi sử dụng 12 tháng; lịch sử giám sát 180 ngày (mặc định của Lifetime); số đo hiệu
+**Thời gian lưu giữ.** [Ví dụ: bản ghi sử dụng 12 tháng; lịch sử giám sát chi tiết 400 ngày (mặc định của Lifetime); số đo hiệu
 năng chi tiết 7 ngày.] Khi kết thúc thí điểm, nếu không tiếp tục, dữ liệu trên máy chủ và các bản sao lưu sẽ được xóa
 trước [ngày].
 

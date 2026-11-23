@@ -23,6 +23,12 @@ Clients send `Lifetime-Accept: capabilities`; to those clients the server adds
 optional parts; no list means the 1.1 format. `problem` allows an optional sync
 field `{"kind": <category>, "at": <timestamp>}` with the client's last failure
 category (`timeout`, `certificate`, `http-503`, ...), never error text.
+`downtime` (1.3.0) allows `history.downtime_daily`: per local ISO date exactly
+`asleep_s`, `off_s`, `unknown_s`, `restarts`, `shutdowns` and `unexpected_stops`,
+whole numbers of 0 or more, counts at most 10,000, at most 3,660 days, and for each
+day asleep + off + unknown plus that day's `history.daily` awake seconds at most
+90,000. Anything else refuses the whole sync ("Invalid downtime history"). Clients
+send it only with history consent.
 
 The easy connection path uses a checked Crockford code containing an invitation
 ID, secret and 40-bit certificate commitment. A TLS-only probe verifies that
