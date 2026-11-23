@@ -747,10 +747,12 @@ class HourlyReadTests(unittest.TestCase):
             total += sum(seconds for a, b in spans for d_, seconds in downtime.split(a, b) if d_.isoformat() == day)
         return total
 
-    def run_hourly(self, platform, reader):
+    def run_hourly(self, platform, reader, read_days=None):
         ledger = dict(daily={}, downtime_daily={}, downtime_sources={})
         now = None
         for day in self.DAYS:
+            if read_days is not None and day not in read_days:
+                continue                # Lifetime was not running that day
             for hour in range(8, 22):
                 now = self.local(f'{day}T{hour:02d}:30')
                 ledger['daily'] = {d_: self.awake(d_, now) for d_ in self.DAYS if d_ <= day}
@@ -773,6 +775,12 @@ class HourlyReadTests(unittest.TestCase):
         hourly, full = self.run_hourly('linux', self.linux_reader)
         self.assertEqual(hourly, full)
         self.assertEqual(full['2026-11-17']['restarts'], 2)
+
+    def test_linux_catches_up_on_days_the_tracker_did_not_run(self):
+        self.DAYS = ('2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20')
+        hourly, full = self.run_hourly('linux', self.linux_reader, read_days=(self.DAYS[0], self.DAYS[4]))
+        self.assertEqual(hourly, full)
+        self.assertEqual(hourly['2026-11-16']['shutdowns'], 1)
 
     def test_partial_first_day_never_replaces_a_fuller_saved_day(self):
         """The old rule's failure: a read starting at the newest boot made that day a partly seen first day."""
@@ -843,17 +851,21 @@ class WrongClockTests(unittest.TestCase):
     def test_a_reset_clock_boot_does_not_replace_saved_days(self):
         saved = {'2026-03-02': entry(asleep_s=30000, off_s=20000, restarts=1, shutdowns=2)}
         ledger = dict(daily={'2026-03-02': 36400}, downtime_daily=dict(saved), downtime_sources=dict(log_from='2026-01-01'))
-        boots = [dict(start=at('2018-01-01T00:00'), end=at('2026-09-10T18:00'), events=[], clean=True),
+        # In the order logged: a normal boot, then one whose start was logged with the clock reset to 2018.
+        boots = [dict(start=at('2026-09-01T08:00'), end=at('2026-09-09T18:00'), events=[], clean=True),
+                 dict(start=at('2018-01-01T00:00'), end=at('2026-09-10T18:00'), events=[], clean=True),
                  dict(start=at('2026-09-11T08:00'), end=at('2026-11-20T12:00'), events=[], clean=False)]
         now = at('2026-11-20T12:00')
         result = downtime.from_boots(boots, {}, now, TZ)
         downtime.apply(ledger, result, downtime.sources_for(result, 'windows-log', now=now, tz=TZ), now, TZ)
         self.assertEqual(ledger['downtime_daily']['2026-03-02'], saved['2026-03-02'])
-        self.assertEqual(min(k for k in ledger['downtime_daily'] if k > '2026-03-02'), '2026-09-10')
+        self.assertEqual(min(k for k in ledger['downtime_daily'] if k > '2026-03-02'), '2026-09-01')
         self.assertFalse(any('2018' <= k < '2026' for k in ledger['downtime_daily']))
         self.assertEqual(ledger['downtime_sources']['log_from'], '2026-01-01')
-        self.assertEqual(downtime.sources_for(result, 'windows-log', now=now, tz=TZ)['log_from'], '2026-09-10')
+        self.assertEqual(downtime.sources_for(result, 'windows-log', now=now, tz=TZ)['log_from'], '2026-09-01')
         self.assertEqual(result['days']['2026-09-10']['shutdowns'], 1)       # its clean shutdown still counts
+        self.assertEqual(result['days']['2026-09-09']['off_s'], 0)          # when it really started is unknown
+        self.assertEqual(result['days']['2026-09-10']['off_s'], 6*H)
 
     def test_a_long_boot_with_no_sleep_is_not_turned_into_off_time(self):
         boots = [boot('2026-08-01T08:00', '2026-08-01T18:00'),
@@ -861,8 +873,26 @@ class WrongClockTests(unittest.TestCase):
                  boot('2026-10-02T08:00', '2026-10-02T09:00')]
         result = downtime.from_boots(boots, {}, tz=TZ)
         off = sum(day['off_s'] for day in result['days'].values())
-        self.assertEqual(off, 14*H)                              # only the night after the long boot is known to be off
+        self.assertEqual(off, 28*H)                              # both nights: a long boot is not a wrong clock
         self.assertEqual(sum(day['shutdowns'] for day in result['days'].values()), 2)
+
+    def test_a_server_running_for_months_keeps_its_start(self):
+        now = at('2026-11-20T12:00')
+        boots = [dict(start=at('2026-09-01T08:00'), end=at('2026-09-25T18:00'), events=[], clean=True),
+                 dict(start=at('2026-09-28T08:00'), end=now, events=[], clean=False)]      # up 53 days, no sleep
+        result = downtime.from_boots(boots, dict(boot_time=at('2026-09-28T08:01')), now, TZ)
+        self.assertEqual([e['kind'] for e in result['events']], ['start', 'shutdown', 'start'])
+        self.assertEqual(result['days']['2026-09-26']['off_s'], 24*H)
+        self.assertEqual(downtime.longest_spans(result['events'], at('2026-09-01T00:00'), now)['awake'], now - at('2026-09-28T08:00'))
+
+    def test_the_running_boot_takes_the_system_boot_time_when_its_logged_start_is_wrong(self):
+        now = at('2026-11-20T12:00')
+        boots = [dict(start=at('2026-11-10T08:00'), end=at('2026-11-10T18:00'), events=[], clean=True),
+                 dict(start=at('2018-01-01T00:00'), end=now, events=[], clean=False)]
+        result = downtime.from_boots(boots, dict(boot_time=at('2026-11-11T08:00')), now, TZ)
+        self.assertEqual(result['days']['2026-11-10']['off_s'], 6*H)
+        self.assertEqual(result['days']['2026-11-11']['off_s'], 8*H)
+        self.assertEqual(result['start'], at('2026-11-10T08:00'))
 
     def test_a_day_with_nothing_new_keeps_what_was_seen(self):
         ledger = dict(daily={}, downtime_daily={'2026-11-18': entry(off_s=8*H, unknown_s=16*H, shutdowns=1)})
@@ -904,6 +934,45 @@ class TimeLimitTests(unittest.TestCase):
             self.assertIsInstance(tracker.read_power(None, lambda since: imp.command(['journalctl'])), ValueError)
 
 
+class SaveFailureTests(unittest.TestCase):
+    """Second review, finding 3: saves failing for longer than MAX_DELTA (a full disk) must not lose awake time."""
+    def run_tracker(self, failing, boots=lambda n: 'boot-a'):
+        import threading
+        import lifetime_settings as settings
+        directory = Path(tempfile.mkdtemp())
+        settings.save_settings(dict(settings.defaults(), completed=True, history=True), directory)
+        state = dict(tick=1000, calls=0, saves=0)
+        def awake_clock():
+            state['tick'] += 30
+            state['calls'] += 1
+            return state['tick']
+        real_save = tracker.save
+        def save(*args, **kwargs):
+            state['saves'] += 1
+            if state['saves'] in failing:
+                raise OSError(28, 'No space left on device')
+            return real_save(*args, **kwargs)
+        class Stopper(threading.Event):
+            waits = 0
+            def wait(self, timeout=None):
+                type(self).waits += 1
+                return type(self).waits > 20
+        with patch.object(tracker, 'save', side_effect=save), patch.object(tracker, 'awake_clock', side_effect=awake_clock),                 patch.object(tracker, 'boot_id', side_effect=lambda: boots(state['calls'])),                 patch.object(tracker, '_monotonic', side_effect=lambda: state['tick']),                 patch.object(tracker.threading, 'Event', Stopper), patch.object(tracker, 'read_power', return_value=ValueError('x')),                 patch('lifetime_daily.boot_history', return_value=(None, [], True)), patch('sys.stderr', io.StringIO()) as errors:
+            tracker.run(directory)
+        return tracker.read_ledger(directory), state, errors.getvalue()
+
+    def test_twelve_failed_saves_lose_nothing_and_count_nothing_twice(self):
+        ledger, state, errors = self.run_tracker(set(range(2, 14)))           # 12 failures x 30 s = 360 s > MAX_DELTA
+        self.assertEqual(ledger['total_seconds'], state['tick'])
+        self.assertFalse(ledger.get('coverage_gaps'))
+        self.assertIn('could not save, will retry (OSError: errno 28)', errors)
+
+    def test_a_new_boot_during_the_failures_is_counted_as_a_new_boot(self):
+        ledger, state, _ = self.run_tracker(set(range(2, 14)), boots=lambda calls: 'boot-a' if calls < 8 else 'boot-b')
+        self.assertEqual(ledger['boots'], 2)
+        self.assertEqual(ledger['total_seconds'], 1030 + state['tick'])       # first boot's first save, then boot-b's clock
+
+
 class OutboxSizeTests(unittest.TestCase):
     """Review finding 9: with 10 years of daily totals, one history copy per outbox row filled 16 MB in ~85 records."""
     def test_only_the_newest_row_keeps_a_history_snapshot_and_no_record_is_lost(self):
@@ -928,6 +997,23 @@ class OutboxSizeTests(unittest.TestCase):
         protocol.validate_sync(message)
         self.assertEqual(len(message['records']), 60)
         self.assertEqual(len(message['history']['daily']), 3660)         # the newest snapshot travels with the batch
+
+    def test_every_batch_of_a_long_backlog_carries_the_newest_history(self):
+        import lifetime_agent as agent
+        import lifetime_protocol as protocol
+        root = Path(tempfile.mkdtemp()) / 'machine'
+        with patch.object(agent, 'protect_root'):
+            machine = agent.MachineAgent.initialize(root)
+        self.addCleanup(machine.close)
+        machine.set_policy(dict(history=True, resources=False))
+        for i in range(150):
+            stamp = (dt.datetime(2026, 11, 20, 5, tzinfo=UTC) + dt.timedelta(seconds=30 * i)).isoformat()
+            machine.sample(100 + 30 * i, 'boot-a', stamp)
+        message = machine.batch()
+        protocol.validate_sync(message)
+        self.assertEqual(len(message['records']), 100)
+        self.assertIn('history', message)                                # not only once the backlog has drained
+        self.assertEqual(message['history']['daily'], machine.ledger()['daily'])
 
 
 if __name__ == '__main__':

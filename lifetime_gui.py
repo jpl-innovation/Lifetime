@@ -1489,13 +1489,24 @@ class Window(QWidget):
 
 
 def install_excepthook():
-    """An unexpected error in a click or a timer is logged and shown; without this PyQt ends the whole app."""
+    """An unexpected error in a click or a timer is logged and shown; without this PyQt ends the whole app.
+
+    Each distinct error is shown once (a timer repeating it is only logged again). Before the window's event loop
+    runs, an error still ends the app, so the message says it could not start."""
     import traceback
+    from PyQt6.QtCore import QThread
+    shown = set()
     def report(kind, error, trace):
-        text = ''.join(traceback.format_exception(kind, error, trace))
-        print(text, file=sys.stderr, flush=True)
+        print(''.join(traceback.format_exception(kind, error, trace)), file=sys.stderr, flush=True)
+        detail = f'{kind.__name__}: {error}'
+        if detail in shown:
+            return
+        shown.add(detail)
+        running = QThread.currentThread().loopLevel() > 0
+        words = ('Lifetime hit an unexpected error and kept running. Details: {error}' if running
+                 else 'Lifetime could not start because of an unexpected error. Details: {error}')
         try:
-            QMessageBox.warning(None, tr('Something went wrong'), tr('Lifetime hit an unexpected error and kept running. Details: {error}', error=f'{kind.__name__}: {error}'))
+            QMessageBox.warning(None, tr('Something went wrong'), tr(words, error=detail))
         except Exception:
             pass
     sys.excepthook = report
