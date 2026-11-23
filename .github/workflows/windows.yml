@@ -41,7 +41,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           for script in install_linux.sh uninstall_linux.sh install_server_linux.sh uninstall_server_linux.sh \
-                        restart_server_linux.sh packaging/linux/build_linux.sh packaging/linux/smoke_test.sh; do
+                        restart_server_linux.sh packaging/linux/build_linux.sh packaging/linux/smoke_test.sh \
+                        packaging/linux/pairing_test.sh; do
             bash -n "$script"
           done
           sh -n packaging/linux/lifetime-server.sysv
@@ -117,6 +118,21 @@ jobs:
       - name: Smoke test in ${{ matrix.image }} (${{ matrix.mode }})
         run: docker run --rm -v "$PWD:/src:ro" -w /src ${{ matrix.image }} bash packaging/linux/smoke_test.sh artifacts ${{ matrix.mode }}
 
+  linux-pairing:
+    # A Linux computer pairs with a Linux server by typing the code only (no --server): local discovery and the network
+    # search, the paths that failed in 1.2.1. Two Ubuntu containers on one Docker network (two computers on a LAN), each
+    # resolving its own name to 127.0.1.1 as Ubuntu does, and a server address name that does not resolve.
+    needs: linux-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Lifetime-Linux-x86_64
+          path: artifacts
+      - name: Pair by code only (ubuntu:24.04 client and server)
+        run: bash packaging/linux/pairing_test.sh artifacts ubuntu:24.04
+
   linux-docker:
     # The container image ("runs on every Linux"): non-root, data volume, admin over the Unix socket inside the
     # container, and a client on the host enrolls and syncs.
@@ -165,7 +181,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows-package, windows-server-package, linux-build, linux-smoke, linux-docker]
+    needs: [windows-package, windows-server-package, linux-build, linux-smoke, linux-pairing, linux-docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write

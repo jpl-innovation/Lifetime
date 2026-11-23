@@ -127,7 +127,7 @@ Without systemd there is no journal, so **Verify** and **Add earlier usage** say
 | Arch Linux (and Manjaro, EndeavourOS) | rolling | CI container |
 | Alpine and other musl distributions | — | **not supported** (the build needs glibc) |
 
-"CI containers" means: the bundle and the AppImage start headless (`QT_QPA_PLATFORM=offscreen`) and pass `--self-check`, the tracker records, and a client enrolls with a Lifetime Server and syncs. Containers have no display, desktop session or systemd, so the window on real X11/Wayland desktops, login autostart and the tray still need checking on real machines (see the release notes). 64-bit x86 only for the desktop: PyQt6's ARM64 Linux wheels need a newer glibc than 2.28, so an ARM64 desktop build would not reach the same distributions (the server is built for ARM64).
+"CI containers" means: the bundle and the AppImage start headless (`QT_QPA_PLATFORM=offscreen`) and pass `--self-check`, the tracker records, and a client enrolls with a Lifetime Server and syncs; in a separate test a client in another Ubuntu container connects by typing the code only (finding the server by discovery or the network search, with Ubuntu's `127.0.1.1` host name). Containers have no display, desktop session or systemd, so the window on real X11/Wayland desktops, login autostart and the tray still need checking on real machines (see the release notes). 64-bit x86 only for the desktop: PyQt6's ARM64 Linux wheels need a newer glibc than 2.28, so an ARM64 desktop build would not reach the same distributions (the server is built for ARM64).
 
 **From source** (Python 3.11+ and PyQt6 from your distribution): run `bash install_linux.sh` in a source checkout.
 

@@ -868,8 +868,9 @@ def main(argv=None, stdin=None):
     parser.add_argument('--run', action='store_true')
     parser.add_argument('--enroll-bundle-file', type=Path)
     parser.add_argument('--connection-stdin', action='store_true',
-                        help='read a connection line, or a pairing code with --server, from standard input '
-                             '(never from the command line, where other users could see it)')
+                        help='read a connection line or a pairing code from standard input (never from the command '
+                             'line, where other users could see it); a code without --server is looked for on the '
+                             'local network, as the Connect page does')
     parser.add_argument('--server', help='server address for a pairing code read with --connection-stdin')
     parser.add_argument('--check', action='store_true', help='only validate the options and exit; changes nothing')
     parser.add_argument('--policy-history', action='store_true')
@@ -893,7 +894,7 @@ def main(argv=None, stdin=None):
     if args.server is not None and not args.connection_stdin:
         parser.error('--server is only used with --connection-stdin')
     directory = args.directory if args.directory is not None else machine_directory()
-    bundle = connection = None
+    bundle = connection = search = None
     # Validate everything before any data is created or changed; messages never repeat the secret.
     identity = {'display_name': args.display_name}
     try:
@@ -904,10 +905,13 @@ def main(argv=None, stdin=None):
                 bundle = source.read(tls.MAX_BUNDLE_BYTES*2+1).strip()
             tls.decode_bundle(bundle)
         if args.connection_stdin:
-            from lifetime_connection import parse
+            from lifetime_connection import PREFIX, normalize, parse
             value = (stdin or sys.stdin.buffer).read(2400)
             value = value.decode('utf-8-sig') if isinstance(value, bytes) else value.lstrip('﻿')
-            connection = parse(value.strip(), args.server or '')
+            if args.server is None and not value.strip().startswith(PREFIX):
+                search = normalize(value.strip())       # a code alone: found on the network after --check
+            else:
+                connection = parse(value.strip(), args.server or '')
     except (OSError, ValueError):
         parser.exit(EXIT_INVALID, 'Invalid enrollment input: check the connection line or code, server address, bundle and display name.\n')
     if args.check:
@@ -927,10 +931,14 @@ def main(argv=None, stdin=None):
         if bundle is not None:
             from lifetime_client import SyncClient
             SyncClient(agent).start_enrollment(bundle, identity, policy)
-        if connection is not None:
+        if connection is not None or search is not None:
             from lifetime_client import SyncClient, error_kind
             try:
-                status = SyncClient(agent).start_connection(connection[1], connection[0], identity, policy)
+                if search is not None:
+                    from lifetime_connection import locate
+                    status = SyncClient(agent).start_enrollment(locate(search), identity, policy)
+                else:
+                    status = SyncClient(agent).start_connection(connection[1], connection[0], identity, policy)
             except (OSError, ValueError) as error:      # unreachable, or not the server this code belongs to
                 print('Could not verify the server with this code: ' + error_kind(error), file=sys.stderr)
                 raise SystemExit(EXIT_UNREACHABLE) from None

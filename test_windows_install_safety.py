@@ -304,5 +304,44 @@ class UninstallerTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), 'yes' if ours else 'no', (text, result.stderr))
 
 
+class ServerInstallerModeTests(unittest.TestCase):
+    """Lifetime 1.2.1: Windows Server installs without Python. Without -Mode the installer must pick the ready-made
+    runtime (PackagedTask) whenever LifetimeServerRuntime.exe is beside it, before it ever looks for Python."""
+    text = (PROJECT / 'install_server_windows.ps1').read_text(encoding='utf-8').replace('\r\n', '\n')
+    choice = ("if (-not $PSBoundParameters.ContainsKey('Mode') -and (Test-Path -LiteralPath "
+              "(Join-Path $PSScriptRoot 'LifetimeServerRuntime.exe') -PathType Leaf)) {\n    $Mode = 'PackagedTask'\n}\n")
+
+    def test_without_mode_the_packaged_runtime_is_chosen_before_python_is_looked_for(self):
+        self.assertEqual(self.text.count(self.choice), 1)
+        self.assertLess(self.text.index(self.choice), self.text.index("if ($Mode -ne 'PackagedTask') {"))
+        self.assertLess(self.text.index(self.choice), self.text.index('Get-Command $Python'))
+        # The double-click install passes no -Mode, so it gets the ready-made runtime.
+        double_click = (PROJECT / 'Install Lifetime Server.cmd').read_text(encoding='utf-8')
+        self.assertIn('install_server_windows.ps1" -Start', double_click)
+        self.assertNotIn('-Mode', double_click)
+
+    @WINDOWS
+    def test_the_choice_really_picks_the_runtime_with_no_python_on_the_path(self):
+        # Only the installer's parameters and its choice run, from a temporary folder: nothing is installed.
+        param = self.text[self.text.index('[CmdletBinding()]'):self.text.index("$ErrorActionPreference = 'Stop'")]
+        with tempfile.TemporaryDirectory() as directory:
+            probe = Path(directory) / 'probe.ps1'
+            probe.write_text(param + self.choice + 'Write-Output $Mode\n', encoding='utf-8')
+            windows = Path(__import__('os').environ.get('SystemRoot', r'C:\Windows'))
+            environment = dict(__import__('os').environ, PATH=str(windows / 'System32'))       # no Python here
+
+            def mode(*arguments):
+                result = RUN([str(windows / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'), '-NoProfile',
+                              '-ExecutionPolicy', 'Bypass', '-File', str(probe), *arguments],
+                             capture_output=True, text=True, env=environment,
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip()
+            self.assertEqual(mode(), 'SourceService')         # a source checkout: the Python modes, as before
+            (Path(directory) / 'LifetimeServerRuntime.exe').write_bytes(b'')
+            self.assertEqual(mode(), 'PackagedTask')          # the release package: no Python needed
+            self.assertEqual(mode('-Mode', 'SourceTask'), 'SourceTask')      # named explicitly: kept
+
+
 if __name__ == '__main__':
     unittest.main()

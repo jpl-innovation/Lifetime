@@ -81,33 +81,8 @@ def server_state(status, t, now=None):
 
 
 def locate_server(value):
-    from lifetime_connection import PREFIX, parse, normalize, bootstrap, find_server, named_origin
-    from lifetime_discovery import discover
-    if value.strip().startswith(PREFIX):
-        origin, code = parse(value)
-        try:
-            return bootstrap(origin, code)
-        except (OSError, ValueError):
-            pass        # the line's address may not resolve on this network: look for the server by its code
-    else:
-        code = normalize(value)
-    try:
-        candidates = discover()
-    except OSError:
-        candidates = []
-    for server in candidates:
-        try:
-            return bootstrap(server['address'], code)
-        except (OSError, ValueError):
-            pass
-        # The announced name may not resolve here; the address the answer came from does.
-        if server.get('source'):
-            try:
-                return named_origin(bootstrap(f"https://{server['source']}:{server['port']}", code),
-                                    server['source'], server['port'], code)
-            except (OSError, ValueError):
-                pass
-    return find_server(code)
+    from lifetime_connection import locate      # shared with the agent's command line, which has no Qt
+    return locate(value)
 
 
 FINISH_FAILED = 'Could not finish connecting. Check that the server is on and try again.'

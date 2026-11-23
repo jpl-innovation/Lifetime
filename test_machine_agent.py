@@ -563,7 +563,7 @@ class ConnectionCliTests(unittest.TestCase):
             # Windows PowerShell may put a byte-order mark before piped text.
             self.assertIsNone(agent.main(['--directory', root, '--check', '--connection-stdin'], io.BytesIO(b'\xef\xbb\xbf' + line.encode() + b'\r\n')))
             self.assertEqual(list(Path(root).iterdir()), [])
-            for arguments, value in ((['--connection-stdin'], code),                         # a code needs --server
+            for arguments, value in ((['--connection-stdin'], code[:-1]),                    # damaged code alone
                                      (['--connection-stdin'], line.replace('LTS-', 'LTS-X')), # damaged code
                                      (['--connection-stdin', '--server', 'http://x'], code),
                                      (['--connection-stdin', '--display-name', 'bad\x00name'], line),
@@ -593,6 +593,37 @@ class ConnectionCliTests(unittest.TestCase):
                     stderr = io.StringIO()
                     with self.subTest(outcome=outcome), patch.object(agent.sys, 'stderr', stderr), self.assertRaises(SystemExit) as caught:
                         agent.main(['--directory', root, '--connection-stdin'], io.StringIO(line))
+                    self.assertEqual(caught.exception.code, expected)
+                    self.assertNotIn(code[4:], stderr.getvalue())
+
+    def test_a_code_alone_finds_its_server_on_the_network_as_the_connect_page_does(self):
+        """Without --server the code is looked for by discovery and the network search (lifetime_connection.locate),
+        only after --check, which stays offline: the path that 1.2.1's Linux computers needed and CI pairs through."""
+        import io
+        from lifetime_connection import issue, normalize
+        code = issue('0' * 64)
+        with tempfile.TemporaryDirectory() as root:
+            with patch('lifetime_connection.locate', side_effect=AssertionError('no search during --check')):
+                self.assertIsNone(agent.main(['--directory', root, '--check', '--connection-stdin'], io.StringIO(code.lower() + '\n')))
+            self.assertEqual(list(Path(root).iterdir()), [])
+            machine = Mock()
+            with patch.object(agent.MachineAgent, 'initialize', return_value=machine), \
+                    patch('lifetime_client.SyncClient') as client, patch('lifetime_connection.locate', return_value='BUNDLE') as locate:
+                client.return_value.start_enrollment.return_value = dict(status='pending')
+                agent.main(['--directory', root, '--connection-stdin', '--display-name', 'Lab PC'], io.StringIO(code))
+                locate.assert_called_once_with(normalize(code))
+                client.return_value.start_enrollment.assert_called_once()
+                self.assertEqual(client.return_value.start_enrollment.call_args.args[:2], ('BUNDLE', dict(display_name='Lab PC')))
+                client.return_value.start_connection.assert_not_called()
+                for outcome, expected in ((ValueError('No matching server'), agent.EXIT_UNREACHABLE),
+                                          (dict(status='invalid-code'), agent.EXIT_REFUSED)):
+                    if isinstance(outcome, dict):
+                        locate.side_effect, client.return_value.start_enrollment.return_value = None, outcome
+                    else:
+                        locate.side_effect = outcome
+                    stderr = io.StringIO()
+                    with self.subTest(outcome=outcome), patch.object(agent.sys, 'stderr', stderr), self.assertRaises(SystemExit) as caught:
+                        agent.main(['--directory', root, '--connection-stdin'], io.StringIO(code))
                     self.assertEqual(caught.exception.code, expected)
                     self.assertNotIn(code[4:], stderr.getvalue())
 

@@ -324,5 +324,22 @@ class SecretFileTests(unittest.TestCase):
             self.assertEqual(secrets.load(), dict(smtp_password='pw-123', webhook_url='https://hooks.example/abc'))
 
 
+class PairingScriptTests(unittest.TestCase):
+    """CI's pairing test keeps doing what 1.2.1 lacked (packaging/linux/pairing_test.sh runs in GitHub Actions)."""
+
+    def test_the_client_pairs_by_code_only_with_ubuntus_host_name_and_an_unresolvable_server_name(self):
+        root = Path(__file__).parent
+        script = (root / 'packaging' / 'linux' / 'pairing_test.sh').read_text(encoding='utf-8')
+        enroll = next(line for line in script.splitlines() if '--connection-stdin' in line)
+        self.assertNotIn('--server', enroll)
+        self.assertIn('127.0.1.1', script)
+        self.assertIn('grep -v -w -e "$name"', script)          # Docker's line with the real address is removed
+        self.assertIn('--address https://lifetime.school.lan:8443 --host 0.0.0.0', script)
+        self.assertNotIn('|| true\n', script[script.index('--connection-stdin'):])
+        workflow = (root / '.github' / 'workflows' / 'windows.yml').read_text(encoding='utf-8')
+        self.assertIn('bash packaging/linux/pairing_test.sh artifacts', workflow)
+        self.assertIn('linux-pairing, linux-docker]', workflow)          # a release waits for it
+
+
 if __name__ == '__main__':
     unittest.main()

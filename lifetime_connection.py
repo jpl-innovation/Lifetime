@@ -231,3 +231,35 @@ def find_server(code):
                     pending.cancel()
                 return result
     raise ValueError('No matching server')
+
+
+def locate(value):
+    """A verified bundle for a connection line or a code alone: the line's address first; then local discovery, at
+    the announced name or else the address the answer came from; then the bounded network search. Used by the Connect
+    page and by ``LifetimeAgent --connection-stdin`` without ``--server``."""
+    from lifetime_discovery import discover
+    if value.strip().startswith(PREFIX):
+        origin, code = parse(value)
+        try:
+            return bootstrap(origin, code)
+        except (OSError, ValueError):
+            pass        # the line's address may not resolve on this network: look for the server by its code
+    else:
+        code = normalize(value)
+    try:
+        candidates = discover()
+    except OSError:
+        candidates = []
+    for server in candidates:
+        try:
+            return bootstrap(server['address'], code)
+        except (OSError, ValueError):
+            pass
+        # The announced name may not resolve here; the address the answer came from does.
+        if server.get('source'):
+            try:
+                return named_origin(bootstrap(f"https://{server['source']}:{server['port']}", code),
+                                    server['source'], server['port'], code)
+            except (OSError, ValueError):
+                pass
+    return find_server(code)

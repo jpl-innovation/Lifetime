@@ -74,7 +74,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install_agent_windows.
 - Each computer still appears under **Pending approval** and reports only after an administrator approves it. Treat the deployment script as a secret while its code is valid, and revoke the invitation when the rollout is done.
 - Not yet verified on real GPO or Intune deployments: run a pilot group first and check the exit codes in your tool.
 
-The source agent CLI is `lifetime_agent.py`. Useful explicit options are `--help`, `--initialize`, `--run`, `--directory`, `--enroll-bundle-file`, `--connection-stdin` (a connection line, or a code with `--server`, read from standard input), `--check` (validate only), `--policy-history`, `--policy-resources`, `--policy-updates`, and `--import-ledger`. Optional policy flags require explicit enrollment. Approve the pending device in the server dashboard. No automatic approval or remote administration is provided.
+The source agent CLI is `lifetime_agent.py`. Useful explicit options are `--help`, `--initialize`, `--run`, `--directory`, `--enroll-bundle-file`, `--connection-stdin` (a connection line, or a code read from standard input; a code without `--server` is looked for on the local network by discovery and the network search, as the Connect page does), `--check` (validate only), `--policy-history`, `--policy-resources`, `--policy-updates`, and `--import-ledger`. Optional policy flags require explicit enrollment. Approve the pending device in the server dashboard. No automatic approval or remote administration is provided.
 
 ### Agent updates (staged)
 
