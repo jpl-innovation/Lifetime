@@ -16,8 +16,12 @@ import tempfile
 import lifetime_tracker as tracker
 
 
-def command(args, no_matches=False):
-    result = subprocess.run(args, capture_output=True, text=True, env={**os.environ, 'LC_ALL': 'C', 'TZ': 'UTC'})
+def command(args, no_matches=False, timeout=300):
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, env={**os.environ, 'LC_ALL': 'C', 'TZ': 'UTC'},
+                                timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise ValueError(f'{args[0]} did not answer within {timeout} s') from None
     if result.returncode and not (no_matches and result.returncode == 1 and not result.stdout.strip()):
         raise ValueError(f'{args[0]} failed: {result.stderr.strip()}')
     if re.search(r'permission|not seeing messages', result.stderr, re.I):

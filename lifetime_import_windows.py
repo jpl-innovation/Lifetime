@@ -275,12 +275,13 @@ def archive_events(since=None, before=None, folder=None):
     return events, dict(archives=read, archive_note=note)
 
 
-def _query_system(extras=None, query=None, before=()):
+def _query_system(extras=None, query=None, before=(), timeout=600):
     # /uni:true avoids the active code page and localized message decoding.
     # /e:Events supplies a root for iterparse. No message rendering, elevation,
     # event count cap, or query of a restricted log such as Security is needed.
     # ``extras`` (optional) also collects downtime details from the same stream; ``query`` filters by XPath;
-    # ``before`` are older (archived) events read first, in record order.
+    # ``before`` are older (archived) events read first, in record order. A read still running after ``timeout``
+    # seconds is stopped and reported, so a hung wevtutil never keeps a caller waiting for ever.
     args = ['wevtutil', 'qe', 'System', '/f:xml', '/e:Events', '/rd:false', '/uni:true'] + ([f'/q:{query}'] if query else [])
     errors = bytearray()
     with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
@@ -291,6 +292,9 @@ def _query_system(extras=None, query=None, before=()):
 
         reader = threading.Thread(target=read_errors, daemon=True)
         reader.start()
+        watchdog = threading.Timer(timeout, process.kill)
+        watchdog.daemon = True
+        watchdog.start()
         parse_error = None
         try:
             events = chain(before, _xml_events(process.stdout))
@@ -301,6 +305,7 @@ def _query_system(extras=None, query=None, before=()):
                 process.kill()
         finally:
             process.wait()
+            watchdog.cancel()
             reader.join()
         if process.returncode:
             detail = bytes(errors).decode('utf-16' if errors.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8', errors='replace').strip()
@@ -344,7 +349,7 @@ def windows_power(since=None):
     Returns (boots, extras, info); raises ValueError when the log cannot be read."""
     def read(archived):
         extras = new_extras()
-        return _query_system(extras, power_query(since), archived)[0], extras
+        return _query_system(extras, power_query(since), archived, timeout=60)[0], extras
     try:
         (boots, extras), info = _with_archives(read, since)
     except (OSError, ET.ParseError) as error:

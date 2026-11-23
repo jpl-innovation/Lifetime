@@ -883,5 +883,25 @@ class StopPlacementTests(unittest.TestCase):
         spans = downtime.longest_spans(result['events'], at('2026-11-18T00:00'), at('2026-11-19T12:00'))
         self.assertEqual(spans['awake'], 3*H)       # the unknown night is not counted as awake
 
+
+class TimeLimitTests(unittest.TestCase):
+    """Review finding 8: a hung wevtutil or journalctl must end with an error, never block the hourly read."""
+    def test_a_hung_wevtutil_is_stopped(self):
+        import time as clock
+        original = subprocess.Popen
+        def hung(args, **kwargs):
+            return original([sys.executable, '-c', 'import sys, time; sys.stdout.write("<Events>"); sys.stdout.flush(); time.sleep(60)'], **kwargs)
+        started = clock.monotonic()
+        with patch.object(windows.subprocess, 'Popen', side_effect=hung):
+            with self.assertRaises(ValueError):
+                windows._query_system(windows.new_extras(), windows.power_query(), timeout=1)
+        self.assertLess(clock.monotonic() - started, 20)
+
+    def test_a_hung_journalctl_is_stopped(self):
+        with patch.object(imp.subprocess, 'run', side_effect=subprocess.TimeoutExpired(['journalctl'], 300)):
+            with self.assertRaisesRegex(ValueError, 'did not answer'):
+                imp.command(['journalctl', '--list-boots'])
+            self.assertIsInstance(tracker.read_power(None, lambda since: imp.command(['journalctl'])), ValueError)
+
 if __name__ == '__main__':
     unittest.main()

@@ -581,7 +581,8 @@ def run(directory=None):
                     if power_results:
                         refresh_downtime(ledger, power_results.pop())
                         power_pending = False
-                    if running and not power_pending and time.monotonic()-power_attempt >= 3600:
+                    # A read that never came back (it has its own time limits) does not block the next one for ever.
+                    if running and (not power_pending or time.monotonic()-power_attempt >= 7200)                             and time.monotonic()-power_attempt >= 3600:
                         power_pending = True
                         power_attempt = time.monotonic()
                         threading.Thread(target=collect_power, args=(power_since(ledger),), daemon=True).start()
