@@ -121,7 +121,9 @@ jobs:
   linux-pairing:
     # A Linux computer pairs with a Linux server by typing the code only (no --server): local discovery and the network
     # search, the paths that failed in 1.2.1. Two Ubuntu containers on one Docker network (two computers on a LAN), each
-    # resolving its own name to 127.0.1.1 as Ubuntu does, and a server address name that does not resolve.
+    # resolving its own name to 127.0.1.1 as Ubuntu does, and a server address name that does not resolve. A second
+    # client has multicast blocked (a route set with the runner's sudo, no container privileges), so it proves the
+    # network search on its own.
     needs: linux-build
     runs-on: ubuntu-latest
     steps:

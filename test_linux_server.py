@@ -330,8 +330,14 @@ class PairingScriptTests(unittest.TestCase):
     def test_the_client_pairs_by_code_only_with_ubuntus_host_name_and_an_unresolvable_server_name(self):
         root = Path(__file__).parent
         script = (root / 'packaging' / 'linux' / 'pairing_test.sh').read_text(encoding='utf-8')
-        enroll = next(line for line in script.splitlines() if '--connection-stdin' in line)
-        self.assertNotIn('--server', enroll)
+        enrollments = [line for line in script.splitlines() if '--connection-stdin' in line]
+        self.assertEqual(len(enrollments), 2)
+        for enroll in enrollments:
+            self.assertNotIn('--server', enroll)
+        # The second client cannot send the discovery query, so only the network search can find the server.
+        second = script[script.index('--- second client'):]
+        self.assertLess(second.index('ip route add unreachable 224.0.0.0/4'), second.index('--connection-stdin'))
+        self.assertIn("then echo 'Multicast is not blocked'; exit 1; fi", second)
         self.assertIn('127.0.1.1', script)
         self.assertIn('grep -v -w -e "$name"', script)          # Docker's line with the real address is removed
         self.assertIn('--address https://lifetime.school.lan:8443 --host 0.0.0.0', script)

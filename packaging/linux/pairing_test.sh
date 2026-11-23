@@ -8,7 +8,9 @@
 #    address is removed), so a client that looks for its network through its host name finds none;
 #  - the server's address is a name nobody can resolve (https://lifetime.school.lan:8443), so the client has to find
 #    it by local discovery (5353/udp) or the network search and use the address it answered from.
-# The client enrolls with the code only, is approved, and syncs.
+# The client enrolls with the code only, is approved, and syncs. It may find the server either way; a second client
+# then enrolls with multicast blocked in its network namespace (set from the CI host with sudo, so the container gets
+# no privileges), which leaves only the network search: that path is proven on its own.
 set -euo pipefail
 artifacts="$(cd -- "$1" && pwd)"
 image="${2:-ubuntu:24.04}"
@@ -16,6 +18,7 @@ arch="$(uname -m)"
 network=lifetime-pairing
 server=lifetime-pairing-server
 client=lifetime-pairing-client
+second=lifetime-pairing-client-2
 work="$(mktemp -d)"
 tar -xzf "$artifacts/Lifetime-Server-Linux-$arch.tar.gz" -C "$work"
 tar -xzf "$artifacts/Lifetime-Linux-$arch.tar.gz" -C "$work"
@@ -28,7 +31,7 @@ finish() {
         echo '--- server log'; docker logs "$server" 2>&1 | tail -n 50 || true
         echo '--- client log'; docker exec "$client" tail -n 50 /tmp/agent.log 2>/dev/null || true
     fi
-    docker rm -f "$server" "$client" >/dev/null 2>&1 || true
+    docker rm -f "$server" "$client" "$second" >/dev/null 2>&1 || true
     docker network rm "$network" >/dev/null 2>&1 || true
     exit "$status"
 }
@@ -75,4 +78,19 @@ for _ in $(seq 90); do
     sleep 2
 done
 [[ "$records" =~ ^[1-9] ]] || { echo 'The client did not sync'; exit 1; }
-echo "=== OK: paired by code only and synced $records record(s)"
+echo "client synced $records record(s)"
+
+echo "--- second client ($image): discovery blocked, so only the network search can find the server"
+docker run -d --name "$second" --hostname pc-02 --network "$network" -v "$work:/lifetime:ro" "$image" sleep infinity >/dev/null
+docker exec "$second" bash -c "$ubuntu_hosts"
+pid="$(docker inspect -f '{{.State.Pid}}' "$second")"
+sudo nsenter -t "$pid" -n ip route add unreachable 224.0.0.0/4          # its discovery query cannot be sent
+if sudo nsenter -t "$pid" -n ip route get 224.0.0.251 >/dev/null 2>&1; then echo 'Multicast is not blocked'; exit 1; fi
+code="$(admin --operation invitation --field code)"
+enrolled=0
+printf '%s' "$code" | docker exec -i "$second" "$agent" --directory /agent --connection-stdin --display-name pairing-search \
+    || enrolled=$?
+[[ "$enrolled" == 0 ]] || { echo "The network search did not find the server: LifetimeAgent exit $enrolled"; exit 1; }
+request="$(admin --operation pending_enrollments --field request_id)" || { echo 'No enrollment arrived from the network search'; exit 1; }
+admin --operation approve --arguments "{\"request_id\": \"$request\"}" >/dev/null
+echo "=== OK: paired by code only (any path) and synced $records record(s); paired again through the network search alone"
