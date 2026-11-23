@@ -267,6 +267,22 @@ class MonitorAvailabilityTests(MonitorCase):
         self.assertEqual(self.monitor.availability([ID], start='1971-01-01', end='1971-01-02')['devices'][0]['status'],
                          'insufficient')
 
+    def test_fleet_bars_compute_outside_the_monitoring_lock(self):
+        """The computation for each computer runs without holding the lock a monitoring pass needs."""
+        from unittest.mock import patch
+        import lifetime_monitor
+        self.fleet.add()
+        self.monitor.tick()
+        held, real = [], availability.device_availability
+
+        def spy(*arguments, **options):
+            held.append(self.monitor._lock._is_owned())
+            return real(*arguments, **options)
+        with patch.object(lifetime_monitor.availability, 'device_availability', side_effect=spy):
+            self.monitor.uptime_bars('2026-11-10', '2026-11-16')
+            self.monitor.availability([ID], start='2026-11-10', end='2026-11-16')
+        self.assertEqual(held, [False, False])
+
     def test_fleet_uptime_bars_are_worst_first_bucketed_and_small(self):
         import uuid
         from lifetime_protocol import MAX_BYTES, canonical

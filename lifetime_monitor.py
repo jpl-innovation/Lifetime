@@ -1161,34 +1161,37 @@ class Monitor:
         wanted = set(device_ids)
         devices = [item for item in (self.store.monitor_snapshot() if self.store is not None else [])
                    if item['device_id'] in wanted]
-        with self._lock:
-            results = [self._device_availability(self._db, device, first, last, now, floor, daily) for device in devices]
+        results = [self._device_availability(device, first, last, now, floor, daily) for device in devices]
         return dict(as_of=_stamp(now), coverage_floor=floor, devices=results)
 
-    def _device_availability(self, db, device, first, last, now, floor, daily, spans=None):
-        schedule = self._schedule_for(db, device)
-        zone, zone_ok = schedule_zone(schedule)
-        local = (lambda moment: moment.astimezone(zone)) if zone else (lambda moment: moment.astimezone())
-        since = None
-        if first:
-            begin, finish = first, last
-        else:
-            oldest = db.execute('SELECT MIN(start_at) FROM presence WHERE device_id=?', (device['device_id'],)).fetchone()[0]
-            since = _time(oldest) if oldest else now
-            begin, finish = local(since).date(), local(now).date()
-        low = availability.local_midnight(begin, zone)
-        high = availability.local_midnight(finish + dt.timedelta(days=1), zone)
-        presence = [(row['state'], _time(row['start_at']), row['end_at'] and _time(row['end_at']))
-                    for row in db.execute('''SELECT state,start_at,end_at FROM presence WHERE device_id=?
-                        AND start_at<? AND (end_at IS NULL OR end_at>?)''', (device['device_id'], _stamp(high), _stamp(low)))]
-        windows = [(_time(row['start_at']), _time(row['end_at'])) for row in db.execute(
-            '''SELECT start_at,end_at FROM maintenance WHERE start_at<? AND end_at>? AND (scope='all'
-               OR (scope='group' AND key=?) OR (scope='device' AND key=?))''',
-            (_stamp(high), _stamp(low), (device.get('group') or '').casefold(), device['device_id']))]
-        incidents = [dict(row) for row in db.execute(
-            '''SELECT rule,state,started_at,opened_at,resolved_at,value FROM incidents WHERE device_id=?
-               AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
-               ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
+    def _device_availability(self, device, first, last, now, floor, daily, spans=None):
+        """One computer's availability: its schedule, presence, maintenance and incidents are read under the lock,
+        the computation runs outside it, so a whole-fleet request never holds up a monitoring pass for long."""
+        with self._lock:
+            db = self._db
+            schedule = self._schedule_for(db, device)
+            zone, zone_ok = schedule_zone(schedule)
+            local = (lambda moment: moment.astimezone(zone)) if zone else (lambda moment: moment.astimezone())
+            since = None
+            if first:
+                begin, finish = first, last
+            else:
+                oldest = db.execute('SELECT MIN(start_at) FROM presence WHERE device_id=?', (device['device_id'],)).fetchone()[0]
+                since = _time(oldest) if oldest else now
+                begin, finish = local(since).date(), local(now).date()
+            low = availability.local_midnight(begin, zone)
+            high = availability.local_midnight(finish + dt.timedelta(days=1), zone)
+            presence = [(row['state'], _time(row['start_at']), row['end_at'] and _time(row['end_at']))
+                        for row in db.execute('''SELECT state,start_at,end_at FROM presence WHERE device_id=?
+                            AND start_at<? AND (end_at IS NULL OR end_at>?)''', (device['device_id'], _stamp(high), _stamp(low)))]
+            windows = [(_time(row['start_at']), _time(row['end_at'])) for row in db.execute(
+                '''SELECT start_at,end_at FROM maintenance WHERE start_at<? AND end_at>? AND (scope='all'
+                   OR (scope='group' AND key=?) OR (scope='device' AND key=?))''',
+                (_stamp(high), _stamp(low), (device.get('group') or '').casefold(), device['device_id']))]
+            incidents = [dict(row) for row in db.execute(
+                '''SELECT rule,state,started_at,opened_at,resolved_at,value FROM incidents WHERE device_id=?
+                   AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
+                   ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
         result = availability.device_availability(presence, schedule, device.get('laptop'), windows, begin, finish,
                                                   zone, now, floor, daily, since, spans)
         name = schedule['timezone'] if zone_ok else 'local'
@@ -1217,14 +1220,13 @@ class Monitor:
         else:
             devices = self.store.monitor_snapshot() if self.store is not None else []
             rows = []
-            with self._lock:
-                for device in devices:
-                    found = self._device_availability(self._db, device, first, last, now, floor, False, spans)
-                    bars = [[round(good / 60), round(bad / 60), round(unknown / 60)] for good, bad, unknown, _ in found['spans_s']]
-                    rows.append(dict(device_id=device['device_id'], name=device.get('name', ''),
-                                     group=device.get('group', ''), availability=found['availability'],
-                                     coverage=found['coverage'], status=found['status'], outages=found['outages'],
-                                     longest_outage_s=found['longest_outage_s'], bars=bars))
+            for device in devices:
+                found = self._device_availability(device, first, last, now, floor, False, spans)
+                bars = [[round(good / 60), round(bad / 60), round(unknown / 60)] for good, bad, unknown, _ in found['spans_s']]
+                rows.append(dict(device_id=device['device_id'], name=device.get('name', ''),
+                                 group=device.get('group', ''), availability=found['availability'],
+                                 coverage=found['coverage'], status=found['status'], outages=found['outages'],
+                                 longest_outage_s=found['longest_outage_s'], bars=bars))
             order = {'ok': 0, 'insufficient': 1, 'not-scheduled': 2}
             rows.sort(key=lambda row: (order[row['status']], 101 if row['availability'] is None else row['availability'],
                                        row['name'].casefold(), row['device_id']))
