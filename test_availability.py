@@ -283,6 +283,20 @@ class MonitorAvailabilityTests(MonitorCase):
             self.monitor.availability([ID], start='2026-11-10', end='2026-11-16')
         self.assertEqual(held, [False, False])
 
+    def test_daily_bars_over_years_come_in_pages_that_fit_one_reply(self):
+        import uuid
+        from lifetime_protocol import MAX_BYTES, canonical
+        for number in range(30):
+            self.fleet.add(str(uuid.UUID(int=100 + number)), name=f'PC-{number:02}')
+        self.monitor.tick()
+        result = self.monitor.uptime_bars('2016-11-26', '2026-11-16', kind='day', limit=50)     # 3,643 daily bars
+        self.assertEqual((result['total'], len(result['buckets'])), (30, 3643))
+        self.assertLessEqual(len(result['rows']), 9)                    # fewer computers per page, never a 413
+        worst = [dict(row, name='x' * 64, bars=[[1440, 1440, 1440]] * 3643) for row in result['rows']]
+        self.assertLess(len(canonical(dict(result, rows=worst))), MAX_BYTES * 0.9)
+        rest = self.monitor.uptime_bars('2016-11-26', '2026-11-16', kind='day', offset=len(result['rows']), limit=50)
+        self.assertNotIn(result['rows'][0]['device_id'], [row['device_id'] for row in rest['rows']])
+
     def test_fleet_uptime_bars_are_worst_first_bucketed_and_small(self):
         import uuid
         from lifetime_protocol import MAX_BYTES, canonical

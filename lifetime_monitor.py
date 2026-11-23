@@ -108,6 +108,7 @@ MIGRATIONS = [
     ),
 ]
 TREND_DAYS = 730        # forecasts look back up to two years; one small row per computer and day
+MAX_BAR_CELLS = 36000   # bars in one uptime_bars page (about 600 KB at worst, under the 1 MiB admin reply)
 SUMMARY_DAYS = 3660     # resolved incident summaries are kept this long at most (or until "delete before")
 
 
@@ -1231,6 +1232,7 @@ class Monitor:
             rows.sort(key=lambda row: (order[row['status']], 101 if row['availability'] is None else row['availability'],
                                        row['name'].casefold(), row['device_id']))
             self._bars_cache = (key, rows)
+        limit = min(limit, max(1, MAX_BAR_CELLS // len(spans)))     # long daily bars: fewer computers per page
         return dict(as_of=_stamp(now), coverage_floor=floor, start=first.isoformat(), end=last.isoformat(),
                     buckets=[[a.isoformat(), b.isoformat()] for a, b in spans], total=len(rows),
                     rows=rows[offset:offset + limit])
