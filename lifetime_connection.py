@@ -312,6 +312,12 @@ def scrub(text):
     return '\n'.join(result)
 
 
+def plain(value, limit=300):
+    """``value`` as one line of at most ``limit`` printable characters: names from the network can carry new lines or
+    control characters that would forge lines of their own in a report."""
+    return ''.join(char for char in str(value) if char.isprintable())[:limit]
+
+
 # Diagnose connection and Self check lines: {state, text, fix, values}, text and fix being catalogue keys.
 CHECK_WORDS = {'good': 'Passed', 'warning': 'Check', 'danger': 'Problem', 'info': 'Info', 'neutral': 'Skipped'}
 
@@ -320,7 +326,7 @@ def check_lines(checks, t):
     """Diagnosis or Self check lines as plain text in the language of ``t``: '[Problem] cause' then what to do."""
     lines = []
     for check in checks:
-        values = check.get('values') or {}
+        values = {key: plain(value) for key, value in (check.get('values') or {}).items()}
         lines.append(f"[{t(CHECK_WORDS.get(check['state'], 'Info'))}] {t(check['text'], **values)}")
         if check.get('fix'):
             lines.append('    ' + t('What to do: {fix}', fix=t(check['fix'], **values)))

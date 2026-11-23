@@ -2367,6 +2367,11 @@ _DIAGNOSTICS_VI = {
     'Not run. Press Diagnose connection first.': 'Chưa chạy. Hãy bấm Chẩn đoán kết nối trước.',
     'Log: {name}, last {count} lines': 'Nhật ký: {name}, {count} dòng cuối',
     'Diagnostics copied. Codes, tokens and passwords are left out.': 'Đã sao chép thông tin chẩn đoán. Mã, token và mật khẩu được loại bỏ.',
+    'Several Lifetime Servers answered and none has a certificate that matches the code. Checking the first one, {name}.':
+        'Có nhiều Lifetime Server trả lời và không máy nào có chứng chỉ khớp với mã. Đang kiểm tra máy đầu tiên, {name}.',
+    'Make sure the code comes from the server this computer should use, or type its connection line (Add device shows it).':
+        'Hãy chắc chắn mã đến từ máy chủ mà máy tính này cần dùng, hoặc nhập dòng kết nối của máy chủ đó (Thêm thiết bị hiển thị dòng này).',
+    'Several Lifetime Servers answered. {name} matches the code.': 'Có nhiều Lifetime Server trả lời. {name} khớp với mã.',
 }
 for _key, _text in _DIAGNOSTICS_VI.items():
     EN.setdefault(_key, _key)

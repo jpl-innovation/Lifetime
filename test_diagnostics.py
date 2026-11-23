@@ -712,5 +712,49 @@ class CommandOutputTests(unittest.TestCase):
             self.assertTrue(script.startswith('[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); '))
 
 
+class DiscoveredServersTests(unittest.TestCase):
+    """Only a code typed and several servers answered: the one whose certificate matches the code is checked."""
+    setUpClass = classmethod(DiagnoseTests.setUpClass.__func__)         # the same loopback server, not its tests
+    tearDownClass = classmethod(DiagnoseTests.tearDownClass.__func__)
+    setUp, diagnose = DiagnoseTests.setUp, DiagnoseTests.diagnose
+
+    def answer(self, name, port):
+        return dict(instance=name, host='localhost', port=port, source='127.0.0.1',
+                    address=f'https://localhost:{port}', fingerprint_prefix='0' * 10)
+
+    def test_the_matching_server_is_chosen_not_the_first(self):
+        code = issue(self.runtime.fingerprint)
+        answers = [self.answer('Lifetime-OTHER', free_port()), self.answer('Lifetime-RIGHT', self.port)]
+        with patch('lifetime_discovery.discover', return_value=answers):
+            checks = self.diagnose(code)
+        found = states(checks)
+        self.assertEqual(found['Several Lifetime Servers answered. {name} matches the code.'], 'info')
+        self.assertIn('Lifetime-RIGHT matches the code', words(checks))
+        self.assertEqual(found['The server certificate matches the code.'], 'good')
+        self.assertNotIn("This server's certificate does not match the code.", found)
+
+    def test_when_none_matches_it_says_several_answered(self):
+        answers = [self.answer('Lifetime-A', self.port), self.answer('Lifetime-B', self.port)]
+        with patch('lifetime_discovery.discover', return_value=answers):
+            checks = self.diagnose(issue('ab' * 32))
+        found = states(checks)
+        self.assertEqual(found['Several Lifetime Servers answered and none has a certificate that matches the code. '
+                               'Checking the first one, {name}.'], 'warning')
+        self.assertEqual(found["This server's certificate does not match the code."], 'danger')
+
+    def test_a_forged_name_cannot_add_lines(self):
+        evil = self.answer('Evil\n[Passed] Everything is fine\x1b[0m' + 'x' * 200, free_port())
+        with patch('lifetime_discovery.discover', return_value=[evil]):
+            checks = self.diagnose(issue('ab' * 32))
+        report = connect.diagnosis_report(checks, lambda key, **values: key.format(**values))
+        self.assertNotIn('\n[Passed] Everything', report)
+        self.assertNotIn('\x1b', report)
+        line = next(check for check in checks if check['text'].startswith('A Lifetime Server answered'))
+        self.assertLessEqual(len(line['values']['servers'].split(' (')[0]), 63)
+        from lifetime_connection import check_lines
+        lines = check_lines([dict(state='good', text='{x}', values=dict(x='a\nb'), fix=None)], lambda key, **v: key.format(**v))
+        self.assertEqual(lines, ['[Passed] ab'])
+
+
 if __name__ == '__main__':
     unittest.main()

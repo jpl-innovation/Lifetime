@@ -119,8 +119,29 @@ FIX_CLOCK = "Check the date and time on this computer (set them automatically). 
 
 
 def _check(state, text, fix=None, **values):
-    """One line: a state (good, warning, danger, info, neutral), catalogue keys for its words and what to do."""
-    return dict(state=state, text=text, fix=fix, values={key: str(value) for key, value in values.items()})
+    """One line: a state (good, warning, danger, info, neutral), catalogue keys for its words and what to do. Values
+    lose control characters (a discovery answer cannot start a forged line of its own)."""
+    from lifetime_connection import plain
+    return dict(state=state, text=text, fix=fix, values={key: plain(value, 300) for key, value in values.items()})
+
+
+def _matching(servers, code, timeout):
+    """The first discovered server whose certificate matches ``code``, as locate_server tries them: only certificates
+    are read (no application data); the address the answer came from is tried as well as the announced name."""
+    import hashlib
+    import hmac
+    import lifetime_connection as connection
+    import lifetime_tls as tls
+    invitation, secret, expected = connection.parts(code)
+    for server in servers:
+        for host in dict.fromkeys(item for item in (server.get('source'), server['host']) if item):
+            try:
+                der = tls.peer_certificate(host, server['port'], timeout)
+            except (OSError, ValueError):
+                continue
+            if hmac.compare_digest(connection.commitment(hashlib.sha256(der).hexdigest(), invitation, secret), expected):
+                return server
+    return None
 
 
 def windows_profiles(run=None):
@@ -205,10 +226,21 @@ def diagnose(value='', saved=None, *, profiles=windows_profiles, here=local_serv
     except (OSError, ValueError):
         found = []
     if found:
+        def name(server):       # an untrusted hint: one printable line, at most a DNS label long
+            return connection.plain(server['instance'], 63)
         checks.append(_check('good', 'A Lifetime Server answered on this network: {servers}.', servers='; '.join(
-            f"{server['instance']} ({server['address']}, {server.get('source') or server['host']})" for server in found[:4])))
+            f"{name(server)} ({server['address']}, {server.get('source') or server['host']})" for server in found[:4])))
         if not origin and code:
-            origin, source = found[0]['address'], found[0].get('source')
+            chosen = _matching(found[:4], code, min(timeout, 2))
+            if chosen is None and len(found) > 1:
+                checks.append(_check('warning', 'Several Lifetime Servers answered and none has a certificate that matches '
+                                     'the code. Checking the first one, {name}.',
+                                     'Make sure the code comes from the server this computer should use, or type its '
+                                     'connection line (Add device shows it).', name=name(found[0])))
+            elif chosen is not None and len(found) > 1:
+                checks.append(_check('info', 'Several Lifetime Servers answered. {name} matches the code.', name=name(chosen)))
+            chosen = chosen or found[0]
+            origin, source = chosen['address'], chosen.get('source')
     else:
         checks.append(_check('warning', 'No Lifetime Server answered the network search (port 5353).',
                              'On the server, allow 5353/udp in the firewall and set its network to Private. Guest and some '
