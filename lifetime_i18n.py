@@ -2191,6 +2191,7 @@ _APPIMAGE_VI = {
     'Lifetime Server (dashboard)': 'Lifetime Server (bảng điều khiển)',
     "Lifetime (this computer's awake time)": 'Lifetime (thời gian hoạt động của máy này)',
     'Remember my choice': 'Ghi nhớ lựa chọn của tôi',
+    'Ask again which program the AppImage opens': 'Hỏi lại AppImage sẽ mở chương trình nào',
 }
 VI.update(_APPIMAGE_VI)
 EN.update({key: key for key in _APPIMAGE_VI})

@@ -206,10 +206,13 @@ mkdir -p "$data_home/applications"
 } > "$data_home/applications/lifetime.desktop"
 if [[ -x "$install_dir/LifetimeServerDashboard" ]]; then
     # Gives the dashboard's app id (lifetime-server) its yellow icon in the dock and taskbar on Wayland. It is in the
-    # app menu when Lifetime Server is installed on this computer (the dashboard then finds it without arguments);
-    # install_server_linux.sh shows it there too when the server comes second.
+    # app menu when Lifetime Server is installed on this computer (its program: its settings stay after an uninstall)
+    # and this person may use it, as a member of lifetime-admin or lifetime-console (read from the group database, so
+    # a membership given before their next sign-in counts). install_server_linux.sh shows it when the server comes second.
     hidden='NoDisplay=true\n'
-    [[ ! -x /opt/lifetime-server/LifetimeServerRuntime ]] || hidden=''     # its settings stay after an uninstall
+    if [[ -x /opt/lifetime-server/LifetimeServerRuntime && " $(id -nG "$(id -un)" 2>/dev/null) " =~ \ lifetime-(admin|console)\  ]]; then
+        hidden=''
+    fi
     {
         printf '[Desktop Entry]\nType=Application\nName=Lifetime Server\nComment=Lifetime Server dashboard\nExec='
         desktop_quote "$install_dir/LifetimeServerDashboard"

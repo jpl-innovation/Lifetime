@@ -13,7 +13,7 @@ from lifetime_i18n_qt import QLabel, QPushButton, QWidget, QDialog, QCheckBox, Q
 
 from lifetime_theme import stylesheet, install
 from lifetime_glass import set_style, active_style, desktop_sheet
-from lifetime_settings import defaults, delete_history, normalize, save_settings, load_settings, update_settings
+from lifetime_settings import defaults, delete_history, normalize, save_settings, load_settings, update_settings, start_choice_path
 
 CHOICES = (
     ('awake', 'Awake time', 'Required. Counts time while this computer is awake.'),
@@ -369,11 +369,23 @@ class SettingsPage(QWidget):
             row.switch.toggled.connect(self.changed)
             self.answers[key] = row.switch
             box.addWidget(panel)
+        # The AppImage on a computer with Lifetime Server remembers which program it opens when told to; this asks again.
+        self.ask_again = QPushButton(tr('Ask again which program the AppImage opens'))
+        self.ask_again.setVisible(start_choice_path(directory).exists())
+        self.ask_again.clicked.connect(self.forget_start_choice)
+        box.addWidget(self.ask_again, alignment=Qt.AlignmentFlag.AlignLeft)
         self.delete_button = QPushButton(tr('Delete collected history'))
         self.delete_button.clicked.connect(self.confirm_delete)
         box.addWidget(self.delete_button, alignment=Qt.AlignmentFlag.AlignLeft)
         box.addStretch(1)
         self.load(window.settings)
+
+    def forget_start_choice(self):
+        try:
+            start_choice_path(self.directory).unlink(missing_ok=True)
+        except OSError:
+            return
+        self.ask_again.hide()
 
     @staticmethod
     def heading(value, name):

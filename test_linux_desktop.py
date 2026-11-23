@@ -177,9 +177,30 @@ class ServerDashboardMenuTests(unittest.TestCase):
         self.assertIn('[[ -f "$entry" && ! -L "$entry" ]]', server)
         self.assertIn("runuser -u \"$extra_admin\" -- sed -i '/^NoDisplay=true$/d' \"$entry\"", server)
         self.assertNotIn('chown "$extra_admin', server)
-        # Lifetime for Linux shows the entry by itself when the server is already installed.
-        desktop = (root / 'install_linux.sh').read_text(encoding='utf-8')
-        self.assertIn("[[ ! -x /opt/lifetime-server/LifetimeServerRuntime ]] || hidden=''", desktop)
+
+    @WITH_BASH
+    def test_lifetime_for_linux_shows_the_entry_only_with_the_server_installed_and_to_its_admins(self):
+        desktop = (PROJECT / 'install_linux.sh').read_text(encoding='utf-8').replace('\r\n', '\n')
+        start = desktop.index("    hidden='NoDisplay=true\\n'")
+        block = desktop[start:desktop.index("    {\n        printf '[Desktop Entry]", start)]
+        self.assertEqual(block.count('/opt/lifetime-server/LifetimeServerRuntime'), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / 'LifetimeServerRuntime'
+            script = ('id() { if [[ "$1" == -un ]]; then echo alice; else echo "$MEMBER_OF"; fi; }\n'
+                      + block.replace('/opt/lifetime-server/LifetimeServerRuntime', runtime.as_posix())
+                      + 'echo "[$hidden]"\n')
+
+            def shown(groups):
+                result = run_bash(script, MEMBER_OF=groups)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip() == '[]'
+            self.assertFalse(shown('alice lifetime-admin'))         # no server on this computer
+            runtime.write_text('#!/bin/sh\n')
+            runtime.chmod(0o755)
+            self.assertTrue(shown('alice sudo lifetime-admin'))
+            self.assertTrue(shown('alice lifetime-console'))
+            self.assertFalse(shown('alice sudo'))                   # anyone else on the computer
+            self.assertFalse(shown('alice lifetime-admins'))
 
 
     @WITH_BASH
@@ -218,6 +239,21 @@ class ServerDashboardMenuTests(unittest.TestCase):
 class AppImageStartTests(unittest.TestCase):
     """The AppImage on a computer with Lifetime Server installed asks which program to open, remembered per person."""
 
+    def test_settings_offer_to_ask_again_once_a_choice_is_remembered(self):
+        from PyQt6.QtWidgets import QApplication
+        global APPLICATION
+        APPLICATION = QApplication.instance() or QApplication([])      # kept: Qt needs it alive
+        folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        page = setup.SettingsPage(Mock(settings=settings.defaults()), directory=folder)
+        self.assertTrue(page.ask_again.isHidden())          # nothing remembered: nothing to offer
+        page.deleteLater()
+        settings.start_choice_path(folder).write_text('server', encoding='utf-8')
+        page = setup.SettingsPage(Mock(settings=settings.defaults()), directory=folder)
+        self.assertFalse(page.ask_again.isHidden())
+        page.ask_again.click()
+        self.assertFalse(settings.start_choice_path(folder).exists())
+        self.assertTrue(page.ask_again.isHidden())
+        page.deleteLater()
     def setUp(self):
         self.folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.server = self.folder / 'server.conf'

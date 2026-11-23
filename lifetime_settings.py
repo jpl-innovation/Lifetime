@@ -39,7 +39,7 @@ def appimage_start(ask, directory=None, environ=None, installed=SERVER_INSTALLED
     environ = os.environ if environ is None else environ
     if environ.pop('LIFETIME_APPIMAGE_START', None) != '1' or not any(os.path.exists(path) for path in installed):
         return 'desktop'
-    path = Path(directory or data_dir()) / START_CHOICE
+    path = start_choice_path(directory)
     try:
         remembered = path.read_text(encoding='utf-8').strip()
     except (OSError, ValueError):
@@ -54,6 +54,11 @@ def appimage_start(ask, directory=None, environ=None, installed=SERVER_INSTALLED
         except OSError:
             pass        # asked again next time
     return choice
+
+
+def start_choice_path(directory=None):
+    """Where the AppImage's remembered choice is kept (exists only once someone ticked Remember my choice)."""
+    return Path(directory or data_dir()) / START_CHOICE
 
 
 def iso_date(value: str) -> dt.date:
