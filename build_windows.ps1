@@ -4,14 +4,21 @@
 $ErrorActionPreference = 'Continue'
 python -m pip install --disable-pip-version-check -r requirements-build.txt      # exact, tested versions
 if ($LASTEXITCODE) { throw 'pip install failed' }
+# Version information in every program (product name, version, company): code signing requires it.
+function New-VersionFile([string]$Program, [string]$Description) {
+    $path = Join-Path (Get-Location).Path "build\version-$Program.txt"
+    python tools\windows_version.py $Program $Description $path
+    if ($LASTEXITCODE) { throw "Version information failed ($Program)" }
+    return $path
+}
 $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--onefile', '--icon', 'assets\lifetime.ico')
-python -m PyInstaller @common --noconsole --name LifetimeTracker lifetime_tracker.py
+python -m PyInstaller @common --noconsole --version-file (New-VersionFile LifetimeTracker 'Lifetime Tracker') --name LifetimeTracker lifetime_tracker.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (LifetimeTracker)' }
-python -m PyInstaller @common --noconsole --add-data 'assets\lifetime.png;assets' --add-data 'assets\jpl_innovation.png;assets' --add-data 'assets\jpl_innovation_light.png;assets' --name Lifetime --collect-submodules PyQt6 lifetime_gui.py
+python -m PyInstaller @common --noconsole --version-file (New-VersionFile Lifetime 'Lifetime') --add-data 'assets\lifetime.png;assets' --add-data 'assets\jpl_innovation.png;assets' --add-data 'assets\jpl_innovation_light.png;assets' --name Lifetime --collect-submodules PyQt6 lifetime_gui.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (Lifetime)' }
-python -m PyInstaller @common --console --name LifetimeImport --hidden-import lifetime_tracker lifetime_import_windows.py
+python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeImport 'Lifetime Import') --name LifetimeImport --hidden-import lifetime_tracker lifetime_import_windows.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (LifetimeImport)' }
-python -m PyInstaller @common --console --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 lifetime_agent.py
+python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeAgent 'Lifetime Agent') --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 lifetime_agent.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (LifetimeAgent)' }
 $packageTarget = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'package'))
 if ($packageTarget -ne [IO.Path]::GetFullPath((Join-Path (Get-Location).Path 'package'))) { throw 'Run this build from its repository directory.' }

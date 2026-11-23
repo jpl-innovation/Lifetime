@@ -30,6 +30,13 @@ try {
     $serverLogo = (Join-Path $PSScriptRoot 'assets\lifetime-server.png') + ';assets'     # the same, for the logo in its header
     $creditImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation.png') + ';assets'
     $creditLightImage = (Join-Path $PSScriptRoot 'assets\jpl_innovation_light.png') + ';assets'
+    # Version information in every program (product name "Lifetime", version, company): code signing requires it.
+    function New-VersionFile([string]$Program, [string]$Description) {
+        $path = Join-Path $work "version-$Program.txt"
+        & $Python (Join-Path $PSScriptRoot 'tools\windows_version.py') $Program $Description $path
+        if ($LASTEXITCODE -ne 0) { throw "Version information failed ($Program)." }
+        return $path
+    }
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
                 '--distpath', $output, '--workpath', $work, '--specpath', $work)
     # Modules imported only inside functions. PyInstaller finds most of them by scanning the code, but they are named
@@ -43,14 +50,14 @@ try {
                           'lifetime_signals', 'lifetime_tracker', 'lifetime_unix_admin') | ForEach-Object { '--hidden-import', $_ }
     $ErrorActionPreference = 'Continue'
     # zoneinfo reads IANA time zones from the tzdata package through importlib on Windows: collect its modules and data.
-    & $Python -m PyInstaller @common --console --name LifetimeServerRuntime --collect-all cryptography --collect-all tzdata @runtimeModules --exclude-module PyQt6 lifetime_server.py
+    & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeServerRuntime 'Lifetime Server') --name LifetimeServerRuntime --collect-all cryptography --collect-all tzdata @runtimeModules --exclude-module PyQt6 lifetime_server.py
     if ($LASTEXITCODE -ne 0) { throw 'Runtime build failed.' }
-    & $Python -m PyInstaller @common --noconsole --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --add-data $serverLogo --icon $serverIcon lifetime_server_gui.py
+    & $Python -m PyInstaller @common --noconsole --version-file (New-VersionFile LifetimeServerDashboard 'Lifetime Server Dashboard') --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --add-data $serverLogo --icon $serverIcon lifetime_server_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
-    & $Python -m PyInstaller @common --console --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
+    & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeAgent 'Lifetime Agent') --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
     if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }
     if ($IncludeServiceWrapper) {
-        & $Python -m PyInstaller @common --console --name LifetimeServerService --collect-all cryptography --collect-all tzdata @runtimeModules --hidden-import lifetime_server --exclude-module PyQt6 --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
+        & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeServerService 'Lifetime Server Service') --name LifetimeServerService --collect-all cryptography --collect-all tzdata @runtimeModules --hidden-import lifetime_server --exclude-module PyQt6 --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
         if ($LASTEXITCODE -ne 0) { throw 'Experimental service-wrapper build failed.' }
     }
     $ErrorActionPreference = 'Stop'

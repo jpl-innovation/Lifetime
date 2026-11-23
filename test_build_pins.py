@@ -55,5 +55,58 @@ class BuildPinTests(unittest.TestCase):
         self.assertNotIn('pull_request_target', workflow)
 
 
+class WindowsVersionInfoTests(unittest.TestCase):
+    """Code signing (SignPath) needs product name and version metadata in every Windows program."""
+
+    def fields(self, text):
+        found = {}
+        def record(name):
+            def build(*args, **kwargs):
+                found.setdefault(name, []).append((args, kwargs))
+                return name
+            return build
+        names = ('VSVersionInfo', 'FixedFileInfo', 'StringFileInfo', 'StringTable', 'StringStruct', 'VarFileInfo', 'VarStruct')
+        eval(text, {'__builtins__': {}}, {name: record(name) for name in names})      # the file is our own text
+        return found
+
+    def test_every_program_is_product_lifetime_with_its_own_description_and_the_release_version(self):
+        import sys
+        sys.path.insert(0, str(PROJECT / 'tools'))
+        try:
+            import windows_version
+        finally:
+            sys.path.remove(str(PROJECT / 'tools'))
+        from lifetime_reports import VERSION
+        found = self.fields(windows_version.version_info('LifetimeServerRuntime', 'Lifetime Server', '1.3.0-rc1'))
+        strings = dict(args for args, _ in found['StringStruct'])
+        self.assertEqual(strings['ProductName'], 'Lifetime')
+        self.assertEqual(strings['CompanyName'], 'JPL Innovation')
+        self.assertEqual(strings['FileDescription'], 'Lifetime Server')
+        self.assertEqual(strings['OriginalFilename'], 'LifetimeServerRuntime.exe')
+        self.assertEqual((strings['FileVersion'], strings['ProductVersion']), ('1.3.0-rc1', '1.3.0-rc1'))
+        fixed = found['FixedFileInfo'][0][1]
+        self.assertEqual((fixed['filevers'], fixed['prodvers']), ((1, 3, 0, 0), (1, 3, 0, 0)))
+        default = dict(args for args, _ in self.fields(windows_version.version_info('Lifetime', 'Lifetime'))['StringStruct'])
+        self.assertEqual(default['ProductVersion'], VERSION)
+        try:
+            from PyInstaller.utils.win32.versioninfo import load_version_info_from_text_file
+        except ImportError:
+            return      # the build job checks it with PyInstaller itself
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'version.txt'
+            path.write_text(windows_version.version_info('Lifetime', 'Lifetime'), encoding='utf-8')
+            self.assertIn("StringStruct('ProductName', 'Lifetime')", str(load_version_info_from_text_file(str(path))))
+
+    def test_both_windows_builds_give_every_program_its_version_file(self):
+        for name in ('build_windows.ps1', 'build_server_windows.ps1'):
+            builds = [line for line in text(name).splitlines() if '-m PyInstaller' in line]
+            self.assertGreaterEqual(len(builds), 4, name)
+            for line in builds:
+                program = re.search(r'--name (\w+)', line).group(1)
+                self.assertIn(f'--version-file (New-VersionFile {program} ', line)
+            self.assertIn('windows_version.py', text(name))
+
+
 if __name__ == '__main__':
     unittest.main()
