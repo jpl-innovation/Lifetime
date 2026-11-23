@@ -69,7 +69,7 @@ class DashboardShellTests(unittest.TestCase):
     def test_click_keyboard_and_shortcuts_follow_visual_order(self):
         # Legacy IDs remain stable, while the new sidebar has the requested order.
         self.assertEqual([row.text() for row in self.w.sidebar.rows],
-                         ['Overview', 'Activity', 'System', 'Health', 'Connect', 'Reports', 'Settings'])
+                         ['Overview', 'Activity', 'Uptime & downtime', 'System', 'Health', 'Connect', 'Reports', 'Settings'])
         first = self.w.navigation.group.button(0)
         first.setFocus()
         QTest.keyClick(first, Qt.Key.Key_Down)
@@ -82,7 +82,7 @@ class DashboardShellTests(unittest.TestCase):
         self.assertTrue(first.hasFocus())
         QTest.keyClick(first, Qt.Key.Key_Tab)
         self.assertTrue(activity.hasFocus())
-        for key, page in ((Qt.Key.Key_6, 3), (Qt.Key.Key_5, 5), (Qt.Key.Key_4, 4), (Qt.Key.Key_3, 1),
+        for key, page in ((Qt.Key.Key_7, 7), (Qt.Key.Key_6, 3), (Qt.Key.Key_5, 5), (Qt.Key.Key_4, 4), (Qt.Key.Key_3, 1),
                           (Qt.Key.Key_2, 2), (Qt.Key.Key_1, 0)):
             QTest.keyClick(self.w, key, Qt.KeyboardModifier.ControlModifier)
             self.assertEqual(self.w.pages.currentIndex(), page)

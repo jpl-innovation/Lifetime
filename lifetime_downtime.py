@@ -377,7 +377,7 @@ def coverage(ledger):
     daily = [k for k in ledger.get('daily', {}) if valid_date(k)]
     if daily:
         candidates.append((min(daily), 'lifetime'))
-    first, source = min(candidates) if candidates else (None, None)
+    first, source = min(candidates, key=lambda item: item[0]) if candidates else (None, None)   # a log wins a tie
     recorded = ledger.get('recording_started') or ((imported.get('original') or {}).get('tracking_started')) or ledger.get('tracking_started')
     try:
         recorded = dt.datetime.fromisoformat(str(recorded).replace('Z', '+00:00')).astimezone().date().isoformat() if recorded and len(str(recorded)) > 10 else (recorded if valid_date(recorded) else None)

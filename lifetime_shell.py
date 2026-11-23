@@ -776,7 +776,7 @@ class Sidebar(QWidget):
         self.rows = []
         # Keep the original public page IDs for renderers/integrations.
         # Visual order and Ctrl shortcuts are Overview, Activity, System, Reports.
-        for key, title, kind in ((0, 'Overview', 'overview'), (2, 'Activity', 'activity'),
+        for key, title, kind in ((0, 'Overview', 'overview'), (2, 'Activity', 'activity'), (7, 'Uptime & downtime', 'clock'),
                                  (1, 'System', 'system'), (4, 'Health', 'health'), (5, 'Connect', 'connect'), (3, 'Reports', 'reports')):
             row = NavRow(title, kind, self)
             row.setCheckable(True)

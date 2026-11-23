@@ -34,7 +34,7 @@ from lifetime_connect import ConnectPage
 from lifetime_widgets_dashboard import CapacityBar, StatusChip, Icon as Glyph
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase, progress, warm_pages
 from lifetime_tasks import Tasks
-from lifetime_uptime_gui import PeriodModel, PeriodPicker, coverage_line
+from lifetime_uptime_gui import PeriodModel, PeriodPicker, UptimePage, coverage_line
 import lifetime_downtime as downtime
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all, plain_tip
@@ -796,7 +796,9 @@ class Window(QWidget):
         self.connect_page.serverState.connect(self.sidebar.set_server)       # Server: Online / Offline, beside the status
         self.sidebar.set_server(*self.connect_page.show_server_state())
         self.settings_page = SettingsPage(self, data_dir())
-        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page, self.settings_page):
+        self.uptime = UptimePage(self.period)        # page id 7: the existing ids 0-6 stay as they were
+        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page, self.settings_page,
+                     self.uptime):
             page.setMinimumWidth(0)
             page.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
             self.pages.addWidget(page)
@@ -835,7 +837,7 @@ class Window(QWidget):
         body_layout.insertWidget(1, self.history_banner)
         self.history_banner.hide()
         self.shortcuts = []
-        for key, page in (*((f'Ctrl+{number}', page) for number, page in enumerate((0, 2, 1, 4, 5, 3), 1)), ('Ctrl+,', 6)):
+        for key, page in (*((f'Ctrl+{number}', page) for number, page in enumerate((0, 2, 1, 4, 5, 3), 1)), ('Ctrl+7', 7), ('Ctrl+,', 6)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.activated.connect(lambda index=page: self.select_page(index))
             self.shortcuts.append(shortcut)
@@ -978,12 +980,13 @@ class Window(QWidget):
             button.setEnabled(enabled)
         self.technician_actions['Export report'].setEnabled(enabled and self.daily_repair_complete)
         self.navigation.group.button(2).setVisible(enabled and self.settings.get('history', False))
+        self.navigation.group.button(7).setVisible(enabled and self.settings.get('history', False))
         self.trend_panel.setVisible(enabled and self.settings.get('history', False))
         self.system.set_settings(self.settings if enabled else {})
         self.health.set_settings(self.settings if enabled else {})
         self.verify_button.setEnabled(enabled)
         self.start.setEnabled(enabled)
-        if not self.settings.get('history') and self.navigation.group.checkedId() == 2:
+        if not self.settings.get('history') and self.navigation.group.checkedId() in (2, 7):
             self.navigation.group.button(0).click()
 
     def open_settings(self):
@@ -1021,6 +1024,11 @@ class Window(QWidget):
         start, end = self.period.bounds(downtime.earliest_day(ledger))
         self.history.set_bounds(start, end)
         self.activity_coverage.setText(coverage_line(ledger))
+        # The Uptime page works only while it is open (its own fingerprint skips unchanged seconds).
+        if getattr(self, 'active_page', None) == 7:
+            self.uptime.set_ledger(ledger)
+        else:
+            self.uptime.ledger = ledger
 
     def apply_preferences(self, settings, previous):
         if not settings['rebuild']:
@@ -1103,9 +1111,9 @@ class Window(QWidget):
         self.history_banner.setVisible(getattr(self, '_history_due', False) and getattr(self, 'active_page', 0) != 5)
 
     def select_page(self, index):
-        if index not in (0, 1, 2, 3, 4, 5, 6):
+        if index not in (0, 1, 2, 3, 4, 5, 6, 7):
             return
-        if index == 2 and not (self.settings.get('completed') and self.settings.get('history')):
+        if index in (2, 7) and not (self.settings.get('completed') and self.settings.get('history')):
             return
         self.navigation.group.button(index).setChecked(True)
         if index == 6:
