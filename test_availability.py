@@ -118,6 +118,83 @@ class GoldenCases(unittest.TestCase):
         self.assertEqual(result['scheduled_s'], 12 * HOUR)
 
 
+def reference(presence, schedule, laptop, maintenance, first, last, zone, now):
+    """The pre-1.3 day-by-day computation with the O(n*m) interval helpers, to check the sweep against."""
+    def intersect(a, b):
+        return [(max(x, z), min(y, w)) for x, y in a for z, w in b if max(x, z) < min(y, w)]
+
+    def subtract(first_list, second):
+        result = []
+        for start, end in first_list:
+            for cut_start, cut_end in second:
+                if cut_end <= start or cut_start >= end:
+                    continue
+                if cut_start > start:
+                    result.append((start, cut_start))
+                start = max(start, cut_end)
+                if start >= end:
+                    break
+            if start < end:
+                result.append((start, end))
+        return result
+
+    def seconds(items):
+        return sum((b - a).total_seconds() for a, b in items)
+    start, end = availability.local_midnight(first, zone), min(availability.local_midnight(last + dt.timedelta(days=1), zone), now)
+    windows = availability.schedule_windows(schedule, laptop, start, end, zone) if start < end else []
+    states, cuts = availability.normalize(presence, now), availability._merge(maintenance)
+    days, day = [], first
+    while day <= last:
+        low, high = max(start, availability.local_midnight(day, zone)), min(end, availability.local_midnight(day + dt.timedelta(days=1), zone))
+        scheduled = intersect(windows, [(low, high)]) if low < high else []
+        counted = subtract(scheduled, cuts)
+        good, bad = seconds(intersect(counted, states['online'])), seconds(intersect(counted, states['offline']))
+        days.append(dict(date=day.isoformat(), good_s=round(good), bad_s=round(bad),
+                         unknown_s=round(max(0.0, seconds(counted) - good - bad)), excluded_s=round(seconds(intersect(scheduled, cuts)))))
+        day += dt.timedelta(days=1)
+    return days
+
+
+class SweepTests(unittest.TestCase):
+    def test_the_sweep_gives_the_same_days_as_the_old_computation(self):
+        import random
+        chance = random.Random(13)
+        business = dict(ALWAYS, kind='business', start='22:00', end='06:00', weekdays=[0, 2, 3, 6], holidays=['2026-11-19'])
+        for case in range(60):
+            moment, presence = at(10, 0), []
+            while moment < at(28, 0):
+                length = dt.timedelta(minutes=chance.randint(1, 3000))
+                presence.append((chance.choice(['online', 'offline', 'unknown']), moment,
+                                 None if chance.random() < .05 else moment + length + dt.timedelta(minutes=chance.randint(-30, 30))))
+                moment += length
+            maintenance = [(at(chance.randint(11, 26), chance.randint(0, 23)),) for _ in range(chance.randint(0, 4))]
+            maintenance = [(start, start + dt.timedelta(hours=chance.randint(1, 50))) for (start,) in maintenance]
+            schedule = chance.choice([ALWAYS, business, dict(business, start='08:00', end='18:00')])
+            zone = chance.choice([UTC, new_york(), None])
+            first = dt.date(2026, 11, chance.randint(9, 14))
+            last = first + dt.timedelta(days=chance.randint(0, 12))
+            now = at(chance.randint(15, 29), chance.randint(0, 23))
+            expected = reference(presence, schedule, False, maintenance, first, last, zone, now)
+            result = availability.device_availability(presence, schedule, False, maintenance, first, last, zone, now)
+            with self.subTest(case=case):
+                for got, want in zip(result['daily'], expected):
+                    self.assertEqual(got['date'], want['date'])
+                    for key in availability.FIELDS:
+                        self.assertAlmostEqual(got[key], want[key], delta=1)
+
+    def test_outages_count_offline_stretches_inside_expected_hours(self):
+        business = dict(ALWAYS, kind='business', start='08:00', end='18:00', weekdays=[0, 1, 2, 3, 4], holidays=[])
+        presence = [('online', at(16, 0), at(16, 10)), ('offline', at(16, 10), at(16, 11)),      # 1 h in hours
+                    ('online', at(16, 11), at(16, 17)), ('offline', at(16, 17), at(17, 9)),       # overnight: 1 h + 1 h
+                    ('online', at(17, 9), at(17, 20)), ('offline', at(17, 20), at(18, 7)),        # only outside: none
+                    ('unknown', at(18, 7), at(18, 12)), ('online', at(18, 12), None)]             # unknown is never down
+        result = run(presence, schedule=business, last=dt.date(2026, 11, 18), now=at(18, 18))
+        self.assertEqual((result['outages'], result['longest_outage_s']), (2, 2 * HOUR))
+        self.assertEqual(result['bad_s'], 3 * HOUR)
+        quiet = run([('online', at(16, 0), None)], now=at(16, 12))
+        self.assertEqual((quiet['outages'], quiet['longest_outage_s']), (0, 0))
+
+
 class MonitorAvailabilityTests(MonitorCase):
     def test_from_recorded_presence_with_schedule_maintenance_incidents_and_a_fixed_as_of(self):
         self.fleet.add()        # a desktop: expected all day
@@ -153,6 +230,22 @@ class MonitorAvailabilityTests(MonitorCase):
                 self.monitor.availability(**arguments)
         with self.assertRaises(Exception):
             self.monitor.set_coverage_floor(0)
+
+    def test_any_period_up_to_ten_years_with_outages(self):
+        self.fleet.add()
+        self.monitor.set_schedule('device', 'always', key=ID, timezone='UTC')
+        self.monitor.tick()
+        self.clock.advance(hours=1)
+        self.fleet.offline(self.clock.now)
+        self.run_for(90, step=10)
+        self.fleet.online(self.clock.now)
+        self.monitor.tick()
+        self.run_for(30, step=10)
+        ten = self.monitor.availability([ID], start='2016-11-19', end='2026-11-16')['devices'][0]     # 3,650 days
+        self.assertEqual((ten['outages'], ten['longest_outage_s'], ten['bad_s']), (1, 5400, 5400))
+        self.assertEqual(ten['start'], '2016-11-19')
+        with self.assertRaises(Exception):
+            self.monitor.availability([ID], start='2016-01-01', end='2026-11-16')          # over 3,660 days
 
 
 if __name__ == '__main__':

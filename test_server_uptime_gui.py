@@ -122,6 +122,51 @@ class UptimeGuiTests(_Base):
         dialog.period.set_custom(dt.date(2021, 3, 1), dt.date(2021, 3, 31))
         self.assertEqual((dialog.options()['start'], dialog.options()['end']), ('2021-03-01', '2021-03-31'))
 
+    def test_uptime_and_downtime_of_one_computer(self):
+        today = dt.date.today()
+        days = [(today - dt.timedelta(days=offset)).isoformat() for offset in (1, 2, 3)]
+        off = dict(asleep_s=28800, off_s=18000, unknown_s=0, restarts=2, shutdowns=1, unexpected_stops=1)
+        new, old = device(1), device(2)
+        for row in (new, old):
+            row['policy']['history'] = True
+        new['history'] = dict(daily={day: 36000 for day in days}, downtime_daily={days[0]: off, days[1]: off},
+                              first_seen='2025-03-04T08:00:00+07:00', first_seen_source='os-install-date',
+                              recording_started='2026-11-01T09:00:00+07:00')
+        old['history'] = dict(daily={days[0]: 7200})
+        import lifetime_availability as availability
+        found = availability.summarise(dict(good_s=72000, bad_s=7200, unknown_s=7200, excluded_s=0))
+        self.api.availability = dict(devices=[dict(found, device_id=new['device_id'], outages=3, longest_outage_s=5400)])
+        self.load([new, old])
+        self.select(new['device_id'])
+        uptime = self.window.uptime
+        self.window.detail_range.set_key('7d')
+        self.wait_idle()
+        chart = uptime.downtime_chart
+        self.assertEqual(len(chart.items), 7)
+        yesterday = chart.items[-2]
+        self.assertEqual(yesterday['parts'], dict(awake_s=36000, asleep_s=28800, off_s=18000, unknown_s=3600))
+        self.assertIn('Restarts 2 · unexpected stops 1', yesterday['tip'])
+        self.assertEqual(chart.items[-4]['parts']['unknown_s'], 86400 - 36000)     # awake only that day: the rest unknown
+        summary = uptime.downtime_summary.text()
+        self.assertIn('Restarts 4 · clean shutdowns 2 · unexpected stops 2', summary)
+        self.assertIn('Asleep 16 h 00 m', summary)
+        self.assertIn('Sleep and off time reported for 2 of 7 days.', uptime.downtime_coverage.text())
+        self.assertIn('Windows installation date', uptime.downtime_coverage.text())
+        self.assertIn('recorded by Lifetime since', uptime.downtime_coverage.text())
+        self.assertEqual(uptime.availability_text.text(),
+                         'Availability in expected hours: 90.909 % (coverage 91.667 %) · 3 outages, longest 1 h 30 m')
+        call = self.arguments('availability')[-1]
+        self.assertEqual((call['device_ids'], call['end']), ([new['device_id']], today.isoformat()))
+        self.select(old['device_id'])
+        self.assertIn('does not report sleep and off time', uptime.downtime_coverage.text())
+        self.assertNotIn('Restarts', uptime.downtime_summary.text())
+        self.assertEqual(uptime.downtime_chart.items[-2]['parts'], dict(awake_s=7200, asleep_s=0, off_s=0, unknown_s=79200))
+        self.assertEqual(uptime.availability_text.text(), 'Availability in expected hours: not available')
+        self.window.language = 'vi'
+        self.window.retranslate()
+        self.window._render_daily(self.window._detail)
+        self.assertIn('Lifetime trước 1.3', uptime.downtime_coverage.text())
+
 
 def load_tests(loader, tests, pattern):
     return loader.loadTestsFromNames([f'{__name__}.UptimeGuiTests.{name}' for name in dir(UptimeGuiTests)

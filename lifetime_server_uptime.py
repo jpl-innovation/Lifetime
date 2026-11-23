@@ -6,16 +6,93 @@ window's Tasks; panels, buttons and translations are the window's, so Glass/Clas
 follow it. Missing data is shown as unknown (grey), never as zero.
 """
 import datetime as dt
+import time
 
-from PyQt6.QtCore import QDate, QLocale, pyqtSignal
+from PyQt6.QtCore import QDate, QLocale, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import QComboBox, QDateEdit, QHBoxLayout, QSizePolicy, QSpinBox, QWidget
 from lifetime_i18n_qt import PlainLabel as QLabel
 
+from lifetime_charts import bounded_tooltip, hide_tooltip
+from lifetime_theme import tokens
 import lifetime_uptime as uptime
 
 RETENTION_NOTE = ('Online and offline history, incident timelines and sent alerts older than this are removed '
                   'automatically. Daily awake and off-time totals and incident summaries are kept until you delete '
                   'records before a date.')
+
+
+PART_COLOR = {'awake_s': 'accent', 'asleep_s': 'bar', 'off_s': 'muted', 'unknown_s': 'track'}
+PART_TEXT = {'awake_s': 'Awake', 'asleep_s': 'Asleep', 'off_s': 'Off', 'unknown_s': 'Unknown'}
+SOURCE_TEXT = {'os-install-date': 'Windows installation date', 'system-file-date': 'system file dates',
+               'tracking-start': 'when Lifetime started recording', 'imported-log': 'the Windows event log',
+               'unknown': 'unknown source'}
+AVAILABILITY_CACHE_SECONDS = 60
+
+
+class StackedDays(QWidget):
+    """One bar per day, week or month, stacked from the bottom: awake, asleep, off and unknown as shares of that
+    time. A legend sits above; hovering a bar shows its numbers. Colours come from the active theme when painted."""
+    LEGEND = 22
+
+    def __init__(self, translate):
+        super().__init__()
+        self.t = translate
+        self.items, self.message = [], ''
+        self.setMinimumHeight(150)
+        self.setMouseTracking(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_items(self, items, message=''):
+        """items: [dict(parts={awake_s: seconds, ...}, tip=text)], oldest first."""
+        self.items, self.message = list(items), message
+        self.setAccessibleDescription(message or self.t('{count} bars; hover a bar for its numbers', count=len(self.items)))
+        self.update()
+
+    def plot(self):
+        return QRectF(0, self.LEGEND + 4, max(1, self.width()), max(1, self.height() - self.LEGEND - 6))
+
+    def paintEvent(self, event):
+        palette = tokens()
+        p = QPainter(self)
+        x = 0.0
+        metrics = QFontMetrics(p.font())
+        for key in uptime.PARTS:
+            p.fillRect(QRectF(x, 6, 10, 10), QColor(palette[PART_COLOR[key]]))
+            p.setPen(QColor(palette['muted']))
+            words = self.t(PART_TEXT[key])
+            p.drawText(QRectF(x + 14, 0, metrics.horizontalAdvance(words) + 4, self.LEGEND),
+                       Qt.AlignmentFlag.AlignVCenter, words)
+            x += 14 + metrics.horizontalAdvance(words) + 16
+        rect = self.plot()
+        if self.message or not self.items:
+            p.setPen(QColor(palette['muted']))
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.message)
+            return
+        pitch = rect.width() / len(self.items)
+        width = max(1.0, pitch - (2 if pitch > 6 else 0))
+        for index, item in enumerate(self.items):
+            total = sum(item['parts'].values())
+            if not total:
+                continue
+            left, bottom = rect.left() + index * pitch, rect.bottom()
+            for key in uptime.PARTS:
+                height = rect.height() * item['parts'][key] / total
+                if height > 0:
+                    p.fillRect(QRectF(left, bottom - height, width, height), QColor(palette[PART_COLOR[key]]))
+                    bottom -= height
+
+    def mouseMoveEvent(self, event):
+        rect = self.plot()
+        if self.items and not self.message and rect.contains(event.position()):
+            index = min(len(self.items) - 1, int((event.position().x() - rect.left()) / rect.width() * len(self.items)))
+            bounded_tooltip(self, event.globalPosition().toPoint(), self.items[index]['tip'])
+        else:
+            hide_tooltip(self)
+
+    def leaveEvent(self, event):
+        hide_tooltip(self)
+        super().leaveEvent(event)
 
 
 def _qdate(day):
@@ -211,6 +288,132 @@ class UptimeUI:
                                        'Bars show the average per recorded day of each month')
             summary.setText(text)
         summary.setVisible(bool(recorded))
+        self.render_downtime(device)
+
+    # ---- one computer: uptime and downtime ----
+
+    def device_section(self, layout):
+        w = self.w
+        title = w.label('Uptime & downtime')
+        title.setStyleSheet('font-size:18px; font-weight:600;')
+        layout.addWidget(title)
+        self.downtime_chart = StackedDays(self.t)
+        self.downtime_chart.setFixedHeight(170)
+        layout.addWidget(self.downtime_chart)
+        self.downtime_summary, self.downtime_coverage, self.availability_text = QLabel(), QLabel(), QLabel()
+        for label in (self.downtime_summary, self.availability_text, self.downtime_coverage):
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(label)
+        self.downtime_coverage.setObjectName('muted')
+        self._availability = {}         # (device id, first, last) -> (monotonic time, result or None)
+        self._availability_wanted = None
+
+    def hours(self, seconds):
+        return '—' if seconds is None else self.w._duration(seconds)
+
+    def render_downtime(self, device):
+        """Awake, asleep, off and unknown per day for the chosen period (asleep and off only from a computer that
+        reports them, 1.3 or later), its restarts and stops, and availability in expected hours from monitoring."""
+        if not hasattr(self, 'downtime_chart'):
+            return
+        w = self.w
+        allowed = (device.get('policy') or {}).get('history') is True
+        history = (device.get('history') or {}) if allowed else {}
+        daily = history.get('daily') or {}
+        earliest = min([*daily, *(history.get('downtime_daily') or {})], default=None)
+        period = w.detail_range.period()
+        first, last = self.resolve(period, earliest)
+        days = uptime.day_breakdown(history, first, last)
+        kind = uptime.bucket_kind(first, last)
+        items = []
+        for row in uptime.breakdown_buckets(days, first, last, kind):
+            parts = {key: row[key] or 0 for key in uptime.PARTS}
+            lines = [self.bucket_text(row['start'], kind)]
+            lines += [f"{self.t(PART_TEXT[key])}: {self.hours(row[key])}" for key in uptime.PARTS]
+            if row['reported']:
+                lines.append(self.t('Restarts {restarts} · unexpected stops {stops}', restarts=row['restarts'],
+                                    stops=row['unexpected_stops']))
+            items.append(dict(parts=parts, tip='\n'.join(lines)))
+        message = '' if allowed else self.t('History is off on this computer')
+        self.downtime_chart.set_items(items, message)
+        total = uptime.total(days)
+        parts = ' · '.join(f"{self.t(PART_TEXT[key])} {self.hours(total[key])}" for key in uptime.PARTS)
+        if total['reported']:
+            parts += ' · ' + self.t('Restarts {restarts} · clean shutdowns {shutdowns} · unexpected stops {stops}',
+                                    restarts=total['restarts'], shutdowns=total['shutdowns'], stops=total['unexpected_stops'])
+            if total['awake_share'] is not None:
+                parts += ' · ' + self.t('Awake {share} % of the known time', share=f"{total['awake_share']:g}")
+            if total['awake_per_stop'] is not None:
+                parts += ' · ' + self.t('{hours} awake per unexpected stop', hours=self.hours(total['awake_per_stop']))
+        self.downtime_summary.setText(parts if allowed else '')
+        coverage = []
+        if allowed and not history.get('downtime_daily'):
+            coverage.append(self.t('This computer does not report sleep and off time (Lifetime before 1.3): only awake '
+                                   'time is known and the rest is Unknown.'))
+        elif allowed:
+            coverage.append(self.t('Sleep and off time reported for {known} of {days} days.', known=total['reported'],
+                                   days=total['days']))
+        if history.get('first_seen'):
+            coverage.append(self.t('Data from {date} ({source})', date=w._date(history['first_seen']),
+                                   source=self.t(SOURCE_TEXT.get(history.get('first_seen_source', 'unknown'), 'unknown source'))))
+        if history.get('recording_started'):
+            coverage.append(self.t('recorded by Lifetime since {date}', date=w._date(history['recording_started'])))
+        self.downtime_coverage.setText(' · '.join(coverage))
+        self.downtime_coverage.setVisible(bool(coverage))
+        self._load_availability(device['device_id'] if device.get('device_id') else None,
+                                None if period is None else (first, last))
+
+    def _load_availability(self, device_id, period):
+        """Availability in expected hours over the period (All: everything monitoring kept), asked again at most once
+        a minute while the detail refreshes."""
+        key = (device_id, period)
+        self._availability_wanted = key
+        cached = self._availability.get(key)
+        if cached and time.monotonic() - cached[0] < AVAILABILITY_CACHE_SECONDS:
+            self.render_availability(cached[1])
+            return
+        if device_id is None:
+            self.render_availability(None)
+            return
+        if cached is None:
+            self.availability_text.setText(self.t('Availability in expected hours: loading…'))
+        arguments = dict(device_ids=[device_id])
+        if period:
+            arguments.update(start=period[0].isoformat(), end=period[1].isoformat())
+        client = self.w.client
+
+        def done(result, success):
+            devices = (result.get('devices') or ()) if success and isinstance(result, dict) else ()
+            found = next((item for item in devices if item.get('device_id') == device_id), None)
+            self._availability[key] = (time.monotonic(), found)
+            while len(self._availability) > 16:
+                del self._availability[next(iter(self._availability))]
+            if self._availability_wanted == key:
+                self.render_availability(found)
+        self.w._submit(lambda: client.call('availability', **arguments), done, quiet=True)
+
+    def render_availability(self, result):
+        """The existing availability model (lifetime_availability): observed online share of the expected hours."""
+        if result is None:
+            text = self.t('Availability in expected hours: not available')
+        elif result['status'] == 'not-scheduled':
+            text = self.t('Not expected online in this period')
+        else:
+            if result['status'] == 'insufficient':
+                head = self.t('Availability in expected hours: insufficient evidence (observed {value}, coverage {coverage})',
+                              value=self._percent(result['availability']), coverage=self._percent(result['coverage']))
+            else:
+                head = self.t('Availability in expected hours: {value} (coverage {coverage})',
+                              value=self._percent(result['availability']), coverage=self._percent(result['coverage']))
+            outages = result.get('outages')
+            text = head if outages is None else head + ' · ' + (
+                self.t('no outages') if not outages else
+                self.t('{count} outages, longest {longest}', count=outages, longest=self.hours(result['longest_outage_s'])))
+        self.availability_text.setText(text)
+
+    def _percent(self, value):
+        return self.t('Not available') if value is None else f'{value:g} %'
 
     # ---- Overview: fleet totals for the period ----
 

@@ -28,6 +28,7 @@ import lifetime_availability as availability
 import lifetime_checks as checks
 import lifetime_insights as insights
 import lifetime_notify as notify
+import lifetime_uptime as uptime
 
 SCHEMA_VERSION = 3
 APPLICATION_ID = 0x4C544D4E     # "LTMN"
@@ -1129,6 +1130,18 @@ class Monitor:
         with self._lock:
             return {device['device_id']: self._schedule_for(self._db, device) for device in devices}
 
+    def _period(self, start, end):
+        """(first, last) dates of an inclusive period of at most MAX_DAYS, or (None, None) when both are None."""
+        if (start is None) != (end is None):
+            raise MonitorError('Choose both dates')
+        try:
+            first, last = (dt.date.fromisoformat(start), dt.date.fromisoformat(end)) if start else (None, None)
+        except (TypeError, ValueError):
+            raise MonitorError('Expected dates as YYYY-MM-DD') from None
+        if first and not dt.timedelta(0) <= last - first < dt.timedelta(days=uptime.MAX_DAYS):
+            raise MonitorError('A period runs forwards and lasts at most 3660 days')
+        return first, last
+
     def availability(self, device_ids, start=None, end=None, as_of=None, daily=False):
         """Per computer over local dates start..end (inclusive, the computer's calendar), or over everything
         monitoring has kept when both are None. ``as_of`` fixes "now" so a reviewed report can be saved unchanged.
@@ -1136,56 +1149,51 @@ class Monitor:
         if (not isinstance(device_ids, list) or not 1 <= len(device_ids) <= 100
                 or any(not isinstance(item, str) or len(item) > 64 for item in device_ids)):
             raise MonitorError('Choose 1 to 100 computers')
-        if (start is None) != (end is None) or type(daily) is not bool:
-            raise MonitorError('Choose both dates')
-        try:
-            first, last = (dt.date.fromisoformat(start), dt.date.fromisoformat(end)) if start else (None, None)
-        except (TypeError, ValueError):
-            raise MonitorError('Expected dates as YYYY-MM-DD') from None
-        if first and not dt.timedelta(0) <= last - first <= dt.timedelta(days=400):
-            raise MonitorError('A period runs forwards and lasts at most 400 days')
+        if type(daily) is not bool:
+            raise MonitorError('Invalid daily flag')
+        first, last = self._period(start, end)
         now = min(_time(as_of), self.clock()) if as_of is not None else self.clock()
         floor = self.coverage_floor()
         wanted = set(device_ids)
         devices = [item for item in (self.store.monitor_snapshot() if self.store is not None else [])
                    if item['device_id'] in wanted]
-        offset = now.astimezone().strftime('%z')
-        results = []
         with self._lock:
-            db = self._db
-            for device in devices:
-                schedule = self._schedule_for(db, device)
-                zone, zone_ok = schedule_zone(schedule)
-                local = (lambda moment: moment.astimezone(zone)) if zone else (lambda moment: moment.astimezone())
-                since = None
-                if first:
-                    begin, finish = first, last
-                else:
-                    oldest = db.execute('SELECT MIN(start_at) FROM presence WHERE device_id=?', (device['device_id'],)).fetchone()[0]
-                    since = _time(oldest) if oldest else now
-                    begin, finish = local(since).date(), local(now).date()
-                low = availability.local_midnight(begin, zone)
-                high = availability.local_midnight(finish + dt.timedelta(days=1), zone)
-                presence = [(row['state'], _time(row['start_at']), row['end_at'] and _time(row['end_at']))
-                            for row in db.execute('''SELECT state,start_at,end_at FROM presence WHERE device_id=?
-                                AND start_at<? AND (end_at IS NULL OR end_at>?)''', (device['device_id'], _stamp(high), _stamp(low)))]
-                windows = [(_time(row['start_at']), _time(row['end_at'])) for row in db.execute(
-                    '''SELECT start_at,end_at FROM maintenance WHERE start_at<? AND end_at>? AND (scope='all'
-                       OR (scope='group' AND key=?) OR (scope='device' AND key=?))''',
-                    (_stamp(high), _stamp(low), (device.get('group') or '').casefold(), device['device_id']))]
-                incidents = [dict(row) for row in db.execute(
-                    '''SELECT rule,state,started_at,opened_at,resolved_at,value FROM incidents WHERE device_id=?
-                       AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
-                       ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
-                result = availability.device_availability(presence, schedule, device.get('laptop'), windows, begin, finish,
-                                                          zone, now, floor, daily, since)
-                name = schedule['timezone'] if zone_ok else 'local'
-                results.append(dict(result, device_id=device['device_id'], name=device.get('name', ''),
-                                    group=device.get('group', ''), start=begin.isoformat(), end=finish.isoformat(),
-                                    timezone=f'local (UTC{offset[:3]}:{offset[3:]})' if name == 'local' else name,
-                                    zone_source=schedule['scope'], zone_ok=zone_ok, schedule=schedule['kind'],
-                                    laptop=device.get('laptop'), incidents=incidents))
+            results = [self._device_availability(self._db, device, first, last, now, floor, daily) for device in devices]
         return dict(as_of=_stamp(now), coverage_floor=floor, devices=results)
+
+    def _device_availability(self, db, device, first, last, now, floor, daily):
+        schedule = self._schedule_for(db, device)
+        zone, zone_ok = schedule_zone(schedule)
+        local = (lambda moment: moment.astimezone(zone)) if zone else (lambda moment: moment.astimezone())
+        since = None
+        if first:
+            begin, finish = first, last
+        else:
+            oldest = db.execute('SELECT MIN(start_at) FROM presence WHERE device_id=?', (device['device_id'],)).fetchone()[0]
+            since = _time(oldest) if oldest else now
+            begin, finish = local(since).date(), local(now).date()
+        low = availability.local_midnight(begin, zone)
+        high = availability.local_midnight(finish + dt.timedelta(days=1), zone)
+        presence = [(row['state'], _time(row['start_at']), row['end_at'] and _time(row['end_at']))
+                    for row in db.execute('''SELECT state,start_at,end_at FROM presence WHERE device_id=?
+                        AND start_at<? AND (end_at IS NULL OR end_at>?)''', (device['device_id'], _stamp(high), _stamp(low)))]
+        windows = [(_time(row['start_at']), _time(row['end_at'])) for row in db.execute(
+            '''SELECT start_at,end_at FROM maintenance WHERE start_at<? AND end_at>? AND (scope='all'
+               OR (scope='group' AND key=?) OR (scope='device' AND key=?))''',
+            (_stamp(high), _stamp(low), (device.get('group') or '').casefold(), device['device_id']))]
+        incidents = [dict(row) for row in db.execute(
+            '''SELECT rule,state,started_at,opened_at,resolved_at,value FROM incidents WHERE device_id=?
+               AND state!='pending' AND started_at<? AND (resolved_at IS NULL OR resolved_at>=?)
+               ORDER BY started_at LIMIT 20''', (device['device_id'], _stamp(min(high, now)), _stamp(low)))]
+        result = availability.device_availability(presence, schedule, device.get('laptop'), windows, begin, finish,
+                                                  zone, now, floor, daily, since)
+        name = schedule['timezone'] if zone_ok else 'local'
+        offset = now.astimezone().strftime('%z')
+        return dict(result, device_id=device['device_id'], name=device.get('name', ''),
+                    group=device.get('group', ''), start=begin.isoformat(), end=finish.isoformat(),
+                    timezone=f'local (UTC{offset[:3]}:{offset[3:]})' if name == 'local' else name,
+                    zone_source=schedule['scope'], zone_ok=zone_ok, schedule=schedule['kind'],
+                    laptop=device.get('laptop'), incidents=incidents)
 
     def presence(self, device_id, limit=100):
         if type(limit) is not int or not 1 <= limit <= 500:

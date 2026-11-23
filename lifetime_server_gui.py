@@ -851,6 +851,7 @@ class ServerWindow(QMainWindow):
         self.daily_summary.setObjectName('muted')
         self.daily_summary.setWordWrap(True)
         detail_layout.addWidget(self.daily_summary)
+        self.uptime.device_section(detail_layout)     # uptime and downtime for the same period
         # The desktop's own Activity and Health pages, fed with what this computer reported.
         self.hardware_detail = HardwarePanel(remote=True)
         detail_layout.addWidget(self.hardware_detail)

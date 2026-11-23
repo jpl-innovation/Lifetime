@@ -2214,6 +2214,33 @@ _SERVER_UPTIME_VI = {
     'Energy, {period} (kWh)': 'Điện năng, {period} (kWh)',
     'Top consumers, {period}': 'Máy tiêu thụ nhiều nhất, {period}',
     'By group, {period}': 'Theo nhóm, {period}',
+    'Uptime & downtime': 'Thời gian hoạt động & ngừng',
+    'Asleep': 'Ngủ',
+    '{count} bars; hover a bar for its numbers': '{count} cột; di chuột lên một cột để xem số liệu',
+    'Restarts {restarts} · unexpected stops {stops}': 'Khởi động lại {restarts} · dừng bất thường {stops}',
+    'Restarts {restarts} · clean shutdowns {shutdowns} · unexpected stops {stops}':
+        'Khởi động lại {restarts} · tắt máy bình thường {shutdowns} · dừng bất thường {stops}',
+    'Awake {share} % of the known time': 'Thức {share} % thời gian đã biết',
+    '{hours} awake per unexpected stop': '{hours} thức cho mỗi lần dừng bất thường',
+    'This computer does not report sleep and off time (Lifetime before 1.3): only awake time is known and the rest is Unknown.':
+        'Máy này không báo thời gian ngủ và tắt (Lifetime trước 1.3): chỉ biết thời gian thức, phần còn lại là Chưa xác định.',
+    'Sleep and off time reported for {known} of {days} days.':
+        'Thời gian ngủ và tắt được báo cho {known} trên {days} ngày.',
+    'Data from {date} ({source})': 'Dữ liệu từ {date} ({source})',
+    'recorded by Lifetime since {date}': 'Lifetime ghi nhận từ {date}',
+    'Windows installation date': 'ngày cài đặt Windows',
+    'system file dates': 'ngày của tệp hệ thống',
+    'when Lifetime started recording': 'lúc Lifetime bắt đầu ghi nhận',
+    'the Windows event log': 'nhật ký sự kiện Windows',
+    'unknown source': 'nguồn chưa xác định',
+    'Availability in expected hours: loading…': 'Mức sẵn sàng trong giờ dự kiến: đang tải…',
+    'Availability in expected hours: not available': 'Mức sẵn sàng trong giờ dự kiến: không có',
+    'Availability in expected hours: insufficient evidence (observed {value}, coverage {coverage})':
+        'Mức sẵn sàng trong giờ dự kiến: chưa đủ bằng chứng (quan sát {value}, độ phủ {coverage})',
+    'Availability in expected hours: {value} (coverage {coverage})':
+        'Mức sẵn sàng trong giờ dự kiến: {value} (độ phủ {coverage})',
+    'no outages': 'không có lần mất kết nối',
+    '{count} outages, longest {longest}': '{count} lần mất kết nối, lâu nhất {longest}',
 }
 for _key, _text in _SERVER_UPTIME_VI.items():
     EN.setdefault(_key, _key)
