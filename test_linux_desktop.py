@@ -2,6 +2,8 @@
 AppImage's changing mount path), and readings that degrade to "not available" when a tool is missing."""
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +15,28 @@ import lifetime_import as importer
 import lifetime_settings as settings
 import lifetime_setup as setup
 import lifetime_signals as signals
+
+PROJECT = Path(__file__).parent
+
+
+def bash_program():
+    """A real bash to run the installers' shell code: Git's on Windows (never WSL's bash.exe), the system one elsewhere."""
+    if sys.platform != 'win32':
+        return shutil.which('bash')
+    git = shutil.which('git')
+    for parent in Path(git).resolve().parents if git else ():
+        if (parent / 'bin' / 'bash.exe').is_file() and (parent / 'usr' / 'bin').is_dir():
+            return str(parent / 'bin' / 'bash.exe')
+    return None
+
+
+BASH = bash_program()
+WITH_BASH = unittest.skipUnless(BASH, 'bash (Git for Windows on Windows)')
+
+
+def run_bash(script, **environment):
+    return subprocess.run([BASH, '-s'], input=script, capture_output=True, text=True, env=dict(os.environ, **environment),
+                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
 
 class AutostartTests(unittest.TestCase):
@@ -147,10 +171,8 @@ class ServerDashboardMenuTests(unittest.TestCase):
     def test_the_installers_put_the_dashboard_in_the_menu_for_the_person_who_installed_the_server(self):
         root = Path(__file__).parent
         server = (root / 'install_server_linux.sh').read_text(encoding='utf-8')
-        # sudo ./install_server_linux.sh makes the person who ran it Admin; root itself is not "a person".
-        self.assertIn('[[ -n "$extra_admin" || -z "${SUDO_USER:-}" || "$SUDO_USER" == root ]] || extra_admin="$SUDO_USER"', server)
-        self.assertLess(server.index('extra_admin="$SUDO_USER"'),
-                        server.index('usermod -a -G lifetime-admin,lifetime-console "$extra_admin"'))
+        # The service account's own groups are set as before, whoever installs.
+        self.assertIn('usermod -a -G lifetime-admin,lifetime-console lifetime\n', server)
         # Their hidden menu entry is shown, edited as them (root never writes through a link in their home folder).
         self.assertIn('[[ -f "$entry" && ! -L "$entry" ]]', server)
         self.assertIn("runuser -u \"$extra_admin\" -- sed -i '/^NoDisplay=true$/d' \"$entry\"", server)
@@ -158,6 +180,39 @@ class ServerDashboardMenuTests(unittest.TestCase):
         # Lifetime for Linux shows the entry by itself when the server is already installed.
         desktop = (root / 'install_linux.sh').read_text(encoding='utf-8')
         self.assertIn("[[ ! -x /opt/lifetime-server/LifetimeServerRuntime ]] || hidden=''", desktop)
+
+
+    @WITH_BASH
+    def test_the_person_who_ran_sudo_becomes_admin_but_a_failure_for_them_never_stops_the_install(self):
+        """A directory (AD/LDAP) account is not in /etc/passwd, so usermod refused it and a plain sudo install stopped
+        half-way. gpasswd adds any account; if even that fails, only an explicit --admin stops the install."""
+        server = (PROJECT / 'install_server_linux.sh').read_text(encoding='utf-8').replace('\r\n', '\n')
+        block = server[server.index('admin_groups() {'):server.index('install -d -m 0700 -o lifetime')]
+        stubs = ('set -euo pipefail\n'
+                 'exec 3>&1\n'          # the installer silences gpasswd; the stub reports on its own channel
+                 'fail() { echo "FAIL: $1" >&2; exit 1; }\n'
+                 'getent() { return 0; }\n'
+                 'gpasswd() { [[ "$2" != refused ]] || return 1; echo "$2 $3" >&3; }\n'     # gpasswd -a USER GROUP
+                 'extra_admin="$EXTRA"\n')
+        def install(extra='', sudo=''):
+            environment = dict(EXTRA=extra)
+            if sudo:
+                environment['SUDO_USER'] = sudo
+            return run_bash(stubs + block + 'echo "admin=$extra_admin"\n', **environment)
+        result = install(sudo='alice')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ['alice', 'lifetime-admin', 'alice', 'lifetime-console', 'admin=alice'])
+        result = install(sudo='refused')                     # the implicit admin: warn with the command, carry on
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ['admin='])
+        self.assertIn('sudo gpasswd -a refused lifetime-admin && sudo gpasswd -a refused lifetime-console', result.stderr)
+        result = install(sudo='root')                        # root itself is not a person to add
+        self.assertEqual(result.stdout.split(), ['admin='])
+        result = install(extra='refused', sudo='alice')      # asked for explicitly: the install stops
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('FAIL: could not add refused', result.stderr)
+        result = install(extra='bob', sudo='alice')          # --admin wins over the account that ran sudo
+        self.assertEqual(result.stdout.split()[-1], 'admin=bob')
 
 
 class AppImageStartTests(unittest.TestCase):

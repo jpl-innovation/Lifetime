@@ -82,14 +82,23 @@ usermod -a -G lifetime-admin,lifetime-console lifetime
 if [[ "$console_created" == true ]]; then
     # Upgrade from a version whose socket used group lifetime-admin: its members keep their access.
     for member in $(getent group lifetime-admin | cut -d: -f4 | tr ',' ' '); do
-        usermod -a -G lifetime-console "$member"
+        gpasswd -a "$member" lifetime-console >/dev/null
     done
 fi
-# The person installing with sudo administers it from the dashboard without another step.
-[[ -n "$extra_admin" || -z "${SUDO_USER:-}" || "$SUDO_USER" == root ]] || extra_admin="$SUDO_USER"
+# Admin in the dashboard. gpasswd, unlike usermod, also adds directory accounts (AD/LDAP through sssd) that are not
+# in /etc/passwd.
+admin_groups() { gpasswd -a "$1" lifetime-admin >/dev/null && gpasswd -a "$1" lifetime-console >/dev/null; }
 if [[ -n "$extra_admin" ]]; then
     getent passwd "$extra_admin" >/dev/null || fail "no such user: $extra_admin"
-    usermod -a -G lifetime-admin,lifetime-console "$extra_admin"
+    admin_groups "$extra_admin" || fail "could not add $extra_admin to the groups lifetime-admin and lifetime-console"
+elif [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
+    # The person installing with sudo administers it without another step; never a reason to stop the install.
+    if admin_groups "$SUDO_USER"; then
+        extra_admin="$SUDO_USER"
+    else
+        printf 'Lifetime Server: %s could not be made Admin. Run: sudo gpasswd -a %s lifetime-admin && sudo gpasswd -a %s lifetime-console\n' \
+            "$SUDO_USER" "$SUDO_USER" "$SUDO_USER" >&2
+    fi
 fi
 install -d -m 0700 -o lifetime -g lifetime "$data"
 chmod 0700 "$data"
