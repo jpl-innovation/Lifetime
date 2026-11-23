@@ -2188,6 +2188,28 @@ for _key, _text in _SCORE_VI.items():
 _UPTIME_VI = {
     'Daily awake totals are retained for up to 10 years and hourly detail for 400 days; only the last 100 sessions are retained. Previously saved dates are not relabeled after timezone changes.':
         'Tổng thời gian thức hằng ngày được lưu tối đa 10 năm, chi tiết theo giờ 400 ngày; chỉ giữ 100 phiên gần nhất. Các ngày đã lưu không được gắn nhãn lại khi đổi múi giờ.',
+    "This month": "Tháng này",
+    "Last month": "Tháng trước",
+    "This year": "Năm nay",
+    "Last 12 months": "12 tháng qua",
+    "Last 5 years": "5 năm qua",
+    "Custom…": "Tùy chọn…",
+    "To": "Đến",
+    "Date range": "Khoảng thời gian",
+    "From date": "Từ ngày",
+    "To date": "Đến ngày",
+    "Windows log": "nhật ký Windows",
+    "OS logs": "nhật ký hệ điều hành",
+    "{source} incl. {count} archived logs": "{source}, gồm {count} nhật ký lưu trữ",
+    "Data from {date} ({source})": "Dữ liệu từ {date} ({source})",
+    "No data yet": "Chưa có dữ liệu",
+    "recorded by Lifetime since {date}": "Lifetime ghi nhận từ {date}",
+    "archived logs could not be read (access denied)": "không đọc được nhật ký lưu trữ (bị từ chối truy cập)",
+    "no archived logs found": "không có nhật ký lưu trữ",
+    "archived logs could not be read": "không đọc được nhật ký lưu trữ",
+    "{count} older login records read": "đã đọc {count} bản ghi đăng nhập cũ",
+    "the system log could not be read": "không đọc được nhật ký hệ thống",
+    "Exported reports use this period.": "Báo cáo xuất ra dùng khoảng thời gian này.",
 }
 for _key, _text in _UPTIME_VI.items():
     EN.setdefault(_key, _key)

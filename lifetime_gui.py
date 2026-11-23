@@ -34,6 +34,8 @@ from lifetime_connect import ConnectPage
 from lifetime_widgets_dashboard import CapacityBar, StatusChip, Icon as Glyph
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase, progress, warm_pages
 from lifetime_tasks import Tasks
+from lifetime_uptime_gui import PeriodModel, PeriodPicker, coverage_line
+import lifetime_downtime as downtime
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all, plain_tip
 ENTRANCE_MS = 1700
@@ -696,6 +698,18 @@ class Window(QWidget):
         self.system.layout().setContentsMargins(0, 0, 0, 0)
         self.history.layout().setContentsMargins(0, 0, 0, 0)
         self.history.layout().itemAt(0).layout().itemAt(0).widget().setText(tr('Activity'))
+        # One chosen date range for Activity, Uptime & downtime and Reports, remembered in settings. The Insights
+        # range buttons stay (the server and Health use them) but the desktop drives Activity from the picker.
+        self.period = PeriodModel(self.settings.get('period'), lambda value: update_settings({'period': value}, data_dir()))
+        self.period.changed.connect(lambda: self.apply_period())
+        activity_header = self.history.layout().itemAt(0).layout()
+        self.history.ranges.hide()
+        self.activity_picker = PeriodPicker(self.period)
+        activity_header.insertWidget(activity_header.indexOf(self.history.ranges), self.activity_picker)
+        self.activity_coverage = label('', 'caption')
+        self.activity_coverage.setWordWrap(True)
+        self.activity_coverage.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.history.layout().insertWidget(1, self.activity_coverage)
         self.reports = QWidget()
         reports_layout = QVBoxLayout(self.reports)
         reports_layout.setContentsMargins(0, 0, 0, 0)
@@ -704,6 +718,14 @@ class Window(QWidget):
         intro = label(tr('Reports and details for this computer.'), 'caption')
         intro.setWordWrap(True)
         reports_layout.addWidget(intro)
+        period_row = QHBoxLayout()
+        period_row.setSpacing(12)
+        self.reports_picker = PeriodPicker(self.period)
+        period_row.addWidget(self.reports_picker)
+        period_note = label(tr('Exported reports use this period.'), 'caption')
+        period_note.setWordWrap(True)
+        period_row.addWidget(period_note, 1)
+        reports_layout.addLayout(period_row)
         # Where the saved time comes from, as one bar: measured here, read back from the OS logs, typed in by hand.
         # Each part also has a chip with its glyph and words, so the colours are never the only key.
         self.sources_panel = QFrame()
@@ -970,6 +992,7 @@ class Window(QWidget):
     def open_technician(self, cls):
         try:
             dialog = cls(self, directory=data_dir(), language=language())
+            self.prefill_period(dialog)
             dialog.exec()
             # Identity is a preference edit, not a request to configure tracking.
             # Refresh choices without invoking apply_preferences/autostart/import.
@@ -979,6 +1002,25 @@ class Window(QWidget):
             self.refresh()
         except (OSError, ValueError, TypeError, RuntimeError) as error:
             QMessageBox.warning(self, tr('Could not open details'), str(error))
+
+    def prefill_period(self, dialog):
+        """The export dialog starts on the period chosen in the app (All = all available history)."""
+        if not isinstance(dialog, ExportDialog) or self.period.choice == 'all':
+            return
+        start, end = self.period.bounds(downtime.earliest_day(getattr(self, '_ledger', {}) or {}))
+        dialog.range_select.setCurrentIndex(1)
+        dialog.start_date.setText(start.isoformat())
+        dialog.end_date.setText(end.isoformat())
+
+    def apply_period(self, ledger=None):
+        """Point every range-following view at the chosen dates (worked out again each time: midnight moves them)."""
+        ledger = ledger if ledger is not None else getattr(self, '_ledger', None)
+        if ledger is None:
+            return
+        self._ledger = ledger
+        start, end = self.period.bounds(downtime.earliest_day(ledger))
+        self.history.set_bounds(start, end)
+        self.activity_coverage.setText(coverage_line(ledger))
 
     def apply_preferences(self, settings, previous):
         if not settings['rebuild']:
@@ -1334,6 +1376,7 @@ class Window(QWidget):
             self.device_name.setText('\u200b'.join(name[i:i+32] for i in range(0, len(name), 32)))
             self.device_name.setAccessibleName(name)
             self.device_name.setVisible(bool(name))
+            self.apply_period(ledger)
             self.history.set_ledger(ledger)
             today = dt.date.today()
             points = date_series(clean_daily(ledger.get('daily', {})), today-dt.timedelta(days=13), today)

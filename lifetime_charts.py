@@ -796,6 +796,7 @@ class Insights(QWidget):
         super().__init__()
         self.ledger = {}
         self.selection = '30 days'
+        self.bounds = None      # (start, end) from the desktop's date picker; None = the range buttons
         self.fingerprint = None
         box = QVBoxLayout(self)
         box.setContentsMargins(0, 0, 0, 0)
@@ -931,17 +932,24 @@ class Insights(QWidget):
         self.fingerprint = None
         self.set_ledger(self.ledger)
 
+    def set_bounds(self, start, end):
+        """Show any inclusive date range (the desktop picker); the range buttons stay for other users of Insights."""
+        if self.bounds != (start, end):
+            self.bounds = (start, end)
+            self.fingerprint = None
+            self.set_ledger(self.ledger)
+
     def set_ledger(self, ledger):
         # Refresh polls every second; no aggregation/table rebuild if unchanged.
         fingerprint = repr((ledger.get('daily'), ledger.get('sessions'), ledger.get('hourly'),
                             ledger.get('total_seconds'), ledger.get('baseline_seconds'),
-                            ledger.get('imported'), ledger.get('dated_hourly'), self.selection, language(), dt.date.today()))
+                            ledger.get('imported'), ledger.get('dated_hourly'), self.selection, self.bounds, language(), dt.date.today()))
         self.ledger = ledger
         if fingerprint == self.fingerprint:
             return
         self.fingerprint = fingerprint
         daily = clean_daily(ledger.get('daily', {}))
-        start, end = range_bounds(daily, self.selection)
+        start, end = self.bounds or range_bounds(daily, self.selection)
         selected = filter_range(daily, start, end)
         scope = tr('date.range', start=date_text(start), end=date_text(end))
         for label, text in zip(self.figures, (scope, str(len(selected)), hm(sum(selected.values())))):
