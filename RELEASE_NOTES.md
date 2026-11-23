@@ -5,13 +5,15 @@ Not released yet. Items marked *(not yet tried on a real machine)* passed the au
 ### Installing and setting up
 
 - **Linux: Lifetime Server dashboard from the app menu.** `sudo ./install_server_linux.sh` makes the person who ran
-  it Admin (as `--admin USER` did) and shows **Lifetime Server** in their app menu when Lifetime for Linux is
-  installed; installing Lifetime for Linux on a computer that has the server shows it too. The dashboard finds the
+  it Admin (as `--admin USER` did; also a directory account such as AD/LDAP, and if that fails the installer only
+  warns) and shows **Lifetime Server** in their app menu when Lifetime for Linux is installed; installing Lifetime for
+  Linux on a computer that has the server shows it too, to members of `lifetime-admin` or `lifetime-console`. The dashboard finds the
   server by itself (no `--directory` or `--admin-port`). Sign out and back in once after installing.
   *(not yet tried on a real machine)*
 - **Linux AppImage on a computer with Lifetime Server:** started without arguments it asks whether to open the
   **Lifetime Server** dashboard or Lifetime, in English or Vietnamese, and remembers the answer when *Remember my
-  choice* is ticked (`--run-tool Lifetime` always opens Lifetime). *(not yet tried on a real machine)*
+  choice* is ticked (`--run-tool Lifetime` always opens Lifetime; Settings > *Ask again which program the AppImage
+  opens* forgets it). *(not yet tried on a real machine)*
 - **Windows: uninstaller.** Lifetime is listed in **Settings > Apps > Installed apps**; *Uninstall* runs
   `uninstall_windows.ps1`, which closes Lifetime and removes its sign-in task, Start menu shortcut and program folder.
   Your history in `%APPDATA%\Lifetime` is kept unless you run it with `-RemoveData`. A computer connected to a server
@@ -26,8 +28,8 @@ Not released yet. Items marked *(not yet tried on a real machine)* passed the au
 ### Tests that would have caught 1.2.1
 
 - **CI pairs a Linux computer with a Linux server by typing the code only**, in two Ubuntu containers whose own names
-  resolve to 127.0.1.1 as on Ubuntu, with a server name that does not resolve. *(new CI job; it runs at the next
-  push)*
+  resolve to 127.0.1.1 as on Ubuntu, with a server name that does not resolve; a second client, whose discovery is
+  blocked, must find the server through the network search. *(new CI job; it runs at the next push)*
 - A test keeps the Windows Server installer using the ready-made server program (no Python) when no `-Mode` is given.
 
 ## Lifetime 1.2.1
