@@ -76,6 +76,18 @@ class BreakdownTests(unittest.TestCase):
         self.assertEqual((old['asleep_s'], old['off_s'], old['restarts'], old['awake_share']), (None, None, None, None))
         self.assertEqual(old['unknown_s'], 82800)
 
+    def test_a_daylight_saving_day_is_23_or_25_hours_long(self):
+        from test_availability import new_york
+        zone = new_york()
+        history = dict(daily={'2026-03-08': 3600, '2026-11-01': 3600})
+        now = dt.datetime(2026, 11, 23, 9, 30, tzinfo=dt.timezone.utc)        # 04:30 in New York
+        days = uptime.day_breakdown(history, D(2026, 3, 7), D(2026, 3, 8), now, zone)
+        self.assertEqual([day['unknown_s'] for day in days], [86400, 82800 - 3600])
+        days = uptime.day_breakdown(history, D(2026, 11, 1), D(2026, 11, 1), now, zone)
+        self.assertEqual(days[0]['unknown_s'], 90000 - 3600)
+        today, = uptime.day_breakdown({}, D(2026, 11, 23), D(2026, 11, 23), now, zone)
+        self.assertEqual(today['unknown_s'], 4.5 * 3600)                        # only the time so far
+
     def test_buckets_of_the_breakdown(self):
         history = dict(daily={'2026-11-16': 3600}, downtime_daily={'2026-11-17': off(asleep_s=86400)})
         days = uptime.day_breakdown(history, D(2026, 11, 16), D(2026, 11, 22), self.NOW)

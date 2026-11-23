@@ -5,6 +5,7 @@ into asleep, off (shut down or restarting) and unknown, with counts of restarts,
 (history.downtime_daily, sent by 1.3 computers). A day the computer did not describe is unknown, never zero.
 """
 import datetime as dt
+import functools
 
 DAY = dt.timedelta(days=1)
 DAY_SECONDS = 86400
@@ -104,18 +105,39 @@ def _days(first, last):
     return (first + offset * DAY for offset in range((last - first).days + 1))
 
 
-def day_breakdown(history, first, last, now=None):
+@functools.lru_cache(maxsize=64)
+def _lengths(first, last, zone):
+    """Seconds in each local day first..last in ``zone`` (None: this computer's zone): 23 or 25 hours across a
+    daylight-saving change, like lifetime_availability. 24 hours where the local time cannot be computed."""
+    from lifetime_availability import local_midnight
+    try:
+        edges = [local_midnight(first + offset * DAY, zone) for offset in range((last - first).days + 2)]
+        return tuple((b - a).total_seconds() for a, b in zip(edges, edges[1:]))
+    except (OSError, OverflowError, ValueError):
+        return (DAY_SECONDS,) * ((last - first).days + 1)
+
+
+def day_breakdown(history, first, last, now=None, zone=None):
     """One dict per local day first..last: awake (history.daily), asleep, off and unknown seconds and the counts
     (history.downtime_daily). Without a downtime entry only awake is known (asleep, off and the counts are None) and
-    the rest of the day is unknown. Today counts only the time so far; days after today have no length."""
+    the rest of the day is unknown. A day is as long as it is in ``zone`` (None: this computer's zone); today counts
+    only the time so far; days after today have no length."""
     history = history or {}
     awake, downtime = history.get('daily') or {}, history.get('downtime_daily') or {}
-    now = now or dt.datetime.now().astimezone()
-    today, elapsed = now.date(), now.hour * 3600 + now.minute * 60 + now.second
+    now = (now or dt.datetime.now()).astimezone(zone)
+    today = now.date()
+    lengths = _lengths(first, last, zone)
     result = []
-    for day in _days(first, last):
+    for index, day in enumerate(_days(first, last)):
         key = day.isoformat()
-        length = DAY_SECONDS if day < today else elapsed if day == today else 0
+        if day == today:
+            try:
+                from lifetime_availability import local_midnight
+                length = max(0, (now - local_midnight(today, zone)).total_seconds())
+            except (OSError, OverflowError, ValueError):
+                length = now.hour * 3600 + now.minute * 60 + now.second
+        else:
+            length = lengths[index] if day < today else 0
         seconds = awake.get(key) if isinstance(awake.get(key), (int, float)) else None
         entry = downtime.get(key)
         item = dict(date=key, reported=entry is not None, awake_s=seconds)
