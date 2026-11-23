@@ -255,6 +255,9 @@ one approved step creates it and checks each file's SHA-256 against what the app
 first copy still trusts the per-user files once; installing with administrator approval avoids even that. Not yet
 exercised on a real standard-user PC with a separate administrator account. A source (Python) install still elevates
 `lifetime_agent.py` from the per-user folder and is meant for development.
+The uninstaller (`uninstall_windows.ps1`, listed in Installed apps) runs as the signed-in user without elevation,
+refuses a folder that is or holds a link or junction before removing anything, closes and unregisters only what runs
+from this installation's folder, and keeps `%APPDATA%\Lifetime` unless `-RemoveData` is given.
 
 Release builds install exact package versions (`requirements-server.txt`, `requirements-desktop.txt`,
 `requirements-build.txt`, and the Linux build script), use GitHub actions pinned to commits, check the AppImage tool

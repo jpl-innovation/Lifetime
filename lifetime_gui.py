@@ -1465,6 +1465,7 @@ def self_check():
 def ask_start_program():
     """The AppImage on a computer with Lifetime Server: which program to open. Returns (choice, remember)."""
     from PyQt6.QtWidgets import QCheckBox
+    install()       # no window yet: the app-wide look (switches, parentless message boxes), as the window does
     box = QMessageBox()
     box.setWindowTitle('Lifetime')
     box.setIcon(QMessageBox.Icon.Question)

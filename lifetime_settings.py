@@ -26,7 +26,7 @@ def bundled_command(tool):
     return [str(Path(sys.executable).with_name(tool + ('.exe' if sys.platform == 'win32' else '')))]
 
 
-SERVER_INSTALLED = ('/etc/lifetime-server/server.conf', '/opt/lifetime-server')
+SERVER_INSTALLED = ('/opt/lifetime-server/LifetimeServerRuntime',)     # its settings stay after an uninstall
 START_CHOICE = 'appimage-opens.txt'
 
 

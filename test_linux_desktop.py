@@ -157,7 +157,7 @@ class ServerDashboardMenuTests(unittest.TestCase):
         self.assertNotIn('chown "$extra_admin', server)
         # Lifetime for Linux shows the entry by itself when the server is already installed.
         desktop = (root / 'install_linux.sh').read_text(encoding='utf-8')
-        self.assertIn("[[ ! -f /etc/lifetime-server/server.conf ]] || hidden=''", desktop)
+        self.assertIn("[[ ! -x /opt/lifetime-server/LifetimeServerRuntime ]] || hidden=''", desktop)
 
 
 class AppImageStartTests(unittest.TestCase):

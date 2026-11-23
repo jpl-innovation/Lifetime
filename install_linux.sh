@@ -209,7 +209,7 @@ if [[ -x "$install_dir/LifetimeServerDashboard" ]]; then
     # app menu when Lifetime Server is installed on this computer (the dashboard then finds it without arguments);
     # install_server_linux.sh shows it there too when the server comes second.
     hidden='NoDisplay=true\n'
-    [[ ! -f /etc/lifetime-server/server.conf ]] || hidden=''
+    [[ ! -x /opt/lifetime-server/LifetimeServerRuntime ]] || hidden=''     # its settings stay after an uninstall
     {
         printf '[Desktop Entry]\nType=Application\nName=Lifetime Server\nComment=Lifetime Server dashboard\nExec='
         desktop_quote "$install_dir/LifetimeServerDashboard"
