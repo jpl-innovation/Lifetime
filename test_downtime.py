@@ -747,10 +747,12 @@ class HourlyReadTests(unittest.TestCase):
             total += sum(seconds for a, b in spans for d_, seconds in downtime.split(a, b) if d_.isoformat() == day)
         return total
 
-    def run_hourly(self, platform, reader):
+    def run_hourly(self, platform, reader, read_days=None):
         ledger = dict(daily={}, downtime_daily={}, downtime_sources={})
         now = None
         for day in self.DAYS:
+            if read_days is not None and day not in read_days:
+                continue                # Lifetime was not running that day
             for hour in range(8, 22):
                 now = self.local(f'{day}T{hour:02d}:30')
                 ledger['daily'] = {d_: self.awake(d_, now) for d_ in self.DAYS if d_ <= day}
@@ -773,6 +775,12 @@ class HourlyReadTests(unittest.TestCase):
         hourly, full = self.run_hourly('linux', self.linux_reader)
         self.assertEqual(hourly, full)
         self.assertEqual(full['2026-11-17']['restarts'], 2)
+
+    def test_linux_catches_up_on_days_the_tracker_did_not_run(self):
+        self.DAYS = ('2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20')
+        hourly, full = self.run_hourly('linux', self.linux_reader, read_days=(self.DAYS[0], self.DAYS[4]))
+        self.assertEqual(hourly, full)
+        self.assertEqual(hourly['2026-11-16']['shutdowns'], 1)
 
     def test_partial_first_day_never_replaces_a_fuller_saved_day(self):
         """The old rule's failure: a read starting at the newest boot made that day a partly seen first day."""

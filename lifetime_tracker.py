@@ -326,11 +326,17 @@ def power_since(ledger, now=None, platform=None):
     """Where the hourly power read starts. None (the whole log) on Windows: the filtered read takes a fraction of a
     second, and a partial read would make the newest boot's day a partly seen first day, losing that day's later
     sleeps and shutdowns. On Linux, after the first full read, from local midnight of the previous day (linux_power
-    adds the boot before it, so the gap into that day is classified too): yesterday and today are always read whole."""
+    adds the boot before it, so the gap into that day is classified too): yesterday and today are always read whole,
+    and so is every day since the day before the last read, however long the tracker was not running."""
     if (platform or sys.platform) == 'win32' or not isinstance(ledger.get('downtime_sources'), dict)             or not ledger['downtime_sources'].get('log_from'):
         return None
-    today = dt.datetime.fromtimestamp(now if now is not None else time.time()).date()
-    return dt.datetime.combine(today - dt.timedelta(days=1), dt.time()).timestamp()
+    first = dt.datetime.fromtimestamp(now if now is not None else time.time()).date() - dt.timedelta(days=1)
+    try:
+        checked = dt.datetime.fromisoformat(ledger['downtime_sources']['checked']).astimezone().date()
+        first = min(first, checked - dt.timedelta(days=1))
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        return None         # when the last read happened is unknown: read everything
+    return dt.datetime.combine(first, dt.time()).timestamp()
 
 
 def refresh_downtime(ledger, found):
