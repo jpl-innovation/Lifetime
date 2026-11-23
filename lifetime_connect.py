@@ -796,7 +796,7 @@ class ConnectPage(QWidget):
         self.diagnosis.hide()
         self.diagnosis_checks = []
         self._diagnosing = False
-        self.diagnose_tasks = Tasks(self)      # its own worker: a diagnosis never blocks or answers the status poll
+        self.diagnose_tasks = Tasks(self)      # a separate Tasks bridge (same thread pool): its results never reach the status poll or block it
         self.diagnose_tasks.completed.connect(lambda number, result: self._diagnosed(result))
         self.diagnose_tasks.failed.connect(lambda number, error: self._diagnosed(
             [_check('danger', 'The diagnosis could not finish.', 'Try again. If it keeps failing, tell your IT team.')]))

@@ -231,7 +231,7 @@ class DiagnoseButtonTests(unittest.TestCase):
         status_jobs = len(page.tasks.jobs)      # the status poll started by the page is still running
         page.diagnose()
         self.assertEqual(len(page.diagnose_tasks.jobs), 1)
-        self.assertEqual(len(page.tasks.jobs), status_jobs)      # its own worker: the poll and Connect are untouched
+        self.assertEqual(len(page.tasks.jobs), status_jobs)      # a separate Tasks bridge: the poll and Connect are untouched
         self.assertFalse(page.diagnose_buttons[0].isEnabled())
         with patch('lifetime_connect.diagnose', return_value=[]) as run:
             page.diagnose_tasks.jobs[-1]()
