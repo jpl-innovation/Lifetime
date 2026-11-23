@@ -314,7 +314,7 @@ class SelfCheckTests(unittest.TestCase):
                 patch.object(runtime, '_lan_names', return_value=['192.168.1.5']), \
                 patch.object(runtime, 'certificate', dict(runtime.certificate, expires=ending)), \
                 patch.object(runtime, 'discovery_state', 'unavailable'):
-            checks = runtime.self_check()['checks']
+            checks = runtime._self_check(9e9)['checks']        # not the 30 s reuse: each case runs
         found = states(checks)
         self.assertEqual(found['Lifetime Server listens on port {port} of every address of this computer: {addresses}.'], 'good')
         self.assertIn('192.168.1.5', words(checks))
@@ -324,7 +324,7 @@ class SelfCheckTests(unittest.TestCase):
         self.assertEqual(found['The certificate ends on {date}, in {days} days.'], 'warning')
         with patch.object(runtime, 'certificate', dict(runtime.certificate, warning='renewal-failed')), \
                 patch.object(runtime, 'discovery_state', 'running'):
-            found = states(runtime.self_check()['checks'])
+            found = states(runtime._self_check(9e9)['checks'])
         self.assertEqual(found['Lifetime Server could not renew its certificate. It works until {date}.'], 'danger')
         self.assertEqual(found['Discovery is answering on port 5353 (UDP): computers find this server with the code alone.'], 'good')
 
@@ -754,6 +754,93 @@ class DiscoveredServersTests(unittest.TestCase):
         from lifetime_connection import check_lines
         lines = check_lines([dict(state='good', text='{x}', values=dict(x='a\nb'), fix=None)], lambda key, **v: key.format(**v))
         self.assertEqual(lines, ['[Passed] ab'])
+
+
+class SelfCheckLimitsTests(unittest.TestCase):
+    """Self check ends within its budget, runs once at a time and is reused for 30 s."""
+
+    def setUp(self):
+        import sys
+        import lifetime_permissions as permissions
+        import lifetime_server as server
+        self.server = server
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        if sys.platform == 'win32':
+            self.enterContext(patch.object(permissions, 'windows_acl'))     # non-elevated Windows fixtures only
+        self.calls = []
+        self.enterContext(patch.object(server, 'firewall_checks', side_effect=self.firewall))
+        self.runtime = server.ServerRuntime(temporary.name, address='https://localhost:8443', host='127.0.0.1', port=0).start()
+        self.addCleanup(self.runtime.stop)
+
+    def firewall(self, port, deadline=None, **options):
+        import time
+        self.calls.append(deadline - time.monotonic())
+        time.sleep(0.2)
+        return []
+
+    def test_one_run_at_a_time_and_reused_for_30_seconds(self):
+        import threading
+        import time
+        threads = [threading.Thread(target=self.runtime.self_check) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(len(self.calls), 1)
+        self.assertLessEqual(self.calls[0], self.server.SELF_CHECK_BUDGET)
+        self.runtime.self_check()
+        self.assertEqual(len(self.calls), 1)
+        self.runtime._check_cache = (time.monotonic() - 31, self.runtime._check_cache[1])
+        self.runtime.self_check()
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_hanging_name_lookup_is_reported_not_waited_for(self):
+        import time
+        real = socket.getaddrinfo
+
+        def slow(host, *args, **kwargs):
+            if host == 'srv.example':
+                time.sleep(5)
+            return real(host, *args, **kwargs)
+        with patch.object(self.runtime, '_hostname', 'srv.example'), patch('socket.getaddrinfo', slow):
+            started = time.monotonic()
+            checks = self.runtime._self_check(time.monotonic() + self.server.SELF_CHECK_BUDGET)['checks']
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual(states(checks)['{host} did not resolve within 2 s on this server.'], 'warning')
+
+
+class SelfCheckProblemTests(unittest.TestCase):
+    def test_only_an_unknown_operation_says_the_server_is_too_old(self):
+        import lifetime_server_gui as gui
+        from lifetime_admin import NotAllowed, _failed
+        self.assertEqual(gui.self_check_problem(_failed(404)), 'unsupported')
+        self.assertEqual(gui.self_check_problem(_failed(500)), 'failed')
+        self.assertEqual(gui.self_check_problem(_failed(403)), 'denied')
+        self.assertIsInstance(_failed(403), NotAllowed)
+        self.assertEqual(gui.self_check_problem(TimeoutError()), 'timeout')
+        self.assertEqual(gui.self_check_problem(socket.timeout()), 'timeout')
+        self.assertEqual(gui.self_check_problem(ConnectionRefusedError()), 'failed')
+        for cause, fix in gui.SELF_CHECK_PROBLEMS.values():
+            for key in (cause, fix):
+                self.assertEqual(gui.text(key, 'en'), key)
+                self.assertNotEqual(gui.text(key, 'vi'), key)
+
+    def test_firewall_commands_stop_at_the_deadline(self):
+        import time
+        from types import SimpleNamespace
+        import lifetime_server as server
+        commands = []
+
+        def run(command, **options):
+            commands.append((command, options['timeout']))
+            return SimpleNamespace(returncode=0, stdout='active\n')
+        for platform in ('win32', 'linux'):
+            checks = server.firewall_checks(8443, run, platform, 'missing.conf', deadline=time.monotonic() + 0.1)
+            self.assertEqual(checks[-1]['text'], server.OUT_OF_TIME)
+        self.assertEqual(commands, [])
+        server.firewall_checks(8443, run, 'linux', 'missing.conf', deadline=time.monotonic() + 3)
+        self.assertTrue(commands and all(timeout <= 3 for command, timeout in commands))
 
 
 if __name__ == '__main__':

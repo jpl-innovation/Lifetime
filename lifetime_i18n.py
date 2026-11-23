@@ -2372,6 +2372,19 @@ _DIAGNOSTICS_VI = {
     'Make sure the code comes from the server this computer should use, or type its connection line (Add device shows it).':
         'Hãy chắc chắn mã đến từ máy chủ mà máy tính này cần dùng, hoặc nhập dòng kết nối của máy chủ đó (Thêm thiết bị hiển thị dòng này).',
     'Several Lifetime Servers answered. {name} matches the code.': 'Có nhiều Lifetime Server trả lời. {name} khớp với mã.',
+    '{host} did not resolve within 2 s on this server.': 'Không phân giải được {host} trong vòng 2 giây trên máy chủ này.',
+    'Computers that use this name wait just as long. Check the DNS servers this server uses, or let computers connect by the IP address.':
+        'Các máy tính dùng tên này cũng phải chờ lâu như vậy. Hãy kiểm tra các máy chủ DNS mà máy chủ này dùng, hoặc cho các máy tính kết nối bằng địa chỉ IP.',
+    'The firewall was not checked to the end: Self check ran out of time.': 'Chưa kiểm tra hết tường lửa: Tự kiểm tra đã hết thời gian.',
+    'Run Self check again. If this keeps happening, the firewall tools on this server answer very slowly.':
+        'Hãy chạy lại Tự kiểm tra. Nếu vẫn xảy ra, các công cụ tường lửa trên máy chủ này trả lời rất chậm.',
+    'Self check did not finish in time.': 'Tự kiểm tra không hoàn tất kịp thời gian.',
+    'Try again in a minute. If it keeps happening, the server may be very busy, or a name lookup or the firewall tools on it answer very slowly.':
+        'Hãy thử lại sau một phút. Nếu vẫn xảy ra, máy chủ có thể đang rất bận, hoặc việc tra tên hay các công cụ tường lửa trên đó trả lời rất chậm.',
+    'Your role does not allow Self check.': 'Vai trò của bạn không cho phép Tự kiểm tra.',
+    'Ask an administrator of this server for a role (Viewer or higher).': 'Hãy nhờ quản trị viên của máy chủ này cấp cho bạn một vai trò (Người xem trở lên).',
+    'Check that Lifetime Server is running, then try again. The server log may say more.':
+        'Hãy kiểm tra Lifetime Server đang chạy, rồi thử lại. Nhật ký máy chủ có thể cho biết thêm.',
 }
 for _key, _text in _DIAGNOSTICS_VI.items():
     EN.setdefault(_key, _key)

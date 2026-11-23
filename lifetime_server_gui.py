@@ -99,6 +99,29 @@ SAFE_INFO = ('server_version', 'os', 'name', 'organisation', 'address', 'host', 
              'reporting_interval', 'device_counts', 'discovery', 'database_size', 'fingerprint', 'server_names')
 
 
+# Why Self check gave no lines: (cause, what to do). Only a server that does not know the operation is too old.
+SELF_CHECK_PROBLEMS = {
+    'unsupported': ('Self check could not run.', 'Update Lifetime Server: versions before 1.3.0 have no self check. Then try again.'),
+    'timeout': ('Self check did not finish in time.',
+                'Try again in a minute. If it keeps happening, the server may be very busy, or a name lookup or the firewall '
+                'tools on it answer very slowly.'),
+    'denied': ('Your role does not allow Self check.', 'Ask an administrator of this server for a role (Viewer or higher).'),
+    'failed': ('Self check could not run.', 'Check that Lifetime Server is running, then try again. The server log may say more.'),
+}
+
+
+def self_check_problem(error):
+    """The SELF_CHECK_PROBLEMS key for an error from AdminClient.call('self_check')."""
+    from lifetime_admin import NotAllowed
+    if isinstance(error, NotAllowed):
+        return 'denied'
+    if isinstance(error, TimeoutError):
+        return 'timeout'
+    if type(error) is ValueError and 'HTTP 404' in str(error):      # the operation is unknown to this server
+        return 'unsupported'
+    return 'failed'
+
+
 def server_logs():
     """The Linux server's own log file, used only when it exists (the systemd service logs to the journal)."""
     return ['/var/log/lifetime-server.log'] if sys.platform.startswith('linux') else []
@@ -1444,7 +1467,13 @@ class ServerWindow(QMainWindow):
 
     def run_self_check(self):
         client = self.client
-        self._submit(lambda: client.call('self_check'), self._self_check_finished, self.self_check_button)
+
+        def work():
+            try:
+                return client.call('self_check')
+            except Exception as error:      # said in the Self check panel itself, by its cause
+                return dict(problem=self_check_problem(error))
+        self._submit(work, self._self_check_finished, self.self_check_button)
 
     def copy_diagnostics(self):
         client = self.client
@@ -1464,12 +1493,13 @@ class ServerWindow(QMainWindow):
         self._submit(work, finished, self.diagnostics_button)
 
     def _self_check_finished(self, result, success):
-        if success:
-            self._self_check = result
-            checks = result.get('checks') or []
+        self._self_check = result if success else None        # shown again in another language
+        problem = (result or {}).get('problem') if success else 'failed'
+        if problem:
+            cause, fix = SELF_CHECK_PROBLEMS[problem]
+            checks = [dict(state='danger', text=cause, fix=fix, values={})]
         else:
-            checks = [dict(state='danger', text='Self check could not run.', values={},
-                           fix='Update Lifetime Server: versions before 1.3.0 have no self check. Then try again.')]
+            checks = result.get('checks') or []
         while self.self_check_rows.count():
             item = self.self_check_rows.takeAt(0)
             if item.widget():
