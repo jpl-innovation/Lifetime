@@ -863,6 +863,9 @@ class MachineAgent:
                 thread.join(timeout=4)
                 sync_thread.join()
                 updates_thread.join(timeout=4)
+                if hasattr(self, '_power_pool'):     # a waiting power-log read never holds up a hand-over
+                    self._power_pool.shutdown(wait=False, cancel_futures=True)
+                    del self._power_pool          # a later run() starts a fresh one
 
     def close(self):
         if hasattr(self, '_inventory_reader'):

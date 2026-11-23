@@ -287,6 +287,7 @@ class MachineTests(AgentFixture):
 class ReplaceRunningAgentTests(AgentFixture):
     def test_a_new_connect_makes_the_old_reporter_leave_and_take_its_place(self):
         client = Mock()
+        self.machine.power_reader = lambda since: None     # no real system-log read on the test machine
         old = threading.Thread(target=self.machine.run, args=(threading.Event(), client), daemon=True)
         old.start()
         deadline = __import__('time').monotonic()+5
