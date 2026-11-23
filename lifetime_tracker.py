@@ -320,10 +320,15 @@ def read_power(since=None):
         return error
 
 
-def power_since(ledger):
-    """Read from just before the last start already seen (so its shutdown is classified); the first time, all of it."""
-    last = (ledger.get('downtime_sources') or {}).get('last_boot') if isinstance(ledger.get('downtime_sources'), dict) else None
-    return last - 60 if isinstance(last, (int, float)) and not isinstance(last, bool) and math.isfinite(last) else None
+def power_since(ledger, now=None, platform=None):
+    """Where the hourly power read starts. None (the whole log) on Windows: the filtered read takes a fraction of a
+    second, and a partial read would make the newest boot's day a partly seen first day, losing that day's later
+    sleeps and shutdowns. On Linux, after the first full read, from local midnight of the previous day (linux_power
+    adds the boot before it, so the gap into that day is classified too): yesterday and today are always read whole."""
+    if (platform or sys.platform) == 'win32' or not isinstance(ledger.get('downtime_sources'), dict)             or not ledger['downtime_sources'].get('log_from'):
+        return None
+    today = dt.datetime.fromtimestamp(now if now is not None else time.time()).date()
+    return dt.datetime.combine(today - dt.timedelta(days=1), dt.time()).timestamp()
 
 
 def refresh_downtime(ledger, found):

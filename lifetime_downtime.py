@@ -242,9 +242,6 @@ def sources_for(result, log, archives=0, archive_note='none', now=None, tz=None,
                  checked=dt.datetime.fromtimestamp(now, dt.timezone.utc).isoformat(timespec='seconds'), **more)
     if result.get('start') is not None:
         value['log_from'] = local_day(result['start'], tz).isoformat()
-        boots = [e['time'] for e in result['events'] if e['kind'] == 'start' and e.get('source') != 'fast-startup']
-        if boots:
-            value['last_boot'] = boots[-1]
     return value
 
 

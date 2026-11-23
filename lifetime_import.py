@@ -180,7 +180,9 @@ def linux_power(since=None):
     the journal nor wtmp shows as a clean shutdown counts as an unexpected stop (there is no Kernel-Power 41)."""
     boots, current = _journal_boots()
     shutdowns, records, rotated = read_wtmp()
-    chosen = [boot for boot in sorted(boots, key=lambda b: b['start']) if since is None or boot['end'] >= since]
+    ordered = sorted(boots, key=lambda b: b['start'])
+    first_index = next((i for i, boot in enumerate(ordered) if since is None or boot['end'] >= since), len(ordered))
+    chosen = ordered[max(0, first_index - 1):]      # and the boot before: its end and the gap after it are read too
     for boot in chosen:
         _power_details(boot, shutdowns)
         if boot['id'] == current['id']:

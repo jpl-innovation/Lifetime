@@ -329,7 +329,7 @@ class LinuxJournalTests(unittest.TestCase):
         self.assertEqual((day['unexpected_stops'], day['restarts'], day['shutdowns'], day['off_s']), (1, 0, 1, 1*H))
         with patch.object(imp, '_journal_boots', return_value=(boots, boots[2])), \
                 patch.object(imp, '_wtmp_shutdowns', return_value=[]), patch.object(imp, '_power_details', side_effect=details):
-            self.assertEqual([b['id'] for b in imp.linux_power(since=at('2026-11-18T13:00'))[0]], ['b', 'c'])
+            self.assertEqual([b['id'] for b in imp.linux_power(since=at('2026-11-18T13:00'))[0]], ['a', 'b', 'c'])   # and the boot before
 
 
 class DeeperImportTests(unittest.TestCase):
@@ -638,6 +638,110 @@ class UptimeReportTests(unittest.TestCase):
         second = self.build(self.ledger())
         self.assertEqual(first['uptime'], second['uptime'])          # all data: as of the last save, not "now"
         self.assertIsNone(self.build(tracker.new_ledger())['uptime'])
+
+
+class HourlyReadTests(unittest.TestCase):
+    """The real hourly sequence (tracker and agent) must end where one full read ends (review finding 1).
+
+    Three local days: an office day (boot 08:00, lunch sleep 12-13, shut down 22:00); a day with two restarts and a
+    sleep after the second; another office day. Reads every running hour, through tracker.refresh_downtime."""
+    DAYS = ('2026-11-16', '2026-11-17', '2026-11-18')
+
+    @staticmethod
+    def local(text):
+        return dt.datetime.fromisoformat(text).timestamp()     # the computer's own zone, as the tracker uses
+
+    def truth(self):
+        t = self.local
+        boots, requests = [], []
+        for day in self.DAYS:
+            if day == '2026-11-17':
+                boots += [dict(id=day + 'a', start=t(f'{day}T08:00'), end=t(f'{day}T10:00'), clean=True, events=[]),
+                          dict(id=day + 'b', start=t(f'{day}T10:02'), end=t(f'{day}T15:00'), clean=True, events=[]),
+                          dict(id=day + 'c', start=t(f'{day}T15:02'), end=t(f'{day}T22:00'), clean=True,
+                               events=[(t(f'{day}T18:00'), 'sleep'), (t(f'{day}T19:00'), 'wake')])]
+                requests += [(t(f'{day}T09:59:50'), dict(kind='restart', by='a', reason='')),
+                             (t(f'{day}T14:59:50'), dict(kind='restart', by='a', reason=''))]
+            else:
+                boots.append(dict(id=day, start=t(f'{day}T08:00'), end=t(f'{day}T22:00'), clean=True,
+                                  events=[(t(f'{day}T12:00'), 'sleep'), (t(f'{day}T13:00'), 'wake')]))
+            requests.append((t(f'{day}T21:59:30'), dict(kind='shutdown', by='explorer.exe', reason='')))
+        return boots, requests
+
+    def seen(self, now):
+        """What the logs hold at ``now``: the running boot ends at now and is not clean yet."""
+        boots, requests = self.truth()
+        result = []
+        for boot in boots:
+            if boot['start'] > now:
+                continue
+            running = boot['end'] > now
+            result.append(dict(boot, end=min(boot['end'], now), clean=boot['clean'] and not running,
+                               events=[e for e in boot['events'] if e[0] <= now]))
+        return result, [r for r in requests if r[0] <= now]
+
+    def windows_reader(self, since, now):
+        """windows_power(since): only events at or after ``since``, and a boot exists only with its start event."""
+        boots, requests = self.seen(now)
+        boots = [b for b in boots if since is None or b['start'] >= since]
+        return boots, dict(requests=[r for r in requests if since is None or r[0] >= since], stops=[], wakes=[]), dict(log='windows-log')
+
+    def linux_reader(self, since, now):
+        """The real linux_power(since), over a journal that holds what had happened by ``now``."""
+        boots, _ = self.seen(now)
+        journal = [dict(id=b['id'], start=b['start'], end=b['end'], index=i - len(boots) + 1) for i, b in enumerate(boots)]
+        truth = {b['id']: b for b in boots}
+        def details(item, shutdowns):
+            item.update(events=truth[item['id']]['events'], clean=truth[item['id']]['clean'])
+        with patch.object(imp, '_journal_boots', return_value=(journal, journal[-1])), \
+                patch.object(imp, 'read_wtmp', return_value=([], [], 0)), patch.object(imp, '_power_details', side_effect=details):
+            return imp.linux_power(since)
+
+    def awake(self, day, now):
+        boots, _ = self.seen(now)
+        total = 0.0
+        for boot in boots:
+            spans = imp._boot_spans(boot)
+            total += sum(seconds for a, b in spans for d_, seconds in downtime.split(a, b) if d_.isoformat() == day)
+        return total
+
+    def run_hourly(self, platform, reader):
+        ledger = dict(daily={}, downtime_daily={}, downtime_sources={})
+        now = None
+        for day in self.DAYS:
+            for hour in range(8, 22):
+                now = self.local(f'{day}T{hour:02d}:30')
+                ledger['daily'] = {d_: self.awake(d_, now) for d_ in self.DAYS if d_ <= day}
+                since = tracker.power_since(ledger, now, platform)
+                boots, extras, info = reader(since, now)
+                tracker.refresh_downtime(ledger, (boots, extras, info, now))
+        full = dict(daily=ledger['daily'])
+        boots, extras, info = reader(None, now)
+        downtime.apply(full, downtime.from_boots(boots, extras, now), now=now)
+        return ledger['downtime_daily'], full['downtime_daily']
+
+    def test_hourly_windows_reads_equal_one_full_read(self):
+        hourly, full = self.run_hourly('win32', self.windows_reader)
+        self.assertEqual(hourly, full)
+        self.assertEqual((full['2026-11-16']['shutdowns'], full['2026-11-16']['asleep_s'], full['2026-11-16']['unknown_s']), (1, H, 8*H))
+        self.assertEqual((full['2026-11-17']['restarts'], full['2026-11-17']['shutdowns'], full['2026-11-17']['asleep_s']), (2, 1, H))
+        self.assertEqual(full['2026-11-17']['off_s'], 2*H + 4*60 + 8*H)     # 22-24, two 2-minute restarts, 00-08
+
+    def test_hourly_linux_reads_equal_one_full_read(self):
+        hourly, full = self.run_hourly('linux', self.linux_reader)
+        self.assertEqual(hourly, full)
+        self.assertEqual(full['2026-11-17']['restarts'], 2)
+
+    def test_partial_first_day_never_replaces_a_fuller_saved_day(self):
+        """The old rule's failure: a read starting at the newest boot made that day a partly seen first day."""
+        now = self.local('2026-11-17T21:30')
+        ledger = dict(daily={}, downtime_daily={}, downtime_sources={})
+        boots, extras, info = self.windows_reader(None, now)
+        downtime.apply(ledger, downtime.from_boots(boots, extras, now), now=now)
+        saved = copy.deepcopy(ledger['downtime_daily'])
+        boots, extras, info = self.windows_reader(self.local('2026-11-17T15:00'), now)
+        downtime.apply(ledger, downtime.from_boots(boots, extras, now), now=now)
+        self.assertEqual(ledger['downtime_daily'], saved)
 
 
 if __name__ == '__main__':
