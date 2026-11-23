@@ -9,6 +9,7 @@ import os
 import random
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +23,10 @@ except ImportError:
     lifetime_fast = None
 
 UTC = dt.timezone.utc
+HERE = os.path.dirname(os.path.abspath(__file__))
+FIX = ('The Rust copy (rust/lifetime_fast/src/lib.rs) no longer matches the Python in lifetime_availability.py: change '
+       'the Rust function of the same name the same way, see rust/lifetime_fast/README.md "If you change the Python" '
+       '(or "How to ship without Rust").')
 STATES = ('online', 'offline', 'offline', 'online', 'unknown')
 BASES = (dt.datetime(1900, 1, 1, tzinfo=UTC), dt.datetime(2026, 10, 25, tzinfo=UTC),     # 1 Nov 2026: a DST change
          dt.datetime(2026, 3, 1, tzinfo=UTC), dt.datetime(9000, 6, 1, tzinfo=UTC))       # 8 Mar 2026: the other one
@@ -125,13 +130,49 @@ class PythonReferenceTests(unittest.TestCase):
                     for value, expected in zip(got_list, want_list):
                         self.assertAlmostEqual(value, expected, delta=1e-6)
 
+    def engine(self, extra_path=None, **environment):
+        """lifetime_availability's ENGINE and whether it kept lifetime_fast, in a fresh Python."""
+        environment = dict(os.environ, **environment)
+        if extra_path:
+            environment['PYTHONPATH'] = os.pathsep.join(filter(None, [extra_path, environment.get('PYTHONPATH')]))
+        found = subprocess.run([sys.executable, '-c', 'import lifetime_availability as a; print(a.ENGINE); '
+                                'print(a.lifetime_fast is not None)'], env=environment, capture_output=True, text=True,
+                               timeout=60, cwd=HERE)
+        return found.stdout.splitlines(), found.stderr
+
     def test_the_engine_can_be_forced_to_python(self):
-        expected = 'Rust accelerator' if lifetime_fast and os.environ.get('LIFETIME_NO_RUST') != '1' else 'Python'
-        self.assertEqual(availability.ENGINE, expected)
-        forced = subprocess.run([sys.executable, '-c', 'import lifetime_availability as a; print(a.ENGINE, a.lifetime_fast)'],
-                                env=dict(os.environ, LIFETIME_NO_RUST='1'), capture_output=True, text=True, timeout=60,
-                                cwd=os.path.dirname(os.path.abspath(__file__)))
-        self.assertEqual(forced.stdout.split(), ['Python', 'None'], forced.stderr)
+        current = lifetime_fast is not None and getattr(lifetime_fast, 'API', None) == availability.RUST_API
+        expected = 'Rust accelerator' if current and os.environ.get('LIFETIME_NO_RUST') != '1' else 'Python'
+        self.assertEqual(availability.ENGINE.split(' (')[0], expected)
+        self.assertEqual(self.engine(LIFETIME_NO_RUST='1')[0], ['Python', 'False'])
+
+    def test_an_out_of_date_rust_module_is_not_used(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with open(os.path.join(folder, 'lifetime_fast.py'), 'w', encoding='utf-8') as module:
+                module.write('API = 0\ndef sums(*arguments):\n    raise AssertionError("never called")\n')
+            lines, errors = self.engine(folder, LIFETIME_NO_RUST='0')
+        self.assertEqual(lines, ['Python (Rust accelerator out of date)', 'False'], errors)
+
+    def test_a_failing_rust_copy_falls_back_to_python_for_that_call_and_says_so_once(self):
+        class Panic(BaseException):     # pyo3's PanicException is a BaseException, not an Exception
+            pass
+
+        class Broken:
+            calls = 0
+
+            def sums(self, *arguments):
+                Broken.calls += 1
+                raise Panic('index out of bounds')
+        case = list(sums_cases())[5]
+        with patch.object(availability, 'lifetime_fast', Broken()), patch.object(availability, '_rust_failed', False), \
+                patch('sys.stderr') as stderr:
+            self.assertEqual(availability._fast_sums(*case), availability._sums(*case))
+            self.assertEqual(availability._fast_sums(*case), availability._sums(*case))
+        self.assertEqual(Broken.calls, 2)
+        self.assertEqual(sum('Rust accelerator failed (Panic)' in str(call) for call in stderr.write.call_args_list), 1)
+        with patch.object(availability, 'lifetime_fast', Broken()), patch.object(Broken, 'sums', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                availability._fast_sums(*case)
 
 
 class RustCopyTests(unittest.TestCase):
@@ -145,8 +186,13 @@ class RustCopyTests(unittest.TestCase):
                           'Python reference was checked. CI builds it and runs this comparison.')
 
     def assertSame(self, got, want):
-        self.assertEqual(got, want)
-        self.assertEqual(repr(got), repr(want))
+        self.assertEqual(got, want, FIX)
+        self.assertEqual(repr(got), repr(want), FIX)
+
+    def test_the_built_module_is_the_version_this_python_expects(self):
+        self.assertEqual(getattr(lifetime_fast, 'API', None), availability.RUST_API,
+                         'lifetime_fast was built from an older or newer rust/lifetime_fast/src/lib.rs (API) than '
+                         'lifetime_availability.RUST_API: rebuild it (rust/lifetime_fast/README.md) or raise both together')
 
     def test_rust_sums_are_identical(self):
         with patch.object(availability, 'lifetime_fast', lifetime_fast):

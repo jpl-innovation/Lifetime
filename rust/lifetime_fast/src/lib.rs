@@ -10,6 +10,10 @@
 
 use pyo3::prelude::*;
 
+/// What `sums` takes and returns. lifetime_availability.RUST_API must be the same number, or the server uses the Python
+/// version ("Python (Rust accelerator out of date)"). Raise both together when `sums` changes.
+const API: u32 = 1;
+
 /// (start, end) in microseconds since 1970. Python: a (start, end) tuple of datetimes.
 type Interval = (i64, i64);
 
@@ -133,5 +137,6 @@ fn sums(
 #[pymodule]
 fn lifetime_fast(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sums, m)?)?;
+    m.add("API", API)?;
     Ok(())
 }

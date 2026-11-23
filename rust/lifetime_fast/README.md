@@ -33,10 +33,26 @@ source installs never do.
 
 ## If you change the Python
 
-Run `python -m unittest test_availability_engines`. Without the Rust module built it checks the Python against a
-simple slow computation and says the Rust comparison was skipped. GitHub builds the Rust module and runs the same test
-with it: if the Python and Rust results differ, it fails and shows the case. Then either make the same change in
-`src/lib.rs` (the matching function has the same name), or ask someone who knows Rust.
+A Python-only change is always safe. Run `python -m unittest test_availability_engines`: without the Rust module built
+it checks the Python against a simple slow computation and says the Rust comparison was skipped. GitHub's
+`rust-accelerator` job builds the Rust module and runs the same test with it: if the Python and Rust results differ,
+it fails, names `src/lib.rs` and shows the case. Then either make the same change in `src/lib.rs` (the matching
+function has the same name), ask someone who knows Rust, or ship without Rust (below). The Python tests and the
+desktop and agent packages never wait for Rust.
+
+If you change what `sums` takes or returns, raise `API` in `src/lib.rs` and `RUST_API` in `lifetime_availability.py`
+together: a server with an older build installed then uses Python ("Python (Rust accelerator out of date)") instead
+of calling it wrongly. If the Rust copy ever fails during a computation, that computation is done in Python and the
+server logs it once.
+
+## How to ship without Rust
+
+In `.github/workflows/windows.yml`: build the Windows server package without `-WithRust` and delete its two Rust steps
+("Rust 1.91.0 for the server's accelerator", "The packaged runtime loads the Rust accelerator"); delete
+`-e LIFETIME_RUST=1` from `linux-build`; remove `rust-accelerator` from `needs:` of `linux-build`,
+`windows-server-package` and `release`. In `packaging/linux/smoke_test.sh` delete the three lines after "The packaged
+server loads its Rust accelerator". The packages are then built with the Python version only, with the same results.
+Details: `docs/notes/1.3.0-rust.md`.
 
 ## Building it yourself
 
@@ -45,7 +61,7 @@ You need Rust 1.91.0 (<https://rustup.rs>, then `rustup toolchain install 1.91.0
 ```sh
 python -m pip install maturin==1.10.2
 python -m maturin build --release --locked -m rust/lifetime_fast/Cargo.toml --out build/rust-wheels
-python -m pip install --no-index --find-links=build/rust-wheels lifetime_fast==0.1.0
+python -m pip install --force-reinstall --no-deps --no-index --find-links=build/rust-wheels lifetime_fast==0.1.0
 python -m unittest test_availability_engines
 ```
 

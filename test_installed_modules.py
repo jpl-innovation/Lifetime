@@ -102,6 +102,8 @@ class SourceInstallationTests(unittest.TestCase):
                 self.assertEqual('lifetime_fast' in hidden, wanted)
                 if not wanted:
                     self.assertIn('--exclude-module lifetime_fast', text)
+        self.assertIn("$fast = if ($WithRust) { @('--hidden-import', 'lifetime_fast') } else { @('--exclude-module', "
+                      "'lifetime_fast') }", script)     # an older installed build is never bundled by accident
         self.assertIn("'--exclude-module', 'lifetime_fast'", (PROJECT/'build_windows.ps1').read_text(encoding='utf-8'))
         spec = (PROJECT/'packaging/linux/lifetime-linux.spec').read_text(encoding='utf-8')
         self.assertIn("([] if fast else ['lifetime_fast'])", spec)

@@ -66,7 +66,8 @@ rust_accelerator() {
     python3.12 -m pip install --disable-pip-version-check 'maturin==1.10.2'
     python3.12 -m maturin build --release --locked --interpreter python3.12 -m "$root/rust/lifetime_fast/Cargo.toml" \
         --out "$work/wheels"
-    python3.12 -m pip install --disable-pip-version-check --no-index --find-links="$work/wheels" 'lifetime_fast==0.1.0'
+    python3.12 -m pip install --disable-pip-version-check --force-reinstall --no-deps --no-index --find-links="$work/wheels" \
+        'lifetime_fast==0.1.0'
 }
 
 copy_docs() {

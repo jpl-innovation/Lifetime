@@ -21,19 +21,27 @@ that both give identical results.
 """
 import datetime as dt
 import os
+import sys
 
-try:
-    if os.environ.get('LIFETIME_NO_RUST') == '1':
-        raise ImportError('LIFETIME_NO_RUST=1')
-    import lifetime_fast
-except ImportError:
-    lifetime_fast = None
+RUST_API = 1        # what _fast_sums expects from lifetime_fast (its API in src/lib.rs): raise both together
+ENGINE = 'Python'   # shown by the server's server_info
+lifetime_fast = None
+if os.environ.get('LIFETIME_NO_RUST') != '1':
+    try:
+        import lifetime_fast
+    except ImportError:
+        lifetime_fast = None
+    else:
+        if getattr(lifetime_fast, 'API', None) == RUST_API:
+            ENGINE = 'Rust accelerator'
+        else:       # an older or newer build than this Python expects
+            lifetime_fast, ENGINE = None, 'Python (Rust accelerator out of date)'
 
 UTC = dt.timezone.utc
 FIELDS = ('good_s', 'bad_s', 'unknown_s', 'excluded_s')
 DEFAULT_FLOOR = 80      # percent coverage below which a result is "insufficient evidence"
-ENGINE = 'Rust accelerator' if lifetime_fast else 'Python'     # shown by the server's server_info
 EPOCH, MICROSECOND = dt.datetime(1970, 1, 1, tzinfo=UTC), dt.timedelta(microseconds=1)
+_rust_failed = False    # a failure of the Rust copy is reported once
 
 
 def _merge(intervals):
@@ -195,11 +203,23 @@ def _sums(scheduled, cuts, online, offline, edges):
 
 
 def _fast_sums(scheduled, cuts, online, offline, edges):
-    """_sums in Rust. Times go over as whole microseconds since 1970 (exact); the floats come back the same."""
+    """_sums in Rust. Times go over as whole microseconds since 1970 (exact); the floats come back the same. If the
+    Rust copy fails (a panic arrives as pyo3's PanicException, a BaseException), this call uses the Python instead."""
+    global _rust_failed
+
     def micro(intervals):
         return [((start - EPOCH) // MICROSECOND, (end - EPOCH) // MICROSECOND) for start, end in intervals]
-    *seconds, number, longest = lifetime_fast.sums(micro(scheduled), micro(cuts), micro(online), micro(offline),
-                                                   [(edge - EPOCH) // MICROSECOND for edge in edges])
+    try:
+        *seconds, number, longest = lifetime_fast.sums(micro(scheduled), micro(cuts), micro(online), micro(offline),
+                                                       [(edge - EPOCH) // MICROSECOND for edge in edges])
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as error:
+        if not _rust_failed:
+            _rust_failed = True
+            print(f'Lifetime Server: the Rust accelerator failed ({type(error).__name__}); using Python for those '
+                  'computers', file=sys.stderr)
+        return _sums(scheduled, cuts, online, offline, edges)
     return (*seconds, number, round(longest))
 
 

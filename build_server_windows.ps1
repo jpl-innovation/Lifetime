@@ -34,7 +34,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'maturin could not be installed.' }
         & $Python -m maturin build --release --locked --interpreter $Python -m rust\lifetime_fast\Cargo.toml --out $wheels
         if ($LASTEXITCODE -ne 0) { throw 'The Rust accelerator did not build (is Rust 1.91.0 installed?).' }
-        & $Python -m pip install --disable-pip-version-check --no-index --find-links=$wheels lifetime_fast==0.1.0
+        & $Python -m pip install --disable-pip-version-check --force-reinstall --no-deps --no-index --find-links=$wheels lifetime_fast==0.1.0
         if ($LASTEXITCODE -ne 0) { throw 'The Rust accelerator could not be installed.' }
         $ErrorActionPreference = 'Stop'
     }
@@ -51,8 +51,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Version information failed ($Program)." }
         return $path
     }
-    # The Rust accelerator (when it is installed here) goes into the server programs; never the agent.
-    $fast = @('--hidden-import', 'lifetime_fast')
+    # The Rust accelerator goes into the server programs only when built here now (-WithRust): never an older one that
+    # happens to be installed, and never into the agent.
+    $fast = if ($WithRust) { @('--hidden-import', 'lifetime_fast') } else { @('--exclude-module', 'lifetime_fast') }
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
                 '--distpath', $output, '--workpath', $work, '--specpath', $work)
     # Modules imported only inside functions. PyInstaller finds most of them by scanning the code, but they are named
