@@ -55,7 +55,7 @@ class HistoryTests(unittest.TestCase):
         for index in range(405):
             day = dt.date(2025, 1, 1)+dt.timedelta(days=index)
             t.sample(ledger, 10, str(index), day.isoformat()+'T12:00:00')
-        self.assertEqual(len(ledger['daily']), 400)
+        self.assertEqual(len(ledger['daily']), 405)      # daily totals are kept 10 years (t.DAILY_DAYS)
         self.assertEqual(len(ledger['sessions']), 100)
         total = ledger['total_seconds']
         t.sample(ledger, 1000, '404', day.isoformat()+'T13:00:00')

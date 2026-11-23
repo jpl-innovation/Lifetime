@@ -34,6 +34,8 @@ from lifetime_connect import ConnectPage
 from lifetime_widgets_dashboard import CapacityBar, StatusChip, Icon as Glyph
 from lifetime_reveal import Intro, PageEntrance, later, paint_roll, phase, progress, warm_pages
 from lifetime_tasks import Tasks
+from lifetime_uptime_gui import PeriodModel, PeriodPicker, UptimePage, coverage_line
+import lifetime_downtime as downtime
 
 from lifetime_theme import THEMES, stylesheet, install, configure_high_dpi, PANEL_RADIUS, tokens, active_theme, set_theme, resolve_theme, retint_all, plain_tip
 ENTRANCE_MS = 1700
@@ -696,6 +698,18 @@ class Window(QWidget):
         self.system.layout().setContentsMargins(0, 0, 0, 0)
         self.history.layout().setContentsMargins(0, 0, 0, 0)
         self.history.layout().itemAt(0).layout().itemAt(0).widget().setText(tr('Activity'))
+        # One chosen date range for Activity, Uptime & downtime and Reports, remembered in settings. The Insights
+        # range buttons stay (the server and Health use them) but the desktop drives Activity from the picker.
+        self.period = PeriodModel(self.settings.get('period'), self.save_period)
+        self.period.changed.connect(lambda: self.apply_period())
+        activity_header = self.history.layout().itemAt(0).layout()
+        self.history.ranges.hide()
+        self.activity_picker = PeriodPicker(self.period)
+        activity_header.insertWidget(activity_header.indexOf(self.history.ranges), self.activity_picker)
+        self.activity_coverage = label('', 'caption')
+        self.activity_coverage.setWordWrap(True)
+        self.activity_coverage.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.history.layout().insertWidget(1, self.activity_coverage)
         self.reports = QWidget()
         reports_layout = QVBoxLayout(self.reports)
         reports_layout.setContentsMargins(0, 0, 0, 0)
@@ -704,6 +718,14 @@ class Window(QWidget):
         intro = label(tr('Reports and details for this computer.'), 'caption')
         intro.setWordWrap(True)
         reports_layout.addWidget(intro)
+        period_row = QHBoxLayout()
+        period_row.setSpacing(12)
+        self.reports_picker = PeriodPicker(self.period)
+        period_row.addWidget(self.reports_picker)
+        period_note = label(tr('Exported reports use this period.'), 'caption')
+        period_note.setWordWrap(True)
+        period_row.addWidget(period_note, 1)
+        reports_layout.addLayout(period_row)
         # Where the saved time comes from, as one bar: measured here, read back from the OS logs, typed in by hand.
         # Each part also has a chip with its glyph and words, so the colours are never the only key.
         self.sources_panel = QFrame()
@@ -774,7 +796,9 @@ class Window(QWidget):
         self.connect_page.serverState.connect(self.sidebar.set_server)       # Server: Online / Offline, beside the status
         self.sidebar.set_server(*self.connect_page.show_server_state())
         self.settings_page = SettingsPage(self, data_dir())
-        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page, self.settings_page):
+        self.uptime = UptimePage(self.period)        # page id 7: the existing ids 0-6 stay as they were
+        for page in (self.overview, self.system, self.history, self.reports, self.health, self.connect_page, self.settings_page,
+                     self.uptime):
             page.setMinimumWidth(0)
             page.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
             self.pages.addWidget(page)
@@ -813,7 +837,7 @@ class Window(QWidget):
         body_layout.insertWidget(1, self.history_banner)
         self.history_banner.hide()
         self.shortcuts = []
-        for key, page in (*((f'Ctrl+{number}', page) for number, page in enumerate((0, 2, 1, 4, 5, 3), 1)), ('Ctrl+,', 6)):
+        for key, page in (*((f'Ctrl+{number}', page) for number, page in enumerate((0, 2, 1, 4, 5, 3), 1)), ('Ctrl+7', 7), ('Ctrl+,', 6)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.activated.connect(lambda index=page: self.select_page(index))
             self.shortcuts.append(shortcut)
@@ -956,12 +980,13 @@ class Window(QWidget):
             button.setEnabled(enabled)
         self.technician_actions['Export report'].setEnabled(enabled and self.daily_repair_complete)
         self.navigation.group.button(2).setVisible(enabled and self.settings.get('history', False))
+        self.navigation.group.button(7).setVisible(enabled and self.settings.get('history', False))
         self.trend_panel.setVisible(enabled and self.settings.get('history', False))
         self.system.set_settings(self.settings if enabled else {})
         self.health.set_settings(self.settings if enabled else {})
         self.verify_button.setEnabled(enabled)
         self.start.setEnabled(enabled)
-        if not self.settings.get('history') and self.navigation.group.checkedId() == 2:
+        if not self.settings.get('history') and self.navigation.group.checkedId() in (2, 7):
             self.navigation.group.button(0).click()
 
     def open_settings(self):
@@ -970,6 +995,7 @@ class Window(QWidget):
     def open_technician(self, cls):
         try:
             dialog = cls(self, directory=data_dir(), language=language())
+            self.prefill_period(dialog)
             dialog.exec()
             # Identity is a preference edit, not a request to configure tracking.
             # Refresh choices without invoking apply_preferences/autostart/import.
@@ -979,6 +1005,35 @@ class Window(QWidget):
             self.refresh()
         except (OSError, ValueError, TypeError, RuntimeError) as error:
             QMessageBox.warning(self, tr('Could not open details'), str(error))
+
+    def save_period(self, value):
+        """Remember the range on disk and in this window's copy, so a later save of ``self.settings`` keeps it."""
+        update_settings({'period': value}, data_dir())
+        self.settings['period'] = value
+
+    def prefill_period(self, dialog):
+        """The export dialog starts on the period chosen in the app (All = all available history)."""
+        if not isinstance(dialog, ExportDialog) or self.period.choice == 'all':
+            return
+        start, end = self.period.bounds(downtime.earliest_day(getattr(self, '_ledger', {}) or {}))
+        dialog.range_select.setCurrentIndex(1)
+        dialog.start_date.setText(start.isoformat())
+        dialog.end_date.setText(end.isoformat())
+
+    def apply_period(self, ledger=None):
+        """Point every range-following view at the chosen dates (worked out again each time: midnight moves them)."""
+        ledger = ledger if ledger is not None else getattr(self, '_ledger', None)
+        if ledger is None:
+            return
+        self._ledger = ledger
+        start, end = self.period.bounds(downtime.earliest_day(ledger))
+        self.history.set_bounds(start, end)
+        self.activity_coverage.setText(coverage_line(ledger))
+        # The Uptime page works only while it is open (its own fingerprint skips unchanged seconds).
+        if getattr(self, 'active_page', None) == 7:
+            self.uptime.set_ledger(ledger)
+        else:
+            self.uptime.ledger = ledger
 
     def apply_preferences(self, settings, previous):
         if not settings['rebuild']:
@@ -1061,9 +1116,9 @@ class Window(QWidget):
         self.history_banner.setVisible(getattr(self, '_history_due', False) and getattr(self, 'active_page', 0) != 5)
 
     def select_page(self, index):
-        if index not in (0, 1, 2, 3, 4, 5, 6):
+        if index not in (0, 1, 2, 3, 4, 5, 6, 7):
             return
-        if index == 2 and not (self.settings.get('completed') and self.settings.get('history')):
+        if index in (2, 7) and not (self.settings.get('completed') and self.settings.get('history')):
             return
         self.navigation.group.button(index).setChecked(True)
         if index == 6:
@@ -1334,6 +1389,7 @@ class Window(QWidget):
             self.device_name.setText('\u200b'.join(name[i:i+32] for i in range(0, len(name), 32)))
             self.device_name.setAccessibleName(name)
             self.device_name.setVisible(bool(name))
+            self.apply_period(ledger)
             self.history.set_ledger(ledger)
             today = dt.date.today()
             points = date_series(clean_daily(ledger.get('daily', {})), today-dt.timedelta(days=13), today)
@@ -1432,6 +1488,20 @@ class Window(QWidget):
             QMessageBox.warning(self, tr('Could not start tracker'), str(error))
 
 
+def install_excepthook():
+    """An unexpected error in a click or a timer is logged and shown; without this PyQt ends the whole app."""
+    import traceback
+    def report(kind, error, trace):
+        text = ''.join(traceback.format_exception(kind, error, trace))
+        print(text, file=sys.stderr, flush=True)
+        try:
+            QMessageBox.warning(None, tr('Something went wrong'), tr('Lifetime hit an unexpected error and kept running. Details: {error}', error=f'{kind.__name__}: {error}'))
+        except Exception:
+            pass
+    sys.excepthook = report
+    return report
+
+
 LINUX_QT_PLUGINS = ('platforms/libqxcb.so', 'platforms/libqwayland-generic.so', 'platforms/libqwayland-egl.so',
                     'platforms/libqoffscreen.so', 'wayland-shell-integration/libxdg-shell.so')
 
@@ -1498,6 +1568,7 @@ if __name__ == '__main__':
             pass
     configure_high_dpi()
     app = QApplication(sys.argv)
+    install_excepthook()
     app.setDesktopFileName('lifetime')  # Wayland app id: matches lifetime.desktop for the dock/taskbar icon
     here = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
     for candidate in (here / 'assets' / 'lifetime.png', here / 'lifetime.png'):

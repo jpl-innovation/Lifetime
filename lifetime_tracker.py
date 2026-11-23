@@ -19,6 +19,7 @@ import time
 INTERVAL = 30
 MAX_DELTA = 300
 MAX_BOOT_CREDIT = 366 * 24 * 3600  # Reject implausibly large initial uptimes.
+DAILY_DAYS = 3660  # days of daily awake totals kept (10 years; the server's limit too)
 
 
 def data_dir():
@@ -287,8 +288,11 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     if history:
         ledger['sessions'][-1]['seconds'] += added
     ledger['sessions'] = ledger['sessions'][-100:]
+    # Daily totals are one number a day: keep 10 years (the server's limit too), so a 5-year range shows real
+    # days. Dated hourly detail (24 numbers a day) stays at 400 days.
+    daily_cutoff = (local.date() - dt.timedelta(days=DAILY_DAYS-1)).isoformat()
+    ledger['daily'] = {key: value for key, value in ledger['daily'].items() if key >= daily_cutoff}
     cutoff = (local.date() - dt.timedelta(days=399)).isoformat()
-    ledger['daily'] = {key: value for key, value in ledger['daily'].items() if key >= cutoff}
     if 'dated_hourly' in ledger:
         ledger['dated_hourly'] = {key: value for key, value in ledger['dated_hourly'].items() if key >= cutoff}
     if ledger.get('last_update'):
@@ -300,6 +304,56 @@ def sample(ledger, tick, identity, timestamp=None, credit_current=False, history
     ledger['awake_clock_high_water'] = max(high_water, tick)
     ledger['longest_session_seconds'] = max(ledger['longest_session_seconds'], ledger['current_session_seconds'])
     ledger.update(last_clock=tick, boot_id=identity, last_update=stamp)
+    return ledger
+
+
+def read_power(since=None, reader=None):
+    """(boots, extras, info, now) from this computer's power log, or the exception that stopped the read."""
+    try:
+        if reader is not None:
+            pass
+        elif sys.platform == 'win32':
+            from lifetime_import_windows import windows_power as reader
+        else:
+            from lifetime_import import linux_power as reader
+        now = time.time()
+        return (*reader(since), now)
+    except Exception as error:      # a log problem is reported in the coverage line, never raised into the tracker
+        return error
+
+
+def power_since(ledger, now=None, platform=None):
+    """Where the hourly power read starts. None (the whole log) on Windows: the filtered read takes a fraction of a
+    second, and a partial read would make the newest boot's day a partly seen first day, losing that day's later
+    sleeps and shutdowns. On Linux, after the first full read, from local midnight of the previous day (linux_power
+    adds the boot before it, so the gap into that day is classified too): yesterday and today are always read whole."""
+    if (platform or sys.platform) == 'win32' or not isinstance(ledger.get('downtime_sources'), dict)             or not ledger['downtime_sources'].get('log_from'):
+        return None
+    today = dt.datetime.fromtimestamp(now if now is not None else time.time()).date()
+    return dt.datetime.combine(today - dt.timedelta(days=1), dt.time()).timestamp()
+
+
+def refresh_downtime(ledger, found):
+    """Apply a ``read_power`` result to the downtime keys only. Any failure leaves the ledger as it was."""
+    try:
+        import lifetime_downtime as downtime
+        from lifetime_ledger import problems
+        work = dict(daily=ledger.get('daily', {}), downtime_daily=ledger.get('downtime_daily') or {},
+                    downtime_sources=ledger.get('downtime_sources') if isinstance(ledger.get('downtime_sources'), dict) else {})
+        if isinstance(found, Exception):
+            work['downtime_sources'] = dict(work['downtime_sources'], note='unavailable')
+        else:
+            boots, extras, info, now = found
+            result = downtime.from_boots(boots, extras, now)
+            downtime.apply(work, result, downtime.sources_for(result, now=now, **info), now)
+        if problems({'total_seconds': 0, 'downtime_daily': work['downtime_daily'],
+                     'downtime_sources': work['downtime_sources']}):
+            return ledger
+        if work['downtime_daily'] or 'downtime_daily' in ledger:
+            ledger['downtime_daily'] = work['downtime_daily']
+        ledger['downtime_sources'] = work['downtime_sources']
+    except Exception:
+        pass
     return ledger
 
 
@@ -494,10 +548,17 @@ def run(directory=None):
         health_results = []
         health_pending = False
         health_attempt = -3600
+        # Downtime (asleep / off / stops) is read from the System log or journal in the background, at most
+        # hourly, and applied at the next save. It never delays or changes awake accounting.
+        power_results = []
+        power_pending = False
+        power_attempt = -3600
         def collect_capacity():
             health_results.append(health.probe_battery())
+        def collect_power(since):
+            power_results.append(read_power(since))
         def flush(running):
-            nonlocal health_pending, health_attempt
+            nonlocal health_pending, health_attempt, power_pending, power_attempt
             with file_lock(directory, 'ledger.lock'):
                 settings = load_settings(directory)
                 if not settings['completed']:
@@ -516,14 +577,33 @@ def run(directory=None):
                     health_results.clear()
                     health_pending = False
                 sample(ledger, awake_clock(), boot_id(), history=settings['history'])
+                if settings['history']:
+                    if power_results:
+                        refresh_downtime(ledger, power_results.pop())
+                        power_pending = False
+                    # A read that never came back (it has its own time limits) does not block the next one for ever.
+                    if running and (not power_pending or time.monotonic()-power_attempt >= 7200)                             and time.monotonic()-power_attempt >= 3600:
+                        power_pending = True
+                        power_attempt = time.monotonic()
+                        threading.Thread(target=collect_power, args=(power_since(ledger),), daemon=True).start()
+                else:
+                    power_results.clear()
+                    power_pending = False
                 save(directory, ledger, running)
+        def flush_or_retry(running):
+            # Another program holding the ledger lock too long (Windows gives up after about 10 s) or a failed
+            # write must not end the tracker: the awake clock keeps counting and the next save credits the time.
+            try:
+                flush(running)
+            except OSError:
+                pass
         try:
-            flush(True)
+            flush_or_retry(True)
             while not stop.wait(INTERVAL):
-                flush(True)
+                flush_or_retry(True)
         finally:
             try:
-                flush(False)
+                flush_or_retry(False)
             finally:
                 finished.set()
 

@@ -8,6 +8,8 @@ import copy
 import datetime as dt
 import math
 
+import lifetime_downtime  # stdlib only; imported here so every build that bundles the ledger bundles it
+
 NUMBER_FIELDS = ('total_seconds', 'baseline_seconds', 'current_session_seconds',
                  'longest_session_seconds', 'boot_accounted_seconds', 'unattributed_seconds',
                  'awake_clock_high_water')
@@ -123,6 +125,13 @@ def problems(ledger):
                 bad(key, 'must be a list')
             elif any(not check(item) for item in ledger[key]):
                 bad(key, 'invalid entry')
+    if 'downtime_daily' in ledger:
+        # 1.3.0 downtime per local day. Not cross-checked against ``daily``: awake time can move later (import,
+        # repair), and the writer keeps the day-length rule. Salvage drops bad entries, as for ``daily``.
+        for reason in lifetime_downtime.problems(ledger['downtime_daily'])[:1]:
+            bad('downtime_daily', reason)
+    if 'downtime_sources' in ledger and not isinstance(ledger['downtime_sources'], dict):
+        bad('downtime_sources', 'must be an object')
     if 'daily_allocation' in ledger and allocation_problems(ledger['daily_allocation']):
         bad('daily_allocation', 'invalid allocation provenance')
     if 'daily_repair' in ledger:
@@ -209,6 +218,9 @@ def salvage(value, defaults):
         if field in ('daily', 'dated_hourly') and isinstance(value.get(field), dict):
             check = is_number if field == 'daily' else hours_list
             result[field] = {k: v for k, v in result[field].items() if is_date(k) and check(v)}
+        elif field == 'downtime_daily' and isinstance(value.get(field), dict):
+            result[field] = {k: v for k, v in result[field].items()
+                             if lifetime_downtime.valid_date(k) and lifetime_downtime.valid_day(v)}
         elif field in ('sessions', 'coverage_gaps') and isinstance(value.get(field), list):
             check = valid_session if field == 'sessions' else valid_gap
             result[field] = [v for v in result[field] if check(v)]

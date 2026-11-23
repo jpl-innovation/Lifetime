@@ -98,7 +98,7 @@ def _scrub_ledger(ledger):
     ledger.update(first_seen=None, tracking_started=None, history_started=None,
                   recording_started=None, first_seen_source='unknown', daily={},
                   dated_hourly={}, hourly=[0.0]*24, sessions=[], coverage_gaps=[])
-    for key in ('daily_allocation', 'daily_repair', 'daily_repair_version'):
+    for key in ('daily_allocation', 'daily_repair', 'daily_repair_version', 'downtime_daily', 'downtime_sources'):
         ledger.pop(key, None)
     if 'imported' in ledger:
         ledger['imported'] = {'seconds': ledger['imported'].get('seconds', 0.0)}
@@ -258,6 +258,10 @@ def _stamp():
 
 
 class MachineAgent:
+    # Reads the power log for per-day downtime (lifetime_downtime) in the background. Off (None) unless the
+    # reporting loop runs (run() turns it on), so direct sample() calls stay deterministic.
+    power_reader = None
+
     def __init__(self, directory=None):
         self.directory = Path(directory) if directory is not None else machine_directory()
         path = self.directory / DATABASE
@@ -512,6 +516,11 @@ class MachineAgent:
         columns = [protocol.canonical(v).decode() if v is not None else None
                    for v in (record, history, readings)]
         size = sum(len(v.encode()) for v in columns if v is not None)
+        if history is not None:
+            # A history snapshot is cumulative and a batch sends only its newest row's, so older rows' copies are
+            # never sent: keep one. With 10 years of daily totals a copy per row filled the outbox after ~85 records.
+            self._db.execute('UPDATE outbox SET history=NULL, size=length(CAST(record AS BLOB))+'
+                             'coalesce(length(CAST(readings AS BLOB)),0) WHERE history IS NOT NULL')
         self._db.execute('INSERT INTO outbox VALUES (?,?,?,?,?)', (seq, *columns, size))
         state['next_seq'] = protocol.number(seq+1, True)
         count, total = self._db.execute('SELECT count(*),coalesce(sum(size),0) FROM outbox').fetchone()
@@ -544,6 +553,7 @@ class MachineAgent:
                 health_data = health.collect({'completed': True, 'health': True}, details=False)
                 packs = ((health_data or {}).get('battery') or {}).get('packs') or []
                 snapshot['battery_capacity'] = packs[0] if len(packs) == 1 else {}
+        power = self._power_reading(snapshot['ledger']) if snapshot['policy']['history'] else None
         resource_data = None
         if snapshot['policy']['resources']:
             if resources_sampler is None:
@@ -558,6 +568,8 @@ class MachineAgent:
             before = ledger['total_seconds']
             tracker.sample(ledger, tick, boot, timestamp, history=state['policy']['history'],
                            boot_evidence=boot_evidence)
+            if power is not None and state['policy']['history']:
+                tracker.refresh_downtime(ledger, power)       # downtime keys only; never awake accounting
             if state['policy'].get('health'):
                 import lifetime_health as health
                 if health_data is not None:
@@ -609,6 +621,26 @@ class MachineAgent:
             self._health_job = self._health_reader.submit(read)
             self._health_due = time.monotonic()+21600
         return copy.deepcopy(self._health_value)
+
+    def _power_reading(self, ledger):
+        """The latest finished hourly read of the power log, or None; the read never delays sampling."""
+        from concurrent.futures import ThreadPoolExecutor
+        if self.power_reader is None:
+            return None
+        if not hasattr(self, '_power_pool'):
+            self._power_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='downtime-report')
+            self._power_job, self._power_due = None, 0
+        value = None
+        if self._power_job is not None and self._power_job.done():
+            try:
+                value = self._power_job.result()
+            except Exception:
+                value = None
+            self._power_job = None
+        if self._power_job is None and time.monotonic() >= self._power_due:
+            self._power_job = self._power_pool.submit(self.power_reader, tracker.power_since(ledger))
+            self._power_due = time.monotonic() + 3600
+        return value
 
     def _remote_inventory(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -695,7 +727,7 @@ class MachineAgent:
             if tracker.same_boot_identity(identity, current_boot) and clock > current_tick:
                 raise ValueError('Imported same-boot clock is ahead of this machine')
             ledger = _empty_ledger()
-            allowed = set(ledger) | {'imported', 'dated_hourly', 'daily_allocation', 'first_sample',
+            allowed = set(ledger) | {'imported', 'dated_hourly', 'daily_allocation', 'first_sample', 'downtime_daily', 'downtime_sources',
                                      'awake_clock_high_water', 'awake_clock_rollbacks'}
             ledger.update({k: v for k, v in value.items() if k in allowed})
             ledger['boot_accounted_seconds'] = value.get('boot_accounted_seconds', min(clock, ledger['total_seconds']))
@@ -753,6 +785,8 @@ class MachineAgent:
         """Hold a nonblocking process lock for the entire capture/sync loop."""
         from lifetime_client import SyncClient
         stop = stop_event or threading.Event()
+        if self.power_reader is None:
+            self.power_reader = tracker.read_power
         with tracker.file_lock(self.directory, 'agent.lock', blocking=False):
             client = client or SyncClient(self)
             from lifetime_live import Reporter
@@ -829,6 +863,8 @@ class MachineAgent:
             self._inventory_reader.shutdown(wait=False, cancel_futures=True)
         if hasattr(self, '_health_reader'):
             self._health_reader.shutdown(wait=False, cancel_futures=True)
+        if hasattr(self, '_power_pool'):
+            self._power_pool.shutdown(wait=False, cancel_futures=True)
         with self._lock:
             self._db.close()
 

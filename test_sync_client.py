@@ -519,6 +519,45 @@ class CapabilityTests(SyncFixture):
         self.assertTrue(self.report()['trimmed'])
         self.assertFalse(set(self.calls[-1][1]['history']) & set(protocol.HISTORY_EXTRA))
 
+    def test_downtime_goes_only_to_a_server_that_advertises_it(self):
+        """1.3.0, client side. Validating history.downtime_daily on the server is worker 4's part: simulated here."""
+        import datetime as dt
+        import lifetime_downtime as downtime
+        self.pair(self.HISTORY)
+        yesterday = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+        with self.machine._transaction() as state:
+            state['ledger']['downtime_daily'] = {yesterday: dict(asleep_s=3600, off_s=600, unknown_s=0, restarts=1,
+                                                                  shutdowns=0, unexpected_stops=0)}
+        received = []
+        def server_1_3(message):
+            days = message.get('history', {}).pop('downtime_daily', None)
+            if days is not None:
+                self.assertEqual(downtime.problems(days), [])
+                received.append(days)
+            return protocol.validate_sync(message)
+        self.enterContext(patch.object(storage, 'validate_sync', side_effect=server_1_3))
+        self.server_capabilities = protocol.CAPABILITIES            # a 1.2 server: no downtime capability
+        self.report()
+        self.report()
+        self.assertNotIn('downtime_daily', self.calls[-1][1]['history'])
+        self.server_capabilities = (*protocol.CAPABILITIES, 'downtime')
+        self.report()                                               # the reply brings the new list
+        # Worked out once per report: a second, different reading must not make the sent message look out of date.
+        real = downtime.for_server
+        readings = iter(range(1, 100))
+        def changing(*args, **kwargs):
+            days = real(*args, **kwargs)
+            return {k: dict(v, restarts=next(readings)) for k, v in days.items()}
+        self.enterContext(patch.object(downtime, 'for_server', side_effect=changing))
+        status = self.report()
+        self.assertEqual((status['status'], status['trimmed']), ('connected', False))
+        self.assertEqual(set(self.calls[-1][1]['history']['downtime_daily']), {yesterday})
+        self.assertTrue(received)
+        self.assertNotEqual(self.machine._load()['next_attempt'], 0)     # no immediate resend loop
+        self.machine.set_policy(dict(history=False, resources=False))   # history sharing off: never sent
+        self.report()
+        self.assertNotIn('history', self.calls[-1][1])
+
     def test_last_problem_reaches_only_a_server_that_takes_it(self):
         self.server_capabilities = protocol.CAPABILITIES
         self.pair()

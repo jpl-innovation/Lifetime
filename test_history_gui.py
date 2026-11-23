@@ -39,7 +39,7 @@ if __name__ == '__main__' and '--child' in sys.argv:
         import datetime as dt
         from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
         from PyQt6.QtGui import QMouseEvent
-        from lifetime_charts import RANGES
+        import lifetime_downtime
         chart = w.history.daily
         def hover(widget, point):
             # Offscreen's virtual screen is smaller than a 2x window. Dispatch
@@ -71,15 +71,23 @@ if __name__ == '__main__' and '--child' in sys.argv:
         ledger['total_seconds'] = sum(ledger['daily'].values())
         ledger['history_started'] = min(ledger['daily'])
         w.history.set_ledger(ledger)
-        for selection, count in zip(RANGES, (30, 90, 365, 1100)):
-            w.history.ranges.setCurrentText(selection)
+        # The desktop drives Activity from the shared date picker (the range buttons are hidden there).
+        w.period.save = None
+        assert w.history.ranges.isHidden() and not w.activity_picker.isHidden()
+        five_years = (today - lifetime_downtime.period_bounds('5y', today)[0]).days + 1
+        for choice, count in (('30d', 30), ('custom', 90), ('12m', 365), ('all', 1100), ('5y', five_years)):
+            if choice == 'custom':
+                w.period.set('custom', today - dt.timedelta(days=89), today)
+            else:
+                w.period.set(choice)
             assert len(chart.values) == count
             assert len(w.history.running.values) == count
             assert w.history.running.values[-1] == ledger['total_seconds']/3600
             assert len(w.history.cards[0].rows) == count
             assert sum(w.history.distribution.values) == min(count, 100)
+            assert w.activity_picker.choices.currentData() == choice
             assert w.history.heatmap.start == chart.dates[0]
-        w.history.ranges.setCurrentText('30 days')
+        w.period.set('30d')
         w.scroll.ensureWidgetVisible(chart)
         app.processEvents()
         # Hover lanes cover the plot even when the marks are only a few px.
@@ -107,7 +115,7 @@ if __name__ == '__main__' and '--child' in sys.argv:
         assert w.history.width() < w.width()
         assert w.history.columns == 1
         # Three-year rendering exercises line reduction and calendar scrolling.
-        w.history.ranges.setCurrentText('All')
+        w.period.set('all')
         app.processEvents()
         assert w.history.cards[0].viewport.horizontalScrollBar().maximum() > 0
         w.history.running.grab()

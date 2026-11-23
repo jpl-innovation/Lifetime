@@ -258,7 +258,8 @@ class ExportDialog(ScrollDialog):
         report = reports().build_report(ledger, settings, start=start, end=end,
                                        system_fields=fields, language=settings.get('language', 'en'),
                                        selected_identity=[key for key, check in self.identity_checks.items() if check.isChecked()],
-                                       verification=getattr(self.parent(), 'last_verification', None))
+                                       verification=getattr(self.parent(), 'last_verification', None),
+                                       power_events=getattr(getattr(self.parent(), 'uptime', None), 'events', None))
         return report
 
     def invalidate_preview(self, *unused):
