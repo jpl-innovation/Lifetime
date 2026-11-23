@@ -37,11 +37,18 @@ class BuildPinTests(unittest.TestCase):
     def test_downloads_in_the_linux_build_are_checked_against_a_recorded_sha256(self):
         script = text('packaging/linux/build_linux.sh')
         self.assertIn('set -euo pipefail', script)
-        downloads = [match.start() for match in re.finditer(r'curl ', script)]
-        self.assertTrue(downloads)
-        self.assertGreater(script.index('sha256sum -c -'), max(downloads))
-        for variable in ('$tool_sum', '$runtime_sum'):
-            self.assertIn(variable, script[max(downloads):script.index('sha256sum -c -')])
+        self.assertEqual(script.count('curl -'), 3)      # downloads: all inside the two functions below
+        # Each function's downloads (the AppImage tools; rustup-init for the Rust accelerator) end in one check.
+        for function, sums in (('package', ('$tool_sum', '$runtime_sum')), ('rust_accelerator', ('$init_sum',))):
+            with self.subTest(function=function):
+                start = script.index(f'\n{function}() {{')
+                body = script[start:script.index('\n}\n', start)]
+                downloads = [match.start() for match in re.finditer(r'curl -', body)]
+                self.assertTrue(downloads)
+                self.assertGreater(body.index('sha256sum -c -'), max(downloads))
+                for variable in sums:
+                    self.assertIn(variable, body[max(downloads):body.index('sha256sum -c -')])
+        self.assertIn('--default-toolchain 1.91.0', script)
         self.assertNotIn('continuous', script.replace('(not "continuous")', ''))
 
     def test_actions_are_pinned_to_commits_and_a_published_release_is_never_overwritten(self):

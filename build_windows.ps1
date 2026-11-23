@@ -11,7 +11,7 @@ function New-VersionFile([string]$Program, [string]$Description) {
     if ($LASTEXITCODE) { throw "Version information failed ($Program)" }
     return $path
 }
-$common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--onefile', '--icon', 'assets\lifetime.ico')
+$common = @('--hidden-import', 'lifetime_system', '--exclude-module', 'lifetime_fast', '--noconfirm', '--onefile', '--icon', 'assets\lifetime.ico')
 python -m PyInstaller @common --noconsole --version-file (New-VersionFile LifetimeTracker 'Lifetime Tracker') --name LifetimeTracker lifetime_tracker.py
 if ($LASTEXITCODE) { throw 'PyInstaller failed (LifetimeTracker)' }
 python -m PyInstaller @common --noconsole --version-file (New-VersionFile Lifetime 'Lifetime') --add-data 'assets\lifetime.png;assets' --add-data 'assets\jpl_innovation.png;assets' --add-data 'assets\jpl_innovation_light.png;assets' --name Lifetime --collect-submodules PyQt6 lifetime_gui.py

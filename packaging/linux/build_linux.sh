@@ -2,7 +2,8 @@
 # Linux builds of Lifetime.
 #
 #   build_linux.sh build [--server-only]   inside a Rocky Linux 8 container (glibc 2.28): PyInstaller bundles in
-#                                          build-linux/dist (Lifetime/ and LifetimeServer/). Run as root.
+#                                          build-linux/dist (Lifetime/ and LifetimeServer/). Run as root. With
+#                                          LIFETIME_RUST=1 (CI) the server runtime gets the Rust accelerator, or fails.
 #   build_linux.sh package                 on any Linux host: the release files in build-linux/out
 #                                          (Lifetime-Linux-ARCH.AppImage and .tar.gz, Lifetime-Server-Linux-ARCH.tar.gz).
 #
@@ -29,13 +30,43 @@ build() {
     if [[ "$server_only" == false ]]; then
         python3.12 -m pip install --disable-pip-version-check 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.2' 'PyQt6-sip==13.13.0'
     fi
+    if [[ "${LIFETIME_RUST:-0}" == 1 ]]; then
+        rust_accelerator
+    fi
     export LIFETIME_SERVER_ONLY=$([[ "$server_only" == true ]] && echo 1 || echo 0)
     python3.12 -m PyInstaller --noconfirm --clean --distpath "$work/dist" --workpath "$work/pyinstaller" \
         "$root/packaging/linux/lifetime-linux.spec"
+    if [[ "${LIFETIME_RUST:-0}" == 1 ]] && ! compgen -G "$work/dist/LifetimeServer/_internal/lifetime_fast*.so" >/dev/null; then
+        echo "The server bundle was built without the Rust accelerator (lifetime_fast)" >&2
+        exit 1
+    fi
     ldd --version | sed -n 1p > "$work/dist/GLIBC-BASELINE.txt"   # sed reads to the end: head would SIGPIPE ldd under pipefail (exit 141)
     if [[ -n "${HOST_UID:-}" ]]; then
         chown -R "$HOST_UID:${HOST_GID:-$HOST_UID}" "$work"     # the CI host packages these files next
     fi
+}
+
+rust_accelerator() {
+    # rust/lifetime_fast (docs/notes/1.3.0-rust.md) for the server runtime: Rust 1.91.0 through rustup-init 1.28.2,
+    # checked against its recorded sha256, then maturin builds it here on glibc 2.28 and pip installs it for PyInstaller.
+    local init_sum
+    case "$arch" in
+        x86_64) init_sum=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c ;;
+        aarch64) init_sum=e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c ;;
+        *) echo "No pinned rustup-init for $arch" >&2; exit 1 ;;
+    esac
+    dnf -y install gcc curl      # Rust links with the C compiler's linker
+    mkdir -p "$work"
+    local init="$work/rustup-init-1.28.2-$arch"
+    curl -fsSL -o "$init" "https://static.rust-lang.org/rustup/archive/1.28.2/$arch-unknown-linux-gnu/rustup-init"
+    printf '%s  %s\n' "$init_sum" "$init" | sha256sum -c -
+    chmod +x "$init"
+    "$init" -y --no-modify-path --profile minimal --default-toolchain 1.91.0
+    export PATH="$HOME/.cargo/bin:$PATH" CARGO_TARGET_DIR="$work/cargo-target"
+    python3.12 -m pip install --disable-pip-version-check 'maturin==1.10.2'
+    python3.12 -m maturin build --release --locked --interpreter python3.12 -m "$root/rust/lifetime_fast/Cargo.toml" \
+        --out "$work/wheels"
+    python3.12 -m pip install --disable-pip-version-check --no-index --find-links="$work/wheels" 'lifetime_fast==0.1.0'
 }
 
 copy_docs() {

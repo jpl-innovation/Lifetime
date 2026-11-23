@@ -3,7 +3,10 @@
 [CmdletBinding()]
 param(
     [string]$Python = 'python',
-    [switch]$IncludeServiceWrapper
+    [switch]$IncludeServiceWrapper,
+    # Build the Rust accelerator (rust/lifetime_fast, needs Rust 1.91.0) into the runtime, and fail without it. The
+    # release build (CI) uses it; without it the package uses the Python version, with the same results.
+    [switch]$WithRust
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -24,6 +27,17 @@ try {
     $output = Join-Path $PSScriptRoot "server-package-$tag"
     $work = Join-Path $PSScriptRoot "build\server-$tag"
     New-Item -ItemType Directory -Path $output, $work -Force | Out-Null
+    if ($WithRust) {
+        $wheels = Join-Path $work 'wheels'
+        $ErrorActionPreference = 'Continue'
+        & $Python -m pip install --disable-pip-version-check maturin==1.10.2
+        if ($LASTEXITCODE -ne 0) { throw 'maturin could not be installed.' }
+        & $Python -m maturin build --release --locked --interpreter $Python -m rust\lifetime_fast\Cargo.toml --out $wheels
+        if ($LASTEXITCODE -ne 0) { throw 'The Rust accelerator did not build (is Rust 1.91.0 installed?).' }
+        & $Python -m pip install --disable-pip-version-check --no-index --find-links=$wheels lifetime_fast==0.1.0
+        if ($LASTEXITCODE -ne 0) { throw 'The Rust accelerator could not be installed.' }
+        $ErrorActionPreference = 'Stop'
+    }
     $icon = Join-Path $PSScriptRoot 'assets\lifetime.ico'
     $dashboardImage = (Join-Path $PSScriptRoot 'assets\lifetime.png') + ';assets'
     $serverIcon = Join-Path $PSScriptRoot 'assets\lifetime-server.ico'     # the dashboard's own (yellow) icon
@@ -37,6 +51,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Version information failed ($Program)." }
         return $path
     }
+    # The Rust accelerator goes into the server runtime only (when it is installed here); never the dashboard or agent.
+    $fast = @('--hidden-import', 'lifetime_fast')
     $common = @('--hidden-import', 'lifetime_system', '--noconfirm', '--clean', '--onefile', '--icon', $icon,
                 '--distpath', $output, '--workpath', $work, '--specpath', $work)
     # Modules imported only inside functions. PyInstaller finds most of them by scanning the code, but they are named
@@ -50,14 +66,17 @@ try {
                           'lifetime_signals', 'lifetime_tracker', 'lifetime_unix_admin') | ForEach-Object { '--hidden-import', $_ }
     $ErrorActionPreference = 'Continue'
     # zoneinfo reads IANA time zones from the tzdata package through importlib on Windows: collect its modules and data.
-    & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeServerRuntime 'Lifetime Server') --name LifetimeServerRuntime --collect-all cryptography --collect-all tzdata @runtimeModules --exclude-module PyQt6 lifetime_server.py
+    & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeServerRuntime 'Lifetime Server') --name LifetimeServerRuntime --collect-all cryptography --collect-all tzdata @runtimeModules @fast --exclude-module PyQt6 lifetime_server.py
     if ($LASTEXITCODE -ne 0) { throw 'Runtime build failed.' }
-    & $Python -m PyInstaller @common --noconsole --version-file (New-VersionFile LifetimeServerDashboard 'Lifetime Server Dashboard') --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --add-data $serverLogo --icon $serverIcon lifetime_server_gui.py
+    if ($WithRust -and -not (Select-String -Path (Join-Path $work 'LifetimeServerRuntime\PKG-00.toc') -Pattern 'lifetime_fast' -SimpleMatch -Quiet)) {
+        throw 'The runtime was built without the Rust accelerator (lifetime_fast).'    # PKG: what went into the .exe
+    }
+    & $Python -m PyInstaller @common --noconsole --version-file (New-VersionFile LifetimeServerDashboard 'Lifetime Server Dashboard') --name LifetimeServerDashboard --collect-submodules PyQt6 @dashboardModules --exclude-module lifetime_fast --add-data $dashboardImage --add-data $creditImage --add-data $creditLightImage --add-data ($serverIcon + ';assets') --add-data $serverLogo --icon $serverIcon lifetime_server_gui.py
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed.' }
-    & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeAgent 'Lifetime Agent') --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
+    & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeAgent 'Lifetime Agent') --name LifetimeAgent --hidden-import lifetime_ws_client --exclude-module lifetime_fast --exclude-module cryptography --exclude-module PyQt6 --exclude-module win32service --exclude-module win32serviceutil --exclude-module servicemanager --exclude-module pywintypes lifetime_agent.py
     if ($LASTEXITCODE -ne 0) { throw 'Agent build failed.' }
     if ($IncludeServiceWrapper) {
-        & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeServerService 'Lifetime Server Service') --name LifetimeServerService --collect-all cryptography --collect-all tzdata @runtimeModules --hidden-import lifetime_server --exclude-module PyQt6 --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
+        & $Python -m PyInstaller @common --console --version-file (New-VersionFile LifetimeServerService 'Lifetime Server Service') --name LifetimeServerService --collect-all cryptography --collect-all tzdata @runtimeModules @fast --hidden-import lifetime_server --exclude-module PyQt6 --hidden-import win32timezone --hidden-import win32service --hidden-import win32serviceutil --hidden-import win32event --hidden-import servicemanager --hidden-import pywintypes lifetime_server_service.py
         if ($LASTEXITCODE -ne 0) { throw 'Experimental service-wrapper build failed.' }
     }
     $ErrorActionPreference = 'Stop'

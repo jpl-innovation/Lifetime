@@ -5,7 +5,8 @@
 # dist/LifetimeServer/  the headless server: LifetimeServerRuntime, without Qt.
 #
 # Every lifetime_*.py module is bundled into every program as a hidden import, so a module imported only inside a
-# function can never be left out (test_installed_modules checks that this spec keeps doing so).
+# function can never be left out (test_installed_modules checks that this spec keeps doing so). The Rust accelerator
+# (lifetime_fast, when build_linux.sh installed it) goes into the headless server runtime only.
 import glob
 import os
 
@@ -31,10 +32,10 @@ def qt_plugins():
     return found
 
 
-def analysis(script, qt, extra_datas=(), extra_binaries=(), extra_hidden=()):
+def analysis(script, qt, extra_datas=(), extra_binaries=(), extra_hidden=(), fast=False):
     return Analysis([os.path.join(ROOT, script)], pathex=[ROOT], binaries=list(extra_binaries),
-                    datas=list(extra_datas), hiddenimports=MODULES + list(extra_hidden),
-                    excludes=WINDOWS_ONLY + ([] if qt else ['PyQt6']), noarchive=False)
+                    datas=list(extra_datas), hiddenimports=MODULES + list(extra_hidden) + (['lifetime_fast'] if fast else []),
+                    excludes=WINDOWS_ONLY + ([] if qt else ['PyQt6']) + ([] if fast else ['lifetime_fast']), noarchive=False)
 
 
 def program(a, name):
@@ -63,6 +64,6 @@ if os.environ.get('LIFETIME_SERVER_ONLY') != '1':
             strip=False, upx=False, name='Lifetime')
 
 # ---- headless server ----
-runtime = analysis('lifetime_server.py', False, server_datas, server_binaries, server_hidden)
+runtime = analysis('lifetime_server.py', False, server_datas, server_binaries, server_hidden, fast=True)
 COLLECT(program(runtime, 'LifetimeServerRuntime'), runtime.binaries, runtime.datas,
         strip=False, upx=False, name='LifetimeServer')
