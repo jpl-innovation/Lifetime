@@ -1,4 +1,5 @@
 """Diagnose connection, Self check and Copy diagnostics. Network: 127.0.0.1 only; discovery and Windows are mocked."""
+import json
 import socket
 import tempfile
 import unittest
@@ -491,9 +492,14 @@ class CopyDiagnosticsTests(unittest.TestCase):
         self.token = secrets.token_urlsafe(32)
         self.hex_token = secrets.token_hex(16)
         self.bundle = 'lifetime-enrollment-v1:' + secrets.token_urlsafe(60)
+        plain = self.code[4:].replace('-', '')
+        self.spaced = ' '.join(plain[i:i + 4] for i in range(0, 20, 4)).lower()     # no LTS, spaces, lower case
         self.secrets = [self.code, self.code.replace('-', ''), self.code.replace('-', '')[3:], self.code.lower(),
                         self.token, self.bundle[23:], 'hunter2', 'SMTP-PASS-99', 'T000/B000/XXXXSECRET', 'CRED-7f3a',
-                        '5CG1234XYZ', 'ASSET-77-SECRET', 'poll-secret-42', self.hex_token]
+                        '5CG1234XYZ', 'ASSET-77-SECRET', 'poll-secret-42', self.hex_token,
+                        # spellings in fields the allow-lists keep: only scrub() itself can catch them
+                        'hunter3', 'SmtpPw9', 'SLACKKEY77', 'ESCAPEDSECRET', 'NEXTLINESECRET', 'Jayden', 'UrlPw5',
+                        self.spaced, 'PC-of-Mai']
         (self.root / 'settings.json').write_text(json.dumps(dict(
             language='en', completed=True, history=True, identity=dict(display_name='PC', asset_tag='ASSET-77-SECRET'),
             admin_token=self.token, smtp_password='SMTP-PASS-99')), encoding='utf-8')
@@ -501,7 +507,7 @@ class CopyDiagnosticsTests(unittest.TestCase):
         agent.mkdir()
         (agent / 'status.json').write_text(json.dumps(dict(
             enabled=True, phase='approved', status='connected', server='https://srv.lan:8443',
-            server_name=f'srv {self.code}', error='timeout', error_at='2026-11-23T08:00:00Z', checked_at=0,
+            server_name=f'srv {self.spaced} https://u:UrlPw5@srv.lan', error='timeout', error_at='2026-11-23T08:00:00Z', checked_at=0,
             credential='CRED-7f3a', poll_token='poll-secret-42', bundle=self.bundle)), encoding='utf-8')
         self.log = self.root / 'install.log'
         self.log.write_text('\n'.join([
@@ -511,6 +517,10 @@ class CopyDiagnosticsTests(unittest.TestCase):
             f'bundle {self.bundle}', f'Authorization: Bearer {self.token}', f'admin-token={self.token}',
             'password=hunter2', '"smtp_password": "SMTP-PASS-99"', 'webhook https://hooks.example.com/services/T000/B000/XXXXSECRET',
             'Serial number: 5CG1234XYZ', 'credential: CRED-7f3a', f'token {self.hex_token}',
+            'smtp password is hunter3', 'relay smtp://alerts:SmtpPw9@mail.example.com:587',
+            'posting to https://hooks.slack.com?key=SLACKKEY77', '{\\"token\\": \\"ESCAPEDSECRET\\"}',
+            'token:', '    NEXTLINESECRET', 'log in C:\\Users\\Jayden Phan\\AppData\\Local\\Temp',
+            f'code typed: {self.spaced}',
             'Finished']), encoding='utf-8')
         self.checks = [connect._check('info', 'Checking {address}, from the connection line.',
                                       address=f'lifetime-connect-v1:https://srv.lan:8443 {self.code}'),
@@ -528,7 +538,7 @@ class CopyDiagnosticsTests(unittest.TestCase):
         from lifetime_protocol import CLIENT_VERSION
         for expected in (f'Lifetime {CLIENT_VERSION}', 'history: True', 'status: connected', 'server: https://srv.lan:8443',
                          'Last problem: No answer from the server.', '== Connection diagnosis ==', '[Problem]',
-                         'Log: install.log, last 13 lines', 'Installing the reporting service', 'Finished'):
+                         'Log: install.log, last 21 lines', 'Installing the reporting service', 'Finished'):
             self.assertIn(expected, text)
         self.assertNotIn('display_name', text)      # identity is never copied
         none = connect.diagnostics_text(lambda key, **values: key.format(**values), self.root, self.root / 'agent', [], [])
@@ -539,10 +549,10 @@ class CopyDiagnosticsTests(unittest.TestCase):
         info = dict(server_version='1.3.0', os='Windows', name='SRV', address='https://srv.lan:8443', host='0.0.0.0', port=8443,
                     listening_addresses=[dict(address='127.0.0.1', port=48123)], admin_token=self.token,
                     specs=dict(serial='5CG1234XYZ'), webhook_url='https://hooks.example.com/services/T000/B000/XXXXSECRET',
-                    server_names=['srv.lan', f'x {self.code}'], certificate=dict(expires='2027-11-01T00:00:00+00:00', names=['srv.lan']),
+                    server_names=['srv.lan', f'x {self.spaced}'], organisation='smtp password is hunter3', certificate=dict(expires='2027-11-01T00:00:00+00:00', names=['srv.lan']),
                     reporting_interval=60, discovery=True, fingerprint='ab' * 32)
         check = dict(checks=self.checks + [dict(state='good', text='Server time: {time} UTC.', values=dict(time='now'), fix=None)])
-        log = [dict(time='2026-11-23T08:00:00Z', kind='enrollment-refused', category='code', name='password=hunter2', count=2)]
+        log = [dict(time='2026-11-23T08:00:00Z', kind='enrollment-refused', category='code', name='PC-of-Mai', count=2)]
         text = gui.diagnostics_text(lambda key, **values: key.format(**values), info, check, log, [self.log])
         self.assert_clean(text)
         self.assertNotIn('48123', text)         # the administration port
@@ -551,6 +561,17 @@ class CopyDiagnosticsTests(unittest.TestCase):
                          'Installing the reporting service'):
             self.assertIn(expected, text)
         self.assertIn('Self check could not run.', gui.diagnostics_text(lambda key, **values: key.format(**values), info, None, [], []))
+
+    def test_a_large_log_is_copied_quickly(self):
+        import time
+        import lifetime_server_gui as gui
+        self.log.write_text(('x' * 255 + '\n') * 1000 + 'token=' + 'Q' * 300000 + '\n', encoding='utf-8')
+        started = time.perf_counter()
+        desktop = connect.diagnostics_text(lambda key, **values: key.format(**values), self.root, self.root / 'agent', [], [self.log])
+        server = gui.diagnostics_text(lambda key, **values: key.format(**values), dict(name='SRV'), None, [], [self.log])
+        self.assertLess(time.perf_counter() - started, 2.0)
+        for text in (desktop, server):
+            self.assertNotIn('Q' * 32, text)
 
     def test_the_connect_page_button_copies_in_the_background(self):
         from PyQt6.QtWidgets import QApplication
@@ -572,6 +593,81 @@ class CopyDiagnosticsTests(unittest.TestCase):
         copied = QApplication.clipboard().text()
         self.assertIn('== Reporting service ==', copied)
         self.assert_clean(copied)
+
+
+class ScrubTests(unittest.TestCase):
+    """scrub() itself: every spelling the review found, no false masks of public values, and linear time."""
+
+    def setUp(self):
+        from lifetime_connection import scrub
+        self.scrub = scrub
+        self.code = issue('ef' * 32)
+        self.plain = self.code[4:].replace('-', '')
+        self.groups = [self.plain[i:i + 4] for i in range(0, 20, 4)]
+
+    def assert_masked(self, text, *secrets):
+        result = self.scrub(text)
+        for secret in secrets:
+            self.assertNotIn(secret.lower(), result.lower(), (text, result))
+        return result
+
+    def test_codes_in_every_grouping(self):
+        g = self.groups
+        for text in (self.code, self.code.lower(), self.plain, self.plain.lower(), ' '.join(g), ' '.join(g).lower(),
+                     '\t'.join(g), '\n'.join(g), '  '.join(g), 'LTS  ' + '  '.join(g), 'LTS.' + '.'.join(g),
+                     'LTS_' + '_'.join(g), 'lts ' + ' '.join(g), json.dumps({'code': self.code}),
+                     'lifetime-connect-v1:https://srv.example:8443 ' + self.plain):
+            with self.subTest(text=text):
+                result = self.assert_masked('code ' + text + ' end', *g[1:])
+                self.assertIn('LTS-****', result)
+                self.assertTrue(result.startswith('code ') and result.endswith(' end'), result)
+        self.assert_masked('typed LTS-' + g[0] + '-' + g[1][:2], g[0])         # a partial code after LTS
+
+    def test_urls_keys_json_and_paths(self):
+        cases = {
+            'see https://hooks.slack.com?key=SECRETVALUE1234': 'SECRETVALUE1234',
+            'GET https://hooks.example.com/services/T0/B0/XYZSECRET': 'XYZSECRET',
+            'smtp://user:Pa55word@mail.example.com:587': 'Pa55word',
+            'https://user:Pa55word@mail.example.com': 'Pa55word',
+            '{"admin_token": "abc\\"def ghi"}': 'def ghi',
+            '{\\"token\\": \\"supersecretvalue\\"}': 'supersecretvalue',
+            'password is hunter2': 'hunter2',
+            'pwd=hunter2': 'hunter2',
+            'smtp_pass=hunter2': 'hunter2',
+            'pass: hunter2': 'hunter2',
+            'X-Lifetime-Token  :  s3cr3t': 's3cr3t',
+            'token:\n  supersecret\nnext line': 'supersecret',
+            'Serial Number: ABC123': 'ABC123',
+            'Authorization: Bearer abc.def': 'abc.def',
+            'lifetime-enrollment-v1:eyJhbGciOi.xyz+abc/def==': 'eyJhbGciOi',
+            r'C:\Users\Jayden Phan\AppData\Local\Temp\LifetimeAgent-install.log': 'Jayden',
+            r'{"path": "C:\\Users\\Jayden Phan\\x"}': 'Jayden',
+            '/home/jayden/.local/state/lifetime-agent': 'jayden',
+            'secret value ' + 'Ab3_' * 8: 'Ab3_Ab3_',
+        }
+        for text, secret in cases.items():
+            with self.subTest(text=text):
+                self.assert_masked(text, secret)
+        self.assertIn('next line', self.scrub('token:\n  supersecret\nnext line'))
+        self.assertIn('LifetimeAgent-install.log', self.scrub(r'C:\Users\Jayden Phan\AppData\Local\Temp\LifetimeAgent-install.log'))
+
+    def test_public_values_stay(self):
+        for text in ('fingerprint: ' + 'a' * 64, 'fingerprint: ' + 'AB' * 32, 'device_id: 3f2a9c1e-1111-4222-8333-444455556666',
+                     'host DESK-TOP1-ABCD-EF12-3456', 'https://server.lan:8443', '2026-11-23T10:00:00+07:00',
+                     'Lifetime 1.3.0 · Windows-11-10.0.26200-SP0', 'address: fe80::1234:5678:9abc:def0',
+                     '[Passed] Port 8443 on srv is reachable.', 'The network search covers 192.168.1.0/24 (port 8443).'):
+            with self.subTest(text=text):
+                self.assertEqual(self.scrub(text), text)
+
+    def test_long_input_is_fast(self):
+        import time
+        for text in ('a' * 256 * 1024, ('x' * 1000 + '\n') * 256, ('token ' * 40 + 'password\n') * 1000,
+                     (('ABCD ' * 200) + '\n') * 256, '-' * 256 * 1024):
+            started = time.perf_counter()
+            self.scrub(text)
+            self.assertLess(time.perf_counter() - started, 1.0, text[:40])
+        result = self.scrub('start ' + 'Q' * 300000 + ' end')
+        self.assertNotIn('Q' * 32, result)          # a cut line never leaves a piece of a secret behind
 
 
 if __name__ == '__main__':

@@ -106,7 +106,8 @@ def server_logs():
 
 def diagnostics_text(t, info, check=None, log=(), logs=None):
     """Copy diagnostics for the server: versions, system, settings that are not secret, Self check and the last server
-    log events (and log file lines). Named fields only, and the whole text is scrubbed."""
+    log events without computer names (and log file lines). Named fields only, and the whole text is scrubbed. Reads
+    files: call it from a worker."""
     import platform
     certificate = info.get('certificate') or {}
     sections = [(t('Lifetime diagnostics'), [f'Lifetime Server {CLIENT_VERSION} ({t("server")})',
@@ -115,7 +116,7 @@ def diagnostics_text(t, info, check=None, log=(), logs=None):
                 (t('Server'), [f'{key}: {info[key]}' for key in SAFE_INFO if key in info] +
                  [f'certificate {key}: {certificate[key]}' for key in ('expires', 'names', 'warning', 'renewed_at') if certificate.get(key)]),
                 (t('Self check'), check_lines(check['checks'], t) if check else [t('Self check could not run.')]),
-                (t('Server log'), [' '.join(str(event[key]) for key in ('time', 'kind', 'category', 'name', 'count') if event.get(key))
+                (t('Server log'), [' '.join(str(event[key]) for key in ('time', 'kind', 'category', 'count') if event.get(key))
                                    for event in log or []])]
     for name, lines in log_tail(server_logs() if logs is None else logs):
         sections.append((t('Log: {name}, last {count} lines', name=name, count=len(lines)), lines))
@@ -1453,11 +1454,12 @@ class ServerWindow(QMainWindow):
                 check = client.call('self_check')
             except Exception:       # an older server: the rest is still worth copying
                 check = None
-            return dict(info=client.call('server_info'), check=check, log=client.call('server_log', limit=200))
+            # Built here, in the worker: reading the log file and scrubbing 256 KB must not hold up the window.
+            return diagnostics_text(self.t, client.call('server_info'), check, client.call('server_log', limit=200))
 
         def finished(result, success):
             if success:
-                QApplication.clipboard().setText(diagnostics_text(self.t, **result))
+                QApplication.clipboard().setText(result)
                 self.status_label.setText(self.t('Diagnostics copied. Codes, tokens and passwords are left out.'))
         self._submit(work, finished, self.diagnostics_button)
 

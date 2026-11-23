@@ -238,38 +238,78 @@ def find_server(code):
     raise ValueError('No matching server')
 
 
-# What a copied report or log line must never carry. Masking too much is harmless; missing one is not.
-_SCRUB = (
-    (re.compile(r'lifetime-enrollment-v1:[A-Za-z0-9_-]*'), 'lifetime-enrollment-v1:****'),
-    (re.compile(r'(?i)(?<![0-9A-Z])LTS(?:[- ]?[0-9A-Z*~$=]){4,20}'), 'LTS-****'),
-    (re.compile(r'(?i)(?<![0-9A-Z-])(?:[0-9A-Z]{4}-){3,}[0-9A-Z*~$=]{1,4}(?![0-9A-Z])'), 'LTS-****'),
+# What a copied report or log line must never carry. Masking too much is harmless; missing one is not. Every pattern
+# is bounded (no unbounded run before a keyword) and lines are cut at MAX_LINE, so scrubbing stays linear in time.
+MAX_LINE = 4000
+_TOKEN_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_+/=-'
+# A code: optional LTS, then five groups of four with one separator style (spaces, tabs, new lines, dots, dashes or
+# underscores), or twenty characters in a row. Found at every position (a look-ahead), so a failed candidate that
+# starts on a word before a code never hides the code.
+_CODE = re.compile(r'(?i)(?<![0-9A-Z])(?=(?P<all>(?:(?P<lts>LTS)[ \t._-]{0,4})?(?P<body>[0-9A-Z]{4}(?P<sep>[ \t\r\n._-]{1,4})'
+                   r'[0-9A-Z]{4}(?:(?P=sep)[0-9A-Z]{4}){2}(?P=sep)[0-9A-Z]{3}[0-9A-Z*~$=]|[0-9A-Z]{19}[0-9A-Z*~$=]))(?![0-9A-Z]))')
+_PARTIAL = re.compile(r'(?i)(?<![0-9A-Z])LTS(?![ \t._-]{0,4}\*)(?:[ \t._-]{0,4}[0-9A-Z*~$=]){4,20}(?![0-9A-Z])')
+_KEY = (r'(?<![\w-])[\w-]{0,40}(?:token|passw\w{0,10}|pass|pwd|secret|credential|serial|webhook|api[_-]?key|authorization'
+        r'|username)[\w-]{0,40}(?: number| no\.?| key| url| id)?(?:\\?["\'])?')
+_LINE = (
+    (re.compile(r'lifetime-enrollment-v1:\S*'), 'lifetime-enrollment-v1:****'),
+    (re.compile(r'(?i)\b([a-z][a-z0-9+.-]{1,15}://)[^\s/@"\'<>]{1,200}@'), r'\1****@'),       # user:password@
+    (re.compile(r'(?i)\b(https?://[^\s/?#"\'<>]{1,255})[/?#][^\s"\'<>]+'), r'\1/****'),      # paths and queries
     (re.compile(r'(?i)\bBearer\s+\S+'), 'Bearer ****'),
-    (re.compile(r'(?i)(["\']?[\w-]*(?:token|password|passwd|secret|credential|serial|webhook|api[_-]?key|authorization|username)'
-                r'[\w-]*(?: number| no\.?| key| url| id)?["\']?[ \t]*[:=][ \t]*)("[^"]*"|\'[^\']*\'|[^\s,;]+)'), r'\1****'),
-    (re.compile(r'(?i)\b(https?://[^\s/"\'<>]+)/[^\s"\'<>]+'), r'\1/****'),
+    (re.compile(r'(?i)(' + _KEY + r'(?:[ \t]*[:=][ \t]*|[ \t]+is[ \t]+))'
+                r'("(?:[^"\\]|\\.)*"|\\"(?:[^"\\]|\\[^"])*\\"|\'[^\']*\'|[^\s,;]+)'), r'\1****'),
+    (re.compile(r'(?i)\b([a-z]:\\{1,2}(?:users|documents and settings)\\{1,2})[^\\/\r\n"\']+'), r'\1****'),
+    (re.compile(r'(?<![\w.-])(/home/|/Users/)[^/\s"\']+'), r'\1****'),
 )
+_KEY_ALONE = re.compile(r'(?i)' + _KEY + r'[ \t]*[:=][ \t]*$')       # its value is on the next line
+_UUID = re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
+
+
+def _codes(text):
+    """Mask code-shaped strings: after LTS always, else only when the check character is right (so a host name like
+    DESK-TOP1-ABCD-EF12-3456 stays)."""
+    spans = []
+    for match in _CODE.finditer(text):
+        if not match.group('lts'):
+            try:
+                normalize(re.sub(r'[ \t\r\n._-]', '', match.group('body')))
+            except ValueError:
+                continue
+        spans.append(match.span('all'))
+    parts, last = [], 0
+    for start, end in spans:
+        if start >= last:
+            parts += [text[last:start], 'LTS-****']
+        last = max(last, end)
+    return ''.join(parts) + text[last:]
+
+
+def _token(match):
+    value = match.group(0)
+    public = re.fullmatch('[0-9a-fA-F]{64}', value) or _UUID.fullmatch(value)       # SHA-256 fingerprints, device IDs
+    return value if public else '****'
 
 
 def scrub(text):
-    """``text`` without connection codes, enrollment bundles, tokens, passwords, serial numbers or URL paths
-    (webhooks). For reports people copy; structured data is also limited to named fields by its callers."""
-    text = str(text)
-    for pattern, replacement in _SCRUB:
-        text = pattern.sub(replacement, text)
-
-    def code_or_token(match):
-        value = match.group(0)
-        if re.fullmatch('[0-9a-f]{64}', value):       # a certificate fingerprint: public
-            return value
-        if len(value) >= 32:
-            return '****'
-        try:
-            normalize(value)        # a 20-character code typed without LTS or dashes
-            return 'LTS-****'
-        except ValueError:
-            return value
-    return re.sub(r'(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_-]{32,}|[0-9A-Za-z]{19}[0-9A-Za-z*~$=])(?![A-Za-z0-9_-])',
-                  code_or_token, text)
+    """``text`` without what scrub masks (see docs/notes/1.3.0-diagnostics.md): connection codes, enrollment bundles,
+    Bearer values, values of secret-looking keys, URL user names, passwords, paths and queries, long random tokens
+    and user names in home folder paths. Lines longer than MAX_LINE are cut. Structured data is also limited to named
+    fields by its callers."""
+    lines = []
+    for line in str(text).split('\n'):
+        if len(line) > MAX_LINE:        # never leave the start of a cut token behind
+            line = line[:MAX_LINE].rstrip(_TOKEN_CHARS) + ' …'
+        lines.append(line)
+    text = _PARTIAL.sub('LTS-****', _codes('\n'.join(lines)))
+    result, hidden = [], False
+    for line in text.split('\n'):
+        if hidden and line.strip():
+            line, hidden = line[:len(line) - len(line.lstrip())] + '****', False
+        elif not hidden:
+            hidden = bool(_KEY_ALONE.search(line))
+        for pattern, replacement in _LINE:
+            line = pattern.sub(replacement, line)
+        result.append(re.sub(r'(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])', _token, line))
+    return '\n'.join(result)
 
 
 # Diagnose connection and Self check lines: {state, text, fix, values}, text and fix being catalogue keys.
