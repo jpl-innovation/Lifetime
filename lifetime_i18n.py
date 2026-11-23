@@ -2356,6 +2356,17 @@ _DIAGNOSTICS_VI = {
     'Run: sudo firewall-cmd --list-all. It must allow {port}/tcp and the mdns service from the local network.':
         'Chạy: sudo firewall-cmd --list-all. Nó phải cho phép {port}/tcp và dịch vụ mdns từ mạng nội bộ.',
     'No firewall (ufw or firewalld) is on: nothing blocks port {port}.': 'Không có tường lửa nào (ufw hoặc firewalld) đang bật: không gì chặn cổng {port}.',
+    # Copy diagnostics (both apps): no codes, tokens, passwords, webhook addresses or serial numbers.
+    'Copy diagnostics': 'Sao chép thông tin chẩn đoán',
+    'Lifetime diagnostics': 'Thông tin chẩn đoán Lifetime',
+    'desktop, installed package': 'máy tính, bản cài đặt',
+    'desktop, from source': 'máy tính, chạy từ mã nguồn',
+    'server': 'máy chủ',
+    'Reporting service': 'Dịch vụ báo cáo',
+    'Last problem: {reason}': 'Sự cố gần nhất: {reason}',
+    'Not run. Press Diagnose connection first.': 'Chưa chạy. Hãy bấm Chẩn đoán kết nối trước.',
+    'Log: {name}, last {count} lines': 'Nhật ký: {name}, {count} dòng cuối',
+    'Diagnostics copied. Codes, tokens and passwords are left out.': 'Đã sao chép thông tin chẩn đoán. Mã, token và mật khẩu được loại bỏ.',
 }
 for _key, _text in _DIAGNOSTICS_VI.items():
     EN.setdefault(_key, _key)

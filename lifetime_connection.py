@@ -5,6 +5,7 @@ invitation secrets, identity or consent are sent. Discovery is never trusted.
 """
 import hashlib
 import hmac
+import os
 import re
 import secrets
 import socket
@@ -240,11 +241,11 @@ def find_server(code):
 # What a copied report or log line must never carry. Masking too much is harmless; missing one is not.
 _SCRUB = (
     (re.compile(r'lifetime-enrollment-v1:[A-Za-z0-9_-]*'), 'lifetime-enrollment-v1:****'),
-    (re.compile(r'(?i)(?<![0-9A-Z])LTS(?:[-\s]?[0-9A-Z*~$=]){4,24}'), 'LTS-****'),
+    (re.compile(r'(?i)(?<![0-9A-Z])LTS(?:[- ]?[0-9A-Z*~$=]){4,20}'), 'LTS-****'),
     (re.compile(r'(?i)(?<![0-9A-Z-])(?:[0-9A-Z]{4}-){3,}[0-9A-Z*~$=]{1,4}(?![0-9A-Z])'), 'LTS-****'),
     (re.compile(r'(?i)\bBearer\s+\S+'), 'Bearer ****'),
     (re.compile(r'(?i)(["\']?[\w-]*(?:token|password|passwd|secret|credential|serial|webhook|api[_-]?key|authorization|username)'
-                r'[\w-]*["\']?\s*[:=]\s*)("[^"]*"|\'[^\']*\'|[^\s,;]+)'), r'\1****'),
+                r'[\w-]*(?: number| no\.?| key| url| id)?["\']?[ \t]*[:=][ \t]*)("[^"]*"|\'[^\']*\'|[^\s,;]+)'), r'\1****'),
     (re.compile(r'(?i)\b(https?://[^\s/"\'<>]+)/[^\s"\'<>]+'), r'\1/****'),
 )
 
@@ -269,3 +270,38 @@ def scrub(text):
             return value
     return re.sub(r'(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_-]{32,}|[0-9A-Za-z]{19}[0-9A-Za-z*~$=])(?![A-Za-z0-9_-])',
                   code_or_token, text)
+
+
+# Diagnose connection and Self check lines: {state, text, fix, values}, text and fix being catalogue keys.
+CHECK_WORDS = {'good': 'Passed', 'warning': 'Check', 'danger': 'Problem', 'info': 'Info', 'neutral': 'Skipped'}
+
+
+def check_lines(checks, t):
+    """Diagnosis or Self check lines as plain text in the language of ``t``: '[Problem] cause' then what to do."""
+    lines = []
+    for check in checks:
+        values = check.get('values') or {}
+        lines.append(f"[{t(CHECK_WORDS.get(check['state'], 'Info'))}] {t(check['text'], **values)}")
+        if check.get('fix'):
+            lines.append('    ' + t('What to do: {fix}', fix=t(check['fix'], **values)))
+    return lines
+
+
+def log_tail(paths, lines=200):
+    """[(file name, its last ``lines`` lines)] of each log in ``paths`` that exists and may be read."""
+    found = []
+    for path in paths:
+        try:
+            with open(path, 'rb') as source:
+                source.seek(0, 2)
+                source.seek(max(0, source.tell() - 256 * 1024))
+                text = source.read().decode('utf-8', 'replace')
+        except OSError:
+            continue
+        found.append((os.path.basename(path), text.splitlines()[-lines:]))
+    return found
+
+
+def report(sections):
+    """Copy diagnostics: titled sections of lines as plain text, scrubbed (see scrub)."""
+    return scrub('\n\n'.join('\n'.join([f'== {title} =='] + [str(line) for line in lines]) for title, lines in sections))

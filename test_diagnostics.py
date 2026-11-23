@@ -466,6 +466,113 @@ class SelfCheckPageTests(unittest.TestCase):
         self.assertTrue(any(text.startswith('Cách xử lý: Hãy bật nó') for text in texts))
         self.assertIn('Lifetime Server lắng nghe trên 10.0.0.2, cổng 8443.', texts)
 
+    def test_copy_diagnostics_from_the_administration_page(self):
+        from PyQt6.QtWidgets import QApplication
+        from qt_test_support import wait_until
+        QApplication.clipboard().clear()
+        self.window.copy_diagnostics()
+        wait_until(lambda: 'Tự kiểm tra' in QApplication.clipboard().text(), 5000)
+        copied = QApplication.clipboard().text()
+        self.assertIn('Quy tắc tường lửa Windows LifetimeServer-Connect đang tắt.', copied)
+        self.assertIn('Thông tin chẩn đoán Lifetime', copied)
+
+
+class CopyDiagnosticsTests(unittest.TestCase):
+    """Every source of Copy diagnostics gets a secret; none may reach the copied text."""
+
+    def setUp(self):
+        import json
+        import secrets
+        from pathlib import Path
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.code = issue('cd' * 32)
+        self.token = secrets.token_urlsafe(32)
+        self.hex_token = secrets.token_hex(16)
+        self.bundle = 'lifetime-enrollment-v1:' + secrets.token_urlsafe(60)
+        self.secrets = [self.code, self.code.replace('-', ''), self.code.replace('-', '')[3:], self.code.lower(),
+                        self.token, self.bundle[23:], 'hunter2', 'SMTP-PASS-99', 'T000/B000/XXXXSECRET', 'CRED-7f3a',
+                        '5CG1234XYZ', 'ASSET-77-SECRET', 'poll-secret-42', self.hex_token]
+        (self.root / 'settings.json').write_text(json.dumps(dict(
+            language='en', completed=True, history=True, identity=dict(display_name='PC', asset_tag='ASSET-77-SECRET'),
+            admin_token=self.token, smtp_password='SMTP-PASS-99')), encoding='utf-8')
+        agent = self.root / 'agent'
+        agent.mkdir()
+        (agent / 'status.json').write_text(json.dumps(dict(
+            enabled=True, phase='approved', status='connected', server='https://srv.lan:8443',
+            server_name=f'srv {self.code}', error='timeout', error_at='2026-11-23T08:00:00Z', checked_at=0,
+            credential='CRED-7f3a', poll_token='poll-secret-42', bundle=self.bundle)), encoding='utf-8')
+        self.log = self.root / 'install.log'
+        self.log.write_text('\n'.join([
+            '2026-11-23 Installing the reporting service',
+            f'connection line lifetime-connect-v1:https://srv.lan:8443 {self.code}',
+            f'raw code {self.code.replace("-", "")[3:]} and {self.code.lower()}',
+            f'bundle {self.bundle}', f'Authorization: Bearer {self.token}', f'admin-token={self.token}',
+            'password=hunter2', '"smtp_password": "SMTP-PASS-99"', 'webhook https://hooks.example.com/services/T000/B000/XXXXSECRET',
+            'Serial number: 5CG1234XYZ', 'credential: CRED-7f3a', f'token {self.hex_token}',
+            'Finished']), encoding='utf-8')
+        self.checks = [connect._check('info', 'Checking {address}, from the connection line.',
+                                      address=f'lifetime-connect-v1:https://srv.lan:8443 {self.code}'),
+                       connect._check('danger', '{host} does not resolve on this network.', None, host=self.bundle)]
+
+    def assert_clean(self, text):
+        for secret in self.secrets:
+            self.assertNotIn(secret, text)
+            self.assertNotIn(secret.lower(), text.lower())
+
+    def test_desktop(self):
+        text = connect.diagnostics_text(lambda key, **values: key.format(**values), self.root, self.root / 'agent',
+                                        self.checks, [self.log, self.root / 'missing.log'])
+        self.assert_clean(text)
+        from lifetime_protocol import CLIENT_VERSION
+        for expected in (f'Lifetime {CLIENT_VERSION}', 'history: True', 'status: connected', 'server: https://srv.lan:8443',
+                         'Last problem: No answer from the server.', '== Connection diagnosis ==', '[Problem]',
+                         'Log: install.log, last 13 lines', 'Installing the reporting service', 'Finished'):
+            self.assertIn(expected, text)
+        self.assertNotIn('display_name', text)      # identity is never copied
+        none = connect.diagnostics_text(lambda key, **values: key.format(**values), self.root, self.root / 'agent', [], [])
+        self.assertIn('Not run. Press Diagnose connection first.', none)
+
+    def test_server(self):
+        import lifetime_server_gui as gui
+        info = dict(server_version='1.3.0', os='Windows', name='SRV', address='https://srv.lan:8443', host='0.0.0.0', port=8443,
+                    listening_addresses=[dict(address='127.0.0.1', port=48123)], admin_token=self.token,
+                    specs=dict(serial='5CG1234XYZ'), webhook_url='https://hooks.example.com/services/T000/B000/XXXXSECRET',
+                    server_names=['srv.lan', f'x {self.code}'], certificate=dict(expires='2027-11-01T00:00:00+00:00', names=['srv.lan']),
+                    reporting_interval=60, discovery=True, fingerprint='ab' * 32)
+        check = dict(checks=self.checks + [dict(state='good', text='Server time: {time} UTC.', values=dict(time='now'), fix=None)])
+        log = [dict(time='2026-11-23T08:00:00Z', kind='enrollment-refused', category='code', name='password=hunter2', count=2)]
+        text = gui.diagnostics_text(lambda key, **values: key.format(**values), info, check, log, [self.log])
+        self.assert_clean(text)
+        self.assertNotIn('48123', text)         # the administration port
+        for expected in ('server_version: 1.3.0', 'port: 8443', 'certificate expires: 2027-11-01', '== Self check ==',
+                         '[Passed] Server time: now UTC.', 'enrollment-refused code', 'fingerprint: ' + 'ab' * 32,
+                         'Installing the reporting service'):
+            self.assertIn(expected, text)
+        self.assertIn('Self check could not run.', gui.diagnostics_text(lambda key, **values: key.format(**values), info, None, [], []))
+
+    def test_the_connect_page_button_copies_in_the_background(self):
+        from PyQt6.QtWidgets import QApplication
+        from qt_test_support import qt_app
+        from test_company_gui import FakeTasks
+        self.app = qt_app()     # kept: a QApplication nobody holds is deleted at once
+        self.addCleanup(self.app.processEvents)
+        with patch('lifetime_connect.Tasks', FakeTasks), patch.dict('os.environ', LIFETIME_REDUCE_MOTION='1'):
+            page = connect.ConnectPage(directory=str(self.root), machine_root=str(self.root / 'agent'))
+        page.timer.stop()
+        self.addCleanup(page.deleteLater)
+        self.addCleanup(page.close)
+        page.diagnosis_checks = self.checks
+        with patch('lifetime_connect.setup_logs', return_value=[self.log]):
+            page.copy_diagnostics()
+            self.assertFalse(page.copy_buttons[0].isEnabled())
+            page.copy_tasks.resolve(execute=True)
+        self.assertTrue(page.copy_buttons[0].isEnabled())
+        copied = QApplication.clipboard().text()
+        self.assertIn('== Reporting service ==', copied)
+        self.assert_clean(copied)
+
 
 if __name__ == '__main__':
     unittest.main()

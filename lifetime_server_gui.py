@@ -31,6 +31,7 @@ import os
 from lifetime_layout import ControlRow
 from lifetime_tasks import Tasks
 from lifetime_tls import encode_bundle
+from lifetime_connection import CHECK_WORDS, check_lines, log_tail, report
 from lifetime_server_insights import InsightsUI
 from lifetime_server_alerts import AlertsUI
 from lifetime_server_widgets import CycleButton, AddDeviceSheet, DailyChart, GroupField, DeviceDetailsDialog, GroupsDialog, local_expiry, reduced_motion, table_action
@@ -91,6 +92,34 @@ def text(key, language='en', **values):
     else:
         value = SERVER_TEXT_VI.get(key, key) if language == 'vi' else key
     return value.format(**values)
+
+
+# Copy diagnostics: only these named fields of server_info (never the admin port, hardware serials or alert settings).
+SAFE_INFO = ('server_version', 'os', 'name', 'organisation', 'address', 'host', 'port', 'started_at', 'uptime',
+             'reporting_interval', 'device_counts', 'discovery', 'database_size', 'fingerprint', 'server_names')
+
+
+def server_logs():
+    """The Linux server's own log file, used only when it exists (the systemd service logs to the journal)."""
+    return ['/var/log/lifetime-server.log'] if sys.platform.startswith('linux') else []
+
+
+def diagnostics_text(t, info, check=None, log=(), logs=None):
+    """Copy diagnostics for the server: versions, system, settings that are not secret, Self check and the last server
+    log events (and log file lines). Named fields only, and the whole text is scrubbed."""
+    import platform
+    certificate = info.get('certificate') or {}
+    sections = [(t('Lifetime diagnostics'), [f'Lifetime Server {CLIENT_VERSION} ({t("server")})',
+                                             f'{platform.platform()} · Python {platform.python_version()}',
+                                             dt.datetime.now().astimezone().isoformat(timespec='seconds')]),
+                (t('Server'), [f'{key}: {info[key]}' for key in SAFE_INFO if key in info] +
+                 [f'certificate {key}: {certificate[key]}' for key in ('expires', 'names', 'warning', 'renewed_at') if certificate.get(key)]),
+                (t('Self check'), check_lines(check['checks'], t) if check else [t('Self check could not run.')]),
+                (t('Server log'), [' '.join(str(event[key]) for key in ('time', 'kind', 'category', 'name', 'count') if event.get(key))
+                                   for event in log or []])]
+    for name, lines in log_tail(server_logs() if logs is None else logs):
+        sections.append((t('Log: {name}, last {count} lines', name=name, count=len(lines)), lines))
+    return report(sections)
 
 
 class ElidedLabel(QLabel):
@@ -1393,16 +1422,19 @@ class ServerWindow(QMainWindow):
             label.setText(missing if value is None else str(value))
 
     # Self check (1.3.0 diagnostics): what computers need from this server, one line each with what to do.
-    CHECK_WORDS = {'good': 'Passed', 'warning': 'Check', 'danger': 'Problem', 'info': 'Info', 'neutral': 'Skipped'}
-
     def _make_self_check(self):
         panel, layout = self._section('Self check')
         self.access_ui.gate(panel, 'self_check')
         note = self.label('Checks the addresses, certificate, discovery, firewall and time that computers need. It only reads; nothing is changed.')
         note.setObjectName('muted')
         layout.addWidget(note)
+        actions = QHBoxLayout()
         self.self_check_button = self.button('Run self check', self.run_self_check)
-        layout.addWidget(self.self_check_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.diagnostics_button = self.button('Copy diagnostics', self.copy_diagnostics)
+        actions.addWidget(self.self_check_button)
+        actions.addWidget(self.diagnostics_button)
+        actions.addStretch()
+        layout.addLayout(actions)
         self.self_check_rows = QVBoxLayout()
         self.self_check_rows.setSpacing(10)
         layout.addLayout(self.self_check_rows)
@@ -1412,6 +1444,22 @@ class ServerWindow(QMainWindow):
     def run_self_check(self):
         client = self.client
         self._submit(lambda: client.call('self_check'), self._self_check_finished, self.self_check_button)
+
+    def copy_diagnostics(self):
+        client = self.client
+
+        def work():
+            try:
+                check = client.call('self_check')
+            except Exception:       # an older server: the rest is still worth copying
+                check = None
+            return dict(info=client.call('server_info'), check=check, log=client.call('server_log', limit=200))
+
+        def finished(result, success):
+            if success:
+                QApplication.clipboard().setText(diagnostics_text(self.t, **result))
+                self.status_label.setText(self.t('Diagnostics copied. Codes, tokens and passwords are left out.'))
+        self._submit(work, finished, self.diagnostics_button)
 
     def _self_check_finished(self, result, success):
         if success:
@@ -1428,7 +1476,7 @@ class ServerWindow(QMainWindow):
             row = QWidget()
             line = QHBoxLayout(row)
             line.setContentsMargins(0, 0, 0, 0)
-            line.addWidget(StatusChip(check['state'], self.t(self.CHECK_WORDS.get(check['state'], 'Info'))), 0, Qt.AlignmentFlag.AlignTop)
+            line.addWidget(StatusChip(check['state'], self.t(CHECK_WORDS.get(check['state'], 'Info'))), 0, Qt.AlignmentFlag.AlignTop)
             words = QVBoxLayout()
             words.setSpacing(2)
             for key, muted in ((check['text'], False), (check.get('fix'), True)):

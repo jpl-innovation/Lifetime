@@ -18,6 +18,7 @@ from lifetime_shell import PageStack, PulseDot
 from lifetime_i18n import tr, TABLES, datetime_text
 from lifetime_i18n_qt import QLabel, QPushButton
 from lifetime_company import read_status
+from lifetime_connection import CHECK_WORDS
 from lifetime_settings import read_settings
 from lifetime_theme import SWITCH_W, tokens
 from lifetime_glass import solid
@@ -112,7 +113,6 @@ def locate_server(value):
 
 # ---- Diagnose connection: one check per line, each saying its cause and what to do ----
 
-CHECK_WORDS = {'good': 'Passed', 'warning': 'Check', 'danger': 'Problem', 'info': 'Info', 'neutral': 'Skipped'}
 CLOCK_LIMIT = 300       # seconds of clock difference shown as a problem
 FIX_SELF_CHECK = 'On the server, open Administration > Self check.'
 FIX_CLOCK = "Check the date and time on this computer (set them automatically). If they are right, open Administration > Self check on the server."
@@ -383,18 +383,52 @@ def _profile_checks(profiles, here, port):
 def diagnosis_report(checks, t):
     """Copy report: plain text, with any code, token or secret masked."""
     import platform
-    from lifetime_connection import scrub
+    from lifetime_connection import check_lines, scrub
     from lifetime_protocol import CLIENT_VERSION
     lines = [t('Lifetime connection diagnosis'),
              f"Lifetime {CLIENT_VERSION} · {platform.platform()} · {dt.datetime.now().astimezone().isoformat(timespec='seconds')}", '']
-    for check in checks:
-        lines.append(f"[{t(CHECK_WORDS[check['state']])}] {t(check['text'], **check['values'])}")
-        if check['fix']:
-            lines.append('    ' + t('What to do: {fix}', fix=t(check['fix'], **check['values'])))
-    return scrub('\n'.join(lines))
+    return scrub('\n'.join(lines + check_lines(checks, t)))
 
 
-FINISH_FAILED ='Could not finish connecting. Check that the server is on and try again.'
+# Copy diagnostics: only these named fields are copied (identity, codes and credentials never are).
+SAFE_SETTINGS = ('language', 'theme', 'style', 'completed', 'autostart', 'history', 'battery', 'network', 'wifi_name',
+                 'graphics', 'resources', 'health', 'remote_power')
+SAFE_STATUS = ('enabled', 'phase', 'status', 'server', 'server_name', 'reported', 'trimmed', 'updates', 'policy', 'pending',
+               'dropped', 'last_sync', 'server_reachable', 'server_problem', 'server_seen_at', 'checked_at', 'error', 'error_at')
+
+
+def setup_logs():
+    """The reporting service's own setup log (install_agent_windows.ps1): in its data folder, or TEMP before that exists.
+    The data folder is for administrators only, so it is usually not readable here."""
+    if sys.platform != 'win32':
+        return []
+    from lifetime_agent import machine_directory
+    return [machine_directory() / 'install.log', Path(tempfile.gettempdir()) / 'LifetimeAgent-install.log']
+
+
+def diagnostics_text(t, directory=None, machine_root=None, checks=None, logs=None):
+    """Copy diagnostics: version, system, settings that are not secret, the reporting service's state and last problem,
+    the last Diagnose connection and the end of the setup log. Named fields only, and the whole text is scrubbed."""
+    import platform
+    from lifetime_connection import check_lines, log_tail, report
+    from lifetime_protocol import CLIENT_VERSION
+    settings, status = read_settings(directory), read_status(machine_root)
+    edition = t('desktop, installed package') if getattr(sys, 'frozen', False) else t('desktop, from source')
+    sections = [(t('Lifetime diagnostics'), [f'Lifetime {CLIENT_VERSION} ({edition})',
+                                             f'{platform.platform()} · Python {platform.python_version()}',
+                                             dt.datetime.now().astimezone().isoformat(timespec='seconds')]),
+                (t('Settings'), [f'{key}: {settings[key]}' for key in SAFE_SETTINGS if key in settings])]
+    service = [server_state(status, t)[2]] + [f'{key}: {status[key]}' for key in SAFE_STATUS if status.get(key) is not None]
+    if status.get('error'):
+        service.append(t('Last problem: {reason}', reason=reason_text(status['error'], t) or status['error']))
+    sections.append((t('Reporting service'), service))
+    sections.append((t('Connection diagnosis'), check_lines(checks, t) if checks else [t('Not run. Press Diagnose connection first.')]))
+    for name, lines in log_tail(setup_logs() if logs is None else logs):
+        sections.append((t('Log: {name}, last {count} lines', name=name, count=len(lines)), lines))
+    return report(sections)
+
+
+FINISH_FAILED = 'Could not finish connecting. Check that the server is on and try again.'
 # The agent installer's exit codes (install_agent_windows.ps1, Stop-Install; the agent's own 2-4 mean the same).
 SETUP_EXIT = {
     2: "Windows could not set up Lifetime's reporting service with these details. Check the code and try again. If the folder "
@@ -736,6 +770,9 @@ class ConnectPage(QWidget):
         self.diagnose_tasks.completed.connect(lambda number, result: self._diagnosed(result))
         self.diagnose_tasks.failed.connect(lambda number, error: self._diagnosed(
             [_check('danger', 'The diagnosis could not finish.', 'Try again. If it keeps failing, tell your IT team.')]))
+        self.copy_tasks = Tasks(self)       # Copy diagnostics reads files: never on the interface thread
+        self.copy_tasks.completed.connect(lambda number, text: self._copied(text))
+        self.copy_tasks.failed.connect(lambda number, error: self._copied(None))
         box.addWidget(self.diagnosis)
         box.addStretch()
         outer.addWidget(self.column, 1)
@@ -778,6 +815,7 @@ class ConnectPage(QWidget):
         self.code.returnPressed.connect(self.connect_server)
         self.note(f, 'Next you choose what to share. You can change it or disconnect any time.', 'caption')
         self.diagnose_buttons = [self.button(f, 'Diagnose connection', self.diagnose)]
+        self.copy_buttons = [self.button(f, 'Copy diagnostics', self.copy_diagnostics)]
         self.pulse(self.forms[1], 'Looking for your server...', True)
         self.forms[1].addWidget(PacketFlight(self.reduce_motion))
         f = self.forms[2]
@@ -844,7 +882,8 @@ class ConnectPage(QWidget):
         self.button(f, 'Change what is shared', self.change_policy)
         self.button(f, 'Disconnect', self.disconnect)
         self.diagnose_buttons.append(self.button(f, 'Diagnose connection', self.diagnose))
-        for button in self.diagnose_buttons:
+        self.copy_buttons.append(self.button(f, 'Copy diagnostics', self.copy_diagnostics))
+        for button in self.diagnose_buttons + self.copy_buttons:
             button.setObjectName('quietAction')
         self.timer = QTimer(self)
         self.timer.setInterval(2000)
@@ -1072,6 +1111,19 @@ class ConnectPage(QWidget):
     def copy_report(self):
         from PyQt6.QtWidgets import QApplication
         QApplication.clipboard().setText(diagnosis_report(self.diagnosis_checks, self.t))
+
+    def copy_diagnostics(self):
+        directory, root, checks = self.directory, self.machine_root, list(self.diagnosis_checks)
+        for button in self.copy_buttons:
+            button.setEnabled(False)
+        self.copy_tasks.submit(lambda: diagnostics_text(self.t, directory, root, checks))
+
+    def _copied(self, text):
+        from PyQt6.QtWidgets import QApplication
+        for button in self.copy_buttons:
+            button.setEnabled(True)
+        if text:
+            QApplication.clipboard().setText(text)
 
     def policy(self):
         return dict(history=self.history.isChecked(), resources=self.resources.isChecked(),
