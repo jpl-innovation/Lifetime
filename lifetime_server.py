@@ -1381,8 +1381,53 @@ def _windows_firewall(port, run, budget=lambda limit: limit):
     return checks
 
 
+def _in_ports(text, port, protocol):
+    """Whether a firewall port list ('8443/tcp', '8000-9000/tcp', '8000:9000/tcp', '80,8443/tcp', '8443') covers it."""
+    ports, _, kind = text.partition('/')
+    if kind and kind != protocol:
+        return False
+    for part in ports.split(','):
+        low, _, high = part.replace(':', '-').partition('-')
+        if low.isdigit() and (high or low).isdigit() and int(low) <= port <= int(high or low):
+            return True
+    return False
+
+
+def _ufw_allows(status, port, protocol):
+    """``ufw status verbose``: allowed by the default incoming policy, an ALLOW rule for everything or for the port.
+    Rule order and DENY rules are not weighed, so a 'no' is only 'not seen' (the caller says Check, not Problem)."""
+    if re.search(r'^Default:\s*allow \(incoming\)', status, re.MULTILINE):
+        return True
+    for line in status.splitlines():
+        rule = re.match(r'(\S+)(?: \(v6\))?\s+ALLOW(?: IN)?\s', line)
+        if rule and (rule.group(1) == 'Anywhere' or _in_ports(rule.group(1), port, protocol)):
+            return True
+    return False
+
+
+def _firewalld_allows(zones, port, protocol, service):
+    """``firewall-cmd --list-all-zones``: an active zone (or the default one when none is marked active) that accepts
+    everything, has the port (or a range with it), the service, or a rich rule for the port."""
+    blocks, current = [], None
+    for line in zones.splitlines():
+        if line and not line[0].isspace():
+            current = [line, '']
+            blocks.append(current)
+        elif current is not None:
+            current[1] += line + '\n'
+    chosen = [body for head, body in blocks if 'active' in head] or [body for head, body in blocks if 'default' in head]
+    for body in chosen:
+        fields = {key.strip(): value.split() for key, _, value in (line.partition(':') for line in body.splitlines())}
+        if (fields.get('target') == ['ACCEPT'] or service in fields.get('services', ())
+                or any(_in_ports(item, port, protocol) for item in fields.get('ports', ()))):
+            return True
+        for rule in re.findall(r'port port="?([0-9-]+)"? protocol="?(\w+)"?[^\n]*\baccept', body):
+            if _in_ports(rule[0] + '/' + rule[1], port, protocol):
+                return True
+    return False
+
+
 def _linux_firewall(port, run, ufw_conf, budget=lambda limit: limit):
-    import re
     from lifetime_connection import local_ipv4
     try:
         subnet = str(ipaddress.IPv4Network(local_ipv4(named=False)[0] + '/24', strict=False))
@@ -1402,13 +1447,16 @@ def _linux_firewall(port, run, ufw_conf, budget=lambda limit: limit):
         result = command(['systemctl', 'is-active', unit])
         return bool(result) and result[1].strip() == 'active'
 
-    def allowed(name, tcp, udp, tcp_fix, udp_fix):
+    def allowed(name, tcp, udp, check, tcp_fix, udp_fix):
+        """Allowed is certain; not seen is not (rule order, other tools), so it is Check with how to verify."""
         return [_line('good', '{firewall} allows {port}/tcp.', firewall=name, port=port) if tcp else
-                _line('danger', '{firewall} does not allow {port}/tcp: other computers cannot reach the server.',
-                      'Run: {command}', firewall=name, port=port, command=tcp_fix),
+                _line('warning', '{firewall} shows no rule that allows {port}/tcp: other computers may not reach the server.',
+                      'Check with: {check}. If it is not allowed, run: {command}', firewall=name, port=port, check=check,
+                      command=tcp_fix),
                 _line('good', '{firewall} allows 5353/udp (discovery).', firewall=name) if udp else
-                _line('warning', '{firewall} does not allow 5353/udp: computers cannot find the server with the code alone.',
-                      'Run: {command}', firewall=name, command=udp_fix)]
+                _line('warning', '{firewall} shows no rule that allows 5353/udp: computers may not find the server with the '
+                      'code alone.', 'Check with: {check}. If it is not allowed, run: {command}', firewall=name, check=check,
+                      command=udp_fix)]
 
     try:
         ufw = active('ufw')
@@ -1419,27 +1467,24 @@ def _linux_firewall(port, run, ufw_conf, budget=lambda limit: limit):
             except OSError:
                 pass
         if ufw:
-            result = command(['ufw', 'status'])
+            result = command(['ufw', 'status', 'verbose'])
             if result is None or result[0] or 'Status:' not in result[1]:
                 checks.append(_line('warning', 'ufw is on, but only an administrator can read its rules.',
-                                    'Run: sudo ufw status. It must allow {port}/tcp and 5353/udp from the local network.', port=port))
+                                    'Run: sudo ufw status verbose. It must allow {port}/tcp and 5353/udp from the local network.',
+                                    port=port))
             elif 'Status: active' in result[1]:
-                rules = result[1]
-                checks += allowed('ufw', re.search(rf'^{port}(/tcp)?\s.*\bALLOW', rules, re.MULTILINE),
-                                  re.search(r'^5353(/udp)?\s.*\bALLOW', rules, re.MULTILINE),
-                                  f'sudo ufw allow from {subnet} to any port {port} proto tcp',
+                checks += allowed('ufw', _ufw_allows(result[1], port, 'tcp'), _ufw_allows(result[1], 5353, 'udp'),
+                                  'sudo ufw status verbose', f'sudo ufw allow from {subnet} to any port {port} proto tcp',
                                   f'sudo ufw allow from {subnet} to any port 5353 proto udp')
         if active('firewalld'):
-            result = command(['firewall-cmd', '--list-all'], 3)
+            result = command(['firewall-cmd', '--list-all-zones'], 3)
             if result is None or result[0]:
                 checks.append(_line('warning', 'firewalld is on, but its rules could not be read.',
-                                    'Run: sudo firewall-cmd --list-all. It must allow {port}/tcp and the mdns service from the local network.',
-                                    port=port))
+                                    'Run: sudo firewall-cmd --list-all-zones. It must allow {port}/tcp and the mdns service from '
+                                    'the local network.', port=port))
             else:
-                fields = {key.strip(): value.split() for key, _, value in (line.partition(':') for line in result[1].splitlines())}
-                ports, services = fields.get('ports', []), fields.get('services', [])
-                checks += allowed('firewalld', f'{port}/tcp' in ports or re.search(rf'port="?{port}"?\s+protocol="?tcp', result[1]),
-                                  'mdns' in services or '5353/udp' in ports,
+                checks += allowed('firewalld', _firewalld_allows(result[1], port, 'tcp', None),
+                                  _firewalld_allows(result[1], 5353, 'udp', 'mdns'), 'sudo firewall-cmd --list-all-zones',
                                   f"sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address={subnet} "
                                   f"port port={port} protocol=tcp accept' && sudo firewall-cmd --reload",
                                   'sudo firewall-cmd --permanent --add-service=mdns && sudo firewall-cmd --reload')

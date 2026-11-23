@@ -2343,18 +2343,18 @@ _DIAGNOSTICS_VI = {
     'The network {networks} of this server is Public: Windows lets no computer reach it.':
         'Mạng {networks} của máy chủ này là Công cộng (Public): Windows không cho máy tính nào kết nối tới.',
     '{firewall} allows {port}/tcp.': '{firewall} cho phép {port}/tcp.',
-    '{firewall} does not allow {port}/tcp: other computers cannot reach the server.':
-        '{firewall} không cho phép {port}/tcp: các máy tính khác không kết nối được tới máy chủ.',
-    'Run: {command}': 'Chạy: {command}',
+    '{firewall} shows no rule that allows {port}/tcp: other computers may not reach the server.':
+        '{firewall} không có quy tắc nào cho phép {port}/tcp: các máy tính khác có thể không kết nối được tới máy chủ.',
+    'Check with: {check}. If it is not allowed, run: {command}': 'Kiểm tra bằng: {check}. Nếu chưa được cho phép, hãy chạy: {command}',
     '{firewall} allows 5353/udp (discovery).': '{firewall} cho phép 5353/udp (tìm máy chủ).',
-    '{firewall} does not allow 5353/udp: computers cannot find the server with the code alone.':
-        '{firewall} không cho phép 5353/udp: các máy tính không tìm được máy chủ chỉ với mã.',
+    '{firewall} shows no rule that allows 5353/udp: computers may not find the server with the code alone.':
+        '{firewall} không có quy tắc nào cho phép 5353/udp: các máy tính có thể không tìm được máy chủ chỉ với mã.',
     'ufw is on, but only an administrator can read its rules.': 'ufw đang bật, nhưng chỉ quản trị viên mới đọc được các quy tắc của nó.',
-    'Run: sudo ufw status. It must allow {port}/tcp and 5353/udp from the local network.':
-        'Chạy: sudo ufw status. Nó phải cho phép {port}/tcp và 5353/udp từ mạng nội bộ.',
+    'Run: sudo ufw status verbose. It must allow {port}/tcp and 5353/udp from the local network.':
+        'Chạy: sudo ufw status verbose. Nó phải cho phép {port}/tcp và 5353/udp từ mạng nội bộ.',
     'firewalld is on, but its rules could not be read.': 'firewalld đang bật, nhưng không đọc được các quy tắc của nó.',
-    'Run: sudo firewall-cmd --list-all. It must allow {port}/tcp and the mdns service from the local network.':
-        'Chạy: sudo firewall-cmd --list-all. Nó phải cho phép {port}/tcp và dịch vụ mdns từ mạng nội bộ.',
+    'Run: sudo firewall-cmd --list-all-zones. It must allow {port}/tcp and the mdns service from the local network.':
+        'Chạy: sudo firewall-cmd --list-all-zones. Nó phải cho phép {port}/tcp và dịch vụ mdns từ mạng nội bộ.',
     'No firewall (ufw or firewalld) is on: nothing blocks port {port}.': 'Không có tường lửa nào (ufw hoặc firewalld) đang bật: không gì chặn cổng {port}.',
     # Copy diagnostics (both apps): no codes, tokens, passwords, webhook addresses or serial numbers.
     'Copy diagnostics': 'Sao chép thông tin chẩn đoán',

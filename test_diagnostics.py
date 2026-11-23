@@ -408,7 +408,8 @@ class FirewallTests(unittest.TestCase):
         checks = self.check('linux', {'is-active ufw': (0, 'active\n'), 'ufw status': (0, status)}, conf=conf.name)
         found = states(checks)
         self.assertEqual(found['{firewall} allows {port}/tcp.'], 'good')
-        self.assertEqual(found['{firewall} does not allow 5353/udp: computers cannot find the server with the code alone.'], 'warning')
+        self.assertEqual(found['{firewall} shows no rule that allows 5353/udp: computers may not find the server with the '
+                               'code alone.'], 'warning')
         self.assertIn('sudo ufw allow from 192.168.1.0/24 to any port 5353 proto udp', words(checks))
         unreadable = self.check('linux', {'is-active ufw': (0, 'active\n'), 'ufw status': (1, '')}, conf=conf.name)
         self.assertEqual(states(unreadable)['ufw is on, but only an administrator can read its rules.'], 'warning')
@@ -419,7 +420,7 @@ class FirewallTests(unittest.TestCase):
         checks = self.check('linux', {'is-active firewalld': (0, 'active\n'), 'firewall-cmd': (0, listing)})
         self.assertEqual([check['state'] for check in checks], ['good', 'good'])
         closed = self.check('linux', {'is-active firewalld': (0, 'active\n'), 'firewall-cmd': (0, '  services: ssh\n  ports: \n')})
-        self.assertEqual([check['state'] for check in closed], ['danger', 'warning'])
+        self.assertEqual([check['state'] for check in closed], ['warning', 'warning'])      # not seen is not certain
         self.assertIn("--add-rich-rule='rule family=ipv4 source address=192.168.1.0/24 port port=8443", words(closed))
         none = self.check('linux', {})
         self.assertEqual(none[0]['text'], 'No firewall (ufw or firewalld) is on: nothing blocks port {port}.')
@@ -841,6 +842,42 @@ class SelfCheckProblemTests(unittest.TestCase):
         self.assertEqual(commands, [])
         server.firewall_checks(8443, run, 'linux', 'missing.conf', deadline=time.monotonic() + 3)
         self.assertTrue(commands and all(timeout <= 3 for command, timeout in commands))
+
+
+class FirewallRuleTests(FirewallTests):
+    """Rules ufw and firewalld show in more than one way; what Lifetime cannot see is Check, never Problem."""
+    test_windows_rule_and_profiles = test_linux_ufw = test_linux_firewalld_and_no_firewall = None
+
+    def ufw(self, status):
+        import os
+        with tempfile.NamedTemporaryFile('w', suffix='.conf', delete=False) as conf:
+            conf.write('ENABLED=yes\n')
+        self.addCleanup(os.unlink, conf.name)
+        return self.check('linux', {'is-active ufw': (0, 'active\n'), 'ufw status': (0, 'Status: active\n' + status)},
+                          conf=conf.name)
+
+    def test_ufw_default_allow_anywhere_and_ranges(self):
+        for status in ('Default: allow (incoming), allow (outgoing), disabled (routed)\n',
+                       'To                         Action      From\nAnywhere                   ALLOW IN    192.168.1.0/24\n',
+                       '8000:9000/tcp              ALLOW IN    Anywhere\n5300:5400/udp              ALLOW IN    Anywhere\n',
+                       '8443                       ALLOW IN    Anywhere\n5353 (v6)                  ALLOW IN    Anywhere (v6)\n'):
+            with self.subTest(status=status):
+                self.assertEqual([check['state'] for check in self.ufw(status)], ['good', 'good'])
+        closed = self.ufw('Default: deny (incoming), allow (outgoing)\n22/tcp                     ALLOW IN    Anywhere\n')
+        self.assertEqual([check['state'] for check in closed], ['warning', 'warning'])
+        self.assertIn('Check with: sudo ufw status verbose', words(closed))
+
+    def test_firewalld_zones_ranges_and_targets(self):
+        def zones(text):
+            return self.check('linux', {'is-active firewalld': (0, 'active\n'), 'firewall-cmd': (0, text)})
+        work = 'public (default)\n  services: ssh\n  ports: \n\nwork (active)\n  services: mdns\n  ports: 8000-9000/tcp\n'
+        self.assertEqual([check['state'] for check in zones(work)], ['good', 'good'])
+        trusted = 'trusted (active)\n  target: ACCEPT\n  ports: \n'
+        self.assertEqual([check['state'] for check in zones(trusted)], ['good', 'good'])
+        inactive = 'public (default, active)\n  services: ssh\n  ports: \n\nwork\n  services: mdns\n  ports: 8443/tcp\n'
+        closed = zones(inactive)
+        self.assertEqual([check['state'] for check in closed], ['warning', 'warning'])
+        self.assertIn('Check with: sudo firewall-cmd --list-all-zones', words(closed))
 
 
 if __name__ == '__main__':
