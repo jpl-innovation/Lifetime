@@ -49,7 +49,7 @@ jobs:
           sh -n packaging/linux/AppRun
 
   rust-accelerator:
-    # The server's optional Rust accelerator (rust/lifetime_fast, docs/notes/1.3.0-rust.md), in its own job so that a
+    # The server's optional Rust accelerator (rust/lifetime_fast, docs/RUST_ACCELERATOR.md), in its own job so that a
     # Rust problem never stops the Python tests or the desktop and agent packages: only the server packages and the
     # release wait for it. Exact Rust, maturin and crate (Cargo.lock) versions. The comparison with the Python
     # reference may not skip here; then once forced back to Python; then both engines' speed.

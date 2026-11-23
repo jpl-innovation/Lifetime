@@ -1044,7 +1044,7 @@ class ServerRuntime:
                           discovery=self._discovery is not None,
                           certificate=dict(self.certificate), key_fingerprint=self.certificate.get('key'),
                           server_names=self._store.server_names()['names'],
-                          availability_engine=ENGINE)      # 'Python' or 'Rust accelerator' (docs/notes/1.3.0-rust.md)
+                          availability_engine=ENGINE)      # 'Python' or 'Rust accelerator' (docs/RUST_ACCELERATOR.md)
             result.update(self._store.organisation())
             return result
 

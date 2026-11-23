@@ -144,6 +144,11 @@ Rules for any Rust part:
    team can read and change the logic in Python.
 4. **Only after releases are code-signed.** A new, unsigned native file (`.pyd`, `.dll`, `.exe`) is blocked by Smart App
    Control, which would break the Python route that today gets around it.
+**Owner decision, 24 November 2026:** the owner asked for Rust in some part now, still friendly to the team. Lifetime 1.3.0
+adds one server-only accelerator (docs/RUST_ACCELERATOR.md). Rule 4 does not apply to it because Smart App Control only
+affects employee PCs, and the server runs on Windows Server or Linux; the desktop app and the agent stay pure Python.
+Rule 5: there is no Windows ARM64 server package, so none is built for it.
+
 5. **CI builds it for every target** (Windows x64 and ARM64; Linux x86_64 and aarch64 on glibc 2.28) or it is not used.
 
 ## 11. Feature list

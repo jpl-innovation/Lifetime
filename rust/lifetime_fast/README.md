@@ -52,7 +52,7 @@ In `.github/workflows/windows.yml`: build the Windows server package without `-W
 `-e LIFETIME_RUST=1` from `linux-build`; remove `rust-accelerator` from `needs:` of `linux-build`,
 `windows-server-package` and `release`. In `packaging/linux/smoke_test.sh` delete the three lines after "The packaged
 server loads its Rust accelerator". The packages are then built with the Python version only, with the same results.
-Details: `docs/notes/1.3.0-rust.md`.
+Details: `docs/RUST_ACCELERATOR.md`.
 
 ## Building it yourself
 

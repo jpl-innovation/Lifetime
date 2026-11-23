@@ -121,6 +121,12 @@ Run anyway**. Check your download against `SHA256SUMS.txt`.
 - **Windows: version information in every program** (product Lifetime, the program's description, JPL Innovation, the
   version), which code signing needs.
 
+- **Server: a small Rust accelerator** for the fleet uptime bars and availability, in the Windows and Linux server
+  packages. Results are exactly the same as before (a test compares it with the Python version on every change);
+  `server_info` shows `availability_engine`: `Rust accelerator`, `Python`, or `Python (Rust accelerator out of date)`.
+  If it ever fails, the server does that calculation in Python. The desktop app, the agent, source installs and the
+  container image do not contain it. See docs/RUST_ACCELERATOR.md.
+
 ### What is fixed
 
 - **Linux: `LifetimeAgent --connection-stdin` accepts a code without `--server`** and finds the server on the

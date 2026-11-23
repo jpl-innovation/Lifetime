@@ -47,7 +47,7 @@ build() {
 }
 
 rust_accelerator() {
-    # rust/lifetime_fast (docs/notes/1.3.0-rust.md) for the server runtime: Rust 1.91.0 through rustup-init 1.28.2,
+    # rust/lifetime_fast (docs/RUST_ACCELERATOR.md) for the server runtime: Rust 1.91.0 through rustup-init 1.28.2,
     # checked against its recorded sha256, then maturin builds it here on glibc 2.28 and pip installs it for PyInstaller.
     local init_sum
     case "$arch" in

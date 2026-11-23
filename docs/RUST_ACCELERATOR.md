@@ -1,16 +1,8 @@
-# 1.3.0 rust: what the docs must say
+# The Rust accelerator (server only)
 
-The owner asked for Rust in one part of Lifetime, kept friendly to a team of Python programmers. It is one small,
-optional, server-only accelerator; Python stays the reference and is always there.
+An optional speed-up for Lifetime Server, written in Rust, with the Python version as the reference. You never need to touch it: change the Python, and the comparison test tells you if the Rust copy must follow.
 
-## Release notes (for the Lifetime 1.3.0 section)
-
-- The server packages (Windows server package, Linux server `.tar.gz` for x86_64 and aarch64) contain a small Rust
-  accelerator, `lifetime_fast`, for the fleet's uptime bars and availability. Results are exactly the same as before.
-  `server_info` has a new field `availability_engine`: `Rust accelerator`, `Python`, or
-  `Python (Rust accelerator out of date)` when an installed build does not match this version's Python.
-- Nothing changes for computers: the desktop app, the agent, source installs and the container image do not contain
-  it and use the Python version.
+**Status:** first compiled and tested on GitHub on 24 November 2026 (Windows and Ubuntu): it builds, and the comparison test found the Rust results identical to Python.
 
 ## What it does
 
