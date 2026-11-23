@@ -7,8 +7,9 @@ from PyQt6.QtWidgets import QComboBox, QFileDialog, QMessageBox
 
 from lifetime_reports import ensure_report_font, write_csv, write_pdf
 from lifetime_server_reports import device_report, fleet_report
+from lifetime_server_uptime import RangeControl
 from lifetime_tasks import Tasks
-from lifetime_technician import ExportDialog, iso_date
+from lifetime_technician import ExportDialog
 
 
 class ServerExportDialog(ExportDialog):
@@ -33,13 +34,17 @@ class ServerExportDialog(ExportDialog):
         self.scope.setVisible(self.device_ids is None and bool(groups))
         self.form.insertWidget(1, self.scope)
         self.scope.currentIndexChanged.connect(self.invalidate_preview)
+        # Any period (1.3): the shared range control replaces the desktop form's All / Custom dates. All is all
+        # available history, as before.
+        self.range_select.hide()
+        self.dates.hide()
+        self.period = RangeControl(self.t, default='all')
+        self.form.insertWidget(self.form.indexOf(self.range_select), self.period)
+        self.period.changed.connect(self.invalidate_preview)
 
     def options(self):
-        start = end = None
-        if self.range_select.currentData():
-            start, end = iso_date(self.start_date.text().strip()), iso_date(self.end_date.text().strip())
-            if not start or not end or start > end:
-                raise ValueError('Start date must be on or before end date.')
+        period = self.period.period()
+        start, end = (period[0].isoformat(), period[1].isoformat()) if period else (None, None)
         self._as_of = self._as_of or dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
         return dict(start=start, end=end, language=self.language, as_of=self._as_of,
                     group=self.scope.currentData() if self.device_ids is None else None,

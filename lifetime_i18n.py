@@ -2191,6 +2191,29 @@ _SERVER_UPTIME_VI = {
     'Keep detailed records for': 'Giữ dữ liệu chi tiết trong',
     'Online and offline history, incident timelines and sent alerts older than this are removed automatically. Daily awake and off-time totals and incident summaries are kept until you delete records before a date.':
         'Lịch sử trực tuyến/ngoại tuyến, diễn biến sự cố và cảnh báo đã gửi cũ hơn mốc này được tự động xóa. Tổng thời gian thức và thời gian tắt theo ngày cùng bản tóm tắt sự cố được giữ lại cho đến khi bạn xóa dữ liệu trước một ngày.',
+    'This month': 'Tháng này',
+    'Last month': 'Tháng trước',
+    'This year': 'Năm nay',
+    'Last 12 months': '12 tháng qua',
+    'Last 5 years': '5 năm qua',
+    'Custom': 'Tùy chọn',
+    'Period': 'Khoảng thời gian',
+    'To': 'Đến',
+    '{first} to {last}': '{first} đến {last}',
+    'Week of {day}': 'Tuần từ {day}',
+    'No awake time recorded in this period': 'Không ghi nhận thời gian thức trong khoảng này',
+    'Average per recorded day · {known} of {days} days recorded':
+        'Trung bình mỗi ngày có ghi nhận · {known} trên {days} ngày có ghi nhận',
+    '{known} of {days} days recorded': '{known} trên {days} ngày có ghi nhận',
+    'Bars show the average per recorded day of each week':
+        'Mỗi cột là trung bình mỗi ngày có ghi nhận của một tuần',
+    'Bars show the average per recorded day of each month':
+        'Mỗi cột là trung bình mỗi ngày có ghi nhận của một tháng',
+    '{period}: {hours} awake on {count} computers': '{period}: {hours} thời gian thức trên {count} máy',
+    '{period}: no awake time reported': '{period}: chưa có máy nào báo thời gian thức',
+    'Energy, {period} (kWh)': 'Điện năng, {period} (kWh)',
+    'Top consumers, {period}': 'Máy tiêu thụ nhiều nhất, {period}',
+    'By group, {period}': 'Theo nhóm, {period}',
 }
 for _key, _text in _SERVER_UPTIME_VI.items():
     EN.setdefault(_key, _key)

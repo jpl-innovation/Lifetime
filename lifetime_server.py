@@ -284,7 +284,8 @@ _ADMIN = {
     'invitations': ('invitations', (), ('limit', 'offset')),
     'revoke_invitation': ('revoke_invitation', ('invitation_id',), ()),
     'invitation': ('create_invitation', (), ('ttl', 'uses')),
-    'fleet': ('fleet', (), ('day', 'days', 'limit', 'offset', 'search', 'group', 'status', 'sort', 'descending')),
+    'fleet': ('fleet', (), ('day', 'days', 'limit', 'offset', 'search', 'group', 'status', 'sort', 'descending',
+                            'start', 'end')),
     'server_info': (None, (), ()),
     'pending_enrollments': ('pending_enrollments', (), ('limit', 'offset')),
     'organisation': ('organisation', (), ('name',)),
@@ -337,7 +338,7 @@ _ADMIN = {
     'set_update': ('updates.set_rollout', (), ('percent', 'paused')),
     'rollback_update': ('updates.rollback', (), ()),
     # Energy and lifecycle (lifetime_insights): computed from what each computer shares; settings live in monitoring.
-    'insights': (None, (), ()),
+    'insights': (None, (), ('start', 'end')),
     'set_insight_settings': ('monitor.set_insight_settings', ('values',), ()),
     'set_sleep_policy': (None, ('group', 'enabled'), ()),
 }
@@ -691,7 +692,7 @@ class ServerRuntime:
         if operation == 'server_info':
             return self.server_info()
         if operation == 'insights':
-            return self.insights()
+            return self.insights(**value)
         if operation == 'set_sleep_policy':
             return self.set_sleep_policy(identity, **value)
         if operation in ('backup', 'restore'):
@@ -738,9 +739,18 @@ class ServerRuntime:
             result = dict(result, alerts=self.monitor.device_alerts(value['device_id']))
         return result
 
-    def insights(self, today=None):
+    def insights(self, today=None, start=None, end=None):
         """Energy and cost, after-hours time, per computer, room, group and fleet (lifetime_insights), from what each
-        computer shares, with the groups whose computers are put to sleep after hours."""
+        computer shares, with the groups whose computers are put to sleep after hours. With start and end (ISO dates,
+        both included, at most 3,660 days) every result also has the energy of that period (``range``)."""
+        period = None
+        if start is not None or end is not None:
+            try:
+                period = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+            except (TypeError, ValueError):
+                raise ProtocolError('Invalid period') from None
+            if not 0 <= (period[1] - period[0]).days < 3660:
+                raise ProtocolError('Invalid period')
         items = self._store.insight_inputs()
         schedules, trends = self.monitor.resolved_schedules(items), self.monitor.trends()
         for item in items:
@@ -749,7 +759,8 @@ class ServerRuntime:
         from lifetime_protocol import CLIENT_VERSION
         offered = ((self.updates.summary() or {}).get('current') or {}).get('version') if self.updates else None
         latest = max((v for v in (CLIENT_VERSION, offered) if v), key=lambda v: insights.version_key(v) or ())
-        result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date(), latest)
+        result = insights.fleet(items, self.monitor.insight_settings(), today or self.clock().astimezone().date(), latest,
+                                period)
         result['sleep_policies'] = {key: dict(group=value['group'], name=value['name'], since=value['since'])
                                     for key, value in self.monitor.sleep_policies().items()}
         return result

@@ -1457,11 +1457,13 @@ class Store:
             return dict(reporting_interval=reporting_interval, retained_before=boundary)
 
     def fleet(self, day=None, days=7, limit=6, offset=0, search='', group='', status='',
-              sort='name', descending=False):
+              sort='name', descending=False, start=None, end=None):
         """Small dashboard projection. Dated amounts use permitted history only.
 
         Sorting and filtering precede pagination. Missing dates remain unknown,
         including in the aggregate, whose contributor count is explicit.
+        ``daily`` covers the ``days`` up to ``day``, or start..end (ISO dates, both included, at most 3,660 days);
+        ``range`` sums it: awake seconds (None when no computer reported a day of it) and contributing computers.
         """
         _page(limit, offset)
         if (type(days) is not int or days not in (7, 30) or type(descending) is not bool
@@ -1473,9 +1475,19 @@ class Store:
         except (ValueError, TypeError):
             raise StoreError('Invalid fleet date') from None
         dates = [(selected - dt.timedelta(days=i)).isoformat() for i in range(days-1, -1, -1)]
+        if start is not None or end is not None:
+            try:
+                first, last = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+            except (ValueError, TypeError):
+                raise StoreError('Invalid fleet period') from None
+            if not 0 <= (last - first).days < 3660:
+                raise StoreError('Invalid fleet period')
+            dates = [(first + dt.timedelta(days=i)).isoformat() for i in range((last - first).days + 1)]
+        contributors = set()
         daily = {date: dict(day=date, seconds=None, devices=0) for date in dates}
         counts = dict(total=0, enrolled=0, connected=0, overdue=0, pending=0)
         rows, groups, names, events = [], set(), {}, []
+        selected_values = []
         with self._transaction() as db:
             interval = db.execute('SELECT reporting_interval FROM settings WHERE singleton=1').fetchone()[0]
             threshold = max(OVERDUE_SECONDS, interval * 3)
@@ -1516,6 +1528,8 @@ class Store:
                     if date in dated:
                         daily[date]['seconds'] = (daily[date]['seconds'] or 0) + dated[date]
                         daily[date]['devices'] += 1
+                        contributors.add(row['device_id'])
+                selected_values.append(dated.get(selected.isoformat()))
                 snapshot = json.loads(row['latest_record']) if row['latest_record'] else None
                 item = dict(device_id=row['device_id'], name=name, group=department,
                             status=current, today=dated.get(selected.isoformat()), last=received,
@@ -1542,7 +1556,13 @@ class Store:
         events.sort(key=lambda event: event['time'], reverse=True)
         for event in events[:20]:
             event['name'] = names.get(event['device_id'], '')
-        return dict(counts=counts, daily=list(daily.values()), today=daily[selected.isoformat()],
+        known = [value['seconds'] for value in daily.values() if value['seconds'] is not None]
+        today = daily.get(selected.isoformat())
+        if today is None:       # the chosen date lies outside the chart's period
+            values = [history_day for history_day in selected_values if history_day is not None]
+            today = dict(day=selected.isoformat(), seconds=sum(values) if values else None, devices=len(values))
+        return dict(counts=counts, daily=list(daily.values()), today=today,
+                    range=dict(seconds=sum(known) if known else None, devices=len(contributors)),
                     rows=ordered[offset:offset+limit], matching=len(rows),
                     groups=sorted({group.casefold(): group for group in sorted(groups)}.values(), key=str.casefold),
                     recent_events=events[:20], updated_at=_stamp(_now()), date=selected.isoformat())

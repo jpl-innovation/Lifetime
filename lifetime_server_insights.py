@@ -4,6 +4,7 @@ Everything comes from the admin ``insights`` call (lifetime_insights on the serv
 the window's panels, tables, buttons and translations, so Glass/Classic, light/dark and English/Vietnamese follow it.
 Estimated figures always say so; a computer that does not share its awake history is counted as unknown, never zero.
 """
+import datetime as dt
 import math
 
 from PyQt6.QtCore import QLocale, QTime, Qt
@@ -79,11 +80,15 @@ class InsightsUI:
         self.scope.addItem('', None)
         self.scope.currentIndexChanged.connect(self.render)
         header.addWidget(self.scope)
+        # The period of the energy, top consumers and groups (1.3, lifetime_server_uptime); after hours stays a week.
+        self.period = w.uptime.range_control('30d')
+        self.period.changed.connect(self._period_changed)
+        header.addWidget(self.period)
         content.addLayout(header)
         cards = QHBoxLayout()
         cards.setSpacing(12)
         self.cards = {}
-        for key in ('today', 'week', 'month'):
+        for key in ('today', 'range'):
             card = InfoCard('event', '')
             value = QLabel()
             card.add_row('', value)
@@ -335,8 +340,20 @@ class InsightsUI:
             return
         self._busy = True
         client = self.w.client
-        if not self.w._submit(lambda: client.call('insights'), self._loaded, quiet=True):
+        first, last = self.w.uptime.resolve(self.period.period(), '0001-01-01')
+        period = dict(start=first.isoformat(), end=last.isoformat())
+
+        def work():
+            try:
+                return client.call('insights', **period)
+            except ValueError:      # a server before 1.3 knows only the last 7 and 30 days
+                return client.call('insights')
+        if not self.w._submit(work, self._loaded, quiet=True):
             self._busy = False
+
+    def _period_changed(self):
+        self.retranslate()
+        self.load()
 
     def _loaded(self, result, success):
         self._busy = False
@@ -436,14 +453,18 @@ class InsightsUI:
     def retranslate(self):
         self.scope.setItemText(0, self.t('Whole fleet'))
         self.scope.setAccessibleName(self.t('Show'))
-        for key, title in (('today', 'Today'), ('week', 'Last 7 days'), ('month', 'Last 30 days')):
-            self.cards[key][0].title.setText(self.t(title))
+        period = self.period.label()
+        for key, title in (('today', self.t('Today')), ('range', period)):
+            self.cards[key][0].title.setText(title)
             self.cards[key][0].pairs[0][0].setText(self.t('Cost'))
+        self.chart_title.setText(self.t('Energy, {period} (kWh)', period=period))
+        self.top_title.setText(self.t('Top consumers, {period}', period=period))
+        self.groups_title.setText(self.t('By group, {period}', period=period))
         self.top.setHorizontalHeaderLabels([self.t(key) for key in ('Computer', 'Group', 'Power draw', 'Energy', 'Cost')])
         self.groups.setHorizontalHeaderLabels([self.t(key) for key in ('Group', 'Computers', 'Measured', 'Energy', 'Cost')])
-        self.top.setAccessibleName(self.t('Top consumers, last 30 days'))
-        self.groups.setAccessibleName(self.t('By group, last 30 days'))
-        self.chart.setAccessibleName(self.t('Energy per day, last 30 days (kWh)'))
+        self.top.setAccessibleName(self.top_title.text())
+        self.groups.setAccessibleName(self.groups_title.text())
+        self.chart.setAccessibleName(self.chart_title.text())
         self.target.setAccessibleName(self.t('Power for a group or computer'))
         for day, box in enumerate(self.weekday_boxes):
             box.setText(self.t(f'weekday.{day}'))
@@ -510,24 +531,36 @@ class InsightsUI:
         chosen = self.scope.currentData()
         summary = result['fleet'] if chosen is None else result['groups'][chosen]
         computers = [c for c in result['computers'] if chosen is None or c['group'] == chosen]
+        def ranged(item):       # the chosen period; a server before 1.3 sends only the last 30 days
+            return item.get('range') or item['month']
+
+        def computer_figures(c):
+            return c.get('range') or c['energy']['month']
         for key, (card, value) in self.cards.items():
-            card.set_headline(f"{summary[key]['kwh']:,.2f} kWh")
-            value.setText(insights.money(summary[key]['cost'], currency))
+            figures = summary['today'] if key == 'today' else ranged(summary)
+            card.set_headline(f"{figures['kwh']:,.2f} kWh")
+            value.setText(insights.money(figures['cost'], currency))
         self.method.setText(t('{measured} of {known} computers measured on battery; the others are estimated from typical power. '
                               '{unknown} do not share their awake history.', measured=summary['measured'],
                               known=summary['known'], unknown=summary['unknown']))
-        days = list(summary['daily'])
-        self.chart.set_data([day[5:] for day in days], [summary['daily'][day] for day in days],
-                            message='' if summary['known'] else t('No shared awake history yet'))
+        if summary.get('range'):
+            series, kind = summary['range']['series'], summary['range']['kind']
+            labels = [self.w.uptime.bucket_text(dt.date.fromisoformat(start), kind) for start, _ in series]
+            self.chart.set_data(labels, [value for _, value in series],
+                                message='' if summary['known'] else t('No shared awake history yet'))
+        else:
+            days = list(summary['daily'])
+            self.chart.set_data([day[5:] for day in days], [summary['daily'][day] for day in days],
+                                message='' if summary['known'] else t('No shared awake history yet'))
         by_id = {c['device_id']: c for c in computers}
         ranked = [by_id[i] for i in result['top'] if i in by_id] if chosen is None else \
-            sorted((c for c in computers if c['energy']), key=lambda c: -c['energy']['month']['kwh'])[:10]
+            sorted((c for c in computers if c['energy']), key=lambda c: -computer_figures(c)['kwh'])[:10]
         self._fill(self.top, [(c['name'], c['group'] or t('No group'), power_text(t, c['power']),
-                               f"{c['energy']['month']['kwh']:,.2f} kWh", insights.money(c['energy']['month']['cost'], currency))
+                               f"{computer_figures(c)['kwh']:,.2f} kWh", insights.money(computer_figures(c)['cost'], currency))
                               for c in ranked])
         self._fill(self.groups, [(name or t('No group'), str(result['groups'][name]['computers']),
-                                  str(result['groups'][name]['measured']), f"{result['groups'][name]['month']['kwh']:,.2f} kWh",
-                                  insights.money(result['groups'][name]['month']['cost'], currency)) for name in groups])
+                                  str(result['groups'][name]['measured']), f"{ranged(result['groups'][name])['kwh']:,.2f} kWh",
+                                  insights.money(ranged(result['groups'][name])['cost'], currency)) for name in groups])
         self.empty.set_state('off', t('No energy figures yet'),
                              t('Energy appears once approved computers share their awake history.'))
         self.empty.setVisible(not summary['known'])

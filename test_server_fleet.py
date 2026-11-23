@@ -217,7 +217,7 @@ class FleetGuiTests(unittest.TestCase):
 
     def test_date_range_and_missing_history_never_invent_zero(self):
         self.seed()
-        self.window.chart_range.setCurrentIndex(1)
+        self.window.fleet_range.set_key('30d')
         self.wait()
         self.assertEqual(len(self.window.daily_chart.samples), 30)
         self.window.fleet_date.setDate(self.window.fleet_date.date().addYears(-1))

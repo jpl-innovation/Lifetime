@@ -728,6 +728,26 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(StoreError):
             self.store.restore(bad)
 
+    def test_fleet_totals_for_any_period(self):
+        allowed = {'history': True, 'resources': False}
+        for days in ({'2026-11-06': 60, '2026-11-07': 20, '2021-11-08': 100}, {'2026-11-07': 40}):
+            request, credential = self.pair(policy=allowed)
+            self.store.ingest(request['device_id'], credential,
+                              message(request['device_id'], policy=allowed, history={'daily': days}))
+        result = self.store.fleet(day='2026-11-07', start='2021-11-08', end='2026-11-07')
+        self.assertEqual(len(result['daily']), 1826)
+        self.assertEqual(result['range'], dict(seconds=220, devices=2))
+        self.assertEqual(result['today'], dict(day='2026-11-07', seconds=60, devices=2))
+        self.assertIsNone(result['daily'][1]['seconds'])                 # no report that day: unknown, not zero
+        month = self.store.fleet(day='2026-11-07', start='2026-10-01', end='2026-10-31')
+        self.assertEqual(month['range'], dict(seconds=None, devices=0))
+        self.assertEqual(month['today'], dict(day='2026-11-07', seconds=60, devices=2))     # the date outside the period
+        self.assertEqual(len(self.store.fleet(day='2026-11-07')['daily']), 7)               # the 1.2 call is unchanged
+        for start, end in (('2026-11-08', '2026-11-07'), ('2016-01-01', '2026-11-07'), ('x', '2026-11-07'),
+                           ('2026-11-01', None), (None, '2026-11-01')):
+            with self.subTest(start=start, end=end), self.assertRaises(StoreError):
+                self.store.fleet(start=start, end=end)
+
     def test_ten_years_of_daily_and_downtime_fit_one_admin_reply(self):
         """The admin channel answers at most 1 MiB; a computer's detail must fit with the largest history allowed."""
         from lifetime_protocol import MAX_BYTES, canonical

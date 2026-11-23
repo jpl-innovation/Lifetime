@@ -212,6 +212,22 @@ def energy(daily, watts, today, price):
     return result
 
 
+def period_energy(daily, watts, first, last, price):
+    """kWh, cost and awake hours over first..last (both included) and the kWh of each day that has a record; a day
+    without one is unknown, left out and counted in neither ``days_known`` nor the series (never zero)."""
+    values = {}
+    day = first
+    while day <= last:
+        seconds = daily.get(day.isoformat())
+        if isinstance(seconds, (int, float)):
+            values[day.isoformat()] = (seconds, kwh(seconds, watts))
+        day += dt.timedelta(days=1)
+    total = sum(value for _, value in values.values())
+    return dict(first=first.isoformat(), last=last.isoformat(), days_known=len(values), kwh=round(total, 3),
+                cost=round(total * price, 2), awake_hours=round(sum(seconds for seconds, _ in values.values()) / 3600, 2),
+                daily={key: value for key, (_, value) in values.items()})
+
+
 def money(value, currency):
     """1,234,567 VND; other currencies keep two decimals (12.50 USD)."""
     if value is None:
@@ -238,6 +254,23 @@ def after_week(history, schedule, watts, config, today):
                 weeks=[(start, round(total / 3600, 2)) for start, total in weekly(daily, today)])
 
 
+def _period_summary(known, config):
+    """The period sums of several computers and the energy per day, week or month (lifetime_uptime.buckets);
+    a bucket in which no computer had a record is None."""
+    import lifetime_uptime as uptime
+    first, last = (dt.date.fromisoformat(known[0]['range'][key]) for key in ('first', 'last'))
+    daily = {}
+    for item in known:
+        for day, value in item['range']['daily'].items():
+            daily[day] = daily.get(day, 0.0) + value
+    kind = uptime.bucket_kind(first, last)
+    return dict(first=first.isoformat(), last=last.isoformat(), kind=kind,
+                kwh=round(sum(item['range']['kwh'] for item in known), 3),
+                cost=round(sum(item['range']['cost'] for item in known), 2),
+                series=[[row['start'].isoformat(), None if row['seconds'] is None else round(row['seconds'], 4)]
+                        for row in uptime.daily_buckets(daily, first, last, kind)])
+
+
 def summarize(items, config=None):
     """Totals for a group or the fleet from per-computer results (see ``computer``): sums of kWh and cost, how many
     computers have a measured draw, and how many have no shared awake history (left out, never counted as zero).
@@ -254,6 +287,9 @@ def summarize(items, config=None):
         for day, value in item['energy']['daily'].items():
             daily[day] = round(daily.get(day, 0.0) + value, 4)
     total['daily'] = dict(sorted(daily.items()))
+    ranged = [item for item in known if item.get('range')]
+    if ranged:
+        total['range'] = _period_summary(ranged, config or settings())
     after = [item for item in items if item.get('after')]
     weeks = {}
     for item in after:
@@ -447,32 +483,40 @@ def health_summary(items):
     return dict(score=score, known=known, unknown=unknown)
 
 
-def computer(item, config, today, latest_version=None):
+def computer(item, config, today, latest_version=None, period=None):
     """One computer's results from what it shares (lifetime_server_store.Store.insight_inputs shape, which the desktop
-    app builds for itself too)."""
+    app builds for itself too). With ``period`` (first, last) its energy over that period is ``range``."""
     watts = power(item.get('kind'), item.get('discharge'), item.get('device_id', ''), item.get('group', ''), config)
     history = item.get('history')
-    return dict(device_id=item.get('device_id'), name=item.get('name'), group=item.get('group') or '',
-                room=item.get('room') or '', control=bool(item.get('control')), kind=item.get('kind'), power=watts,
-                energy=energy(history['daily'], watts['watts'], today, config['price']) if history else None,
-                after=after_week(history, item.get('schedule'), watts['watts'], config, today),
-                replace=replacements(item, config, today), age=age(item, today), health=health(item, latest_version))
+    result = dict(device_id=item.get('device_id'), name=item.get('name'), group=item.get('group') or '',
+                  room=item.get('room') or '', control=bool(item.get('control')), kind=item.get('kind'), power=watts,
+                  energy=energy(history['daily'], watts['watts'], today, config['price']) if history else None,
+                  after=after_week(history, item.get('schedule'), watts['watts'], config, today),
+                  replace=replacements(item, config, today), age=age(item, today), health=health(item, latest_version))
+    if period and result['energy'] is not None:
+        result['range'] = period_energy(history['daily'], watts['watts'], *period, config['price'])
+    return result
 
 
-def fleet(items, config, today, latest_version=None):
-    """Every computer, each group, each room and the whole fleet, the top consumers of the last 30 days and the
-    computers most awake after hours this week."""
-    computers = [computer(item, config, today, latest_version) for item in items]
+def fleet(items, config, today, latest_version=None, period=None):
+    """Every computer, each group, each room and the whole fleet, the top consumers of the last 30 days (or of
+    ``period``) and the computers most awake after hours this week."""
+    computers = [computer(item, config, today, latest_version, period) for item in items]
     groups, rooms = {}, {}
     for result in computers:
         groups.setdefault(result['group'], []).append(result)
         if result['room']:
             rooms.setdefault(result['room'], []).append(result)
-    ranked = sorted((c for c in computers if c['energy']), key=lambda c: (-c['energy']['month']['kwh'], c['name'] or ''))
+    ranked = sorted((c for c in computers if c['energy']), key=lambda c: (
+        -(c['range'] if period else c['energy']['month'])['kwh'], c['name'] or ''))
     late = sorted((c for c in computers if c['after'] and c['after']['week']['hours']),
                   key=lambda c: (-c['after']['week']['hours'], c['name'] or ''))
-    return dict(settings=config, today=today.isoformat(), computers=computers, fleet=summarize(computers, config),
-                groups={name: summarize(members, config) for name, members in sorted(groups.items())},
-                rooms={name: summarize(members, config) for name, members in sorted(rooms.items())},
-                top=[c['device_id'] for c in ranked[:10]], after_top=[c['device_id'] for c in late[:10]],
-                plan=plan(computers, config, today))
+    result = dict(settings=config, today=today.isoformat(), computers=computers, fleet=summarize(computers, config),
+                  groups={name: summarize(members, config) for name, members in sorted(groups.items())},
+                  rooms={name: summarize(members, config) for name, members in sorted(rooms.items())},
+                  top=[c['device_id'] for c in ranked[:10]], after_top=[c['device_id'] for c in late[:10]],
+                  plan=plan(computers, config, today))
+    for item in computers:      # the per-day series are summed above; one computer keeps only its period totals
+        if item.get('range'):
+            item['range'] = {key: value for key, value in item['range'].items() if key != 'daily'}
+    return result

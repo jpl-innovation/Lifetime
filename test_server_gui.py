@@ -220,7 +220,8 @@ class FakeAdmin:
                 self.updates.update(arguments)
             return copy.deepcopy(self.updates)
         if operation == 'insights':
-            return dict(insights.fleet(copy.deepcopy(self.insight_items), self.insight_config, dt.date.today()),
+            period = tuple(dt.date.fromisoformat(arguments[key]) for key in ('start', 'end')) if 'start' in arguments else None
+            return dict(insights.fleet(copy.deepcopy(self.insight_items), self.insight_config, dt.date.today(), None, period),
                         sleep_policies=copy.deepcopy(self.sleep_policies))
         if operation == 'set_sleep_policy':
             self.sleep_policies[arguments['group'].casefold()] = dict(group=arguments['group'], name='LAB\admin',
@@ -601,13 +602,13 @@ class ServerGuiTests(unittest.TestCase):
         self.wait_idle()
         chart = self.window.device_daily
         self.assertEqual(chart.message, '')
-        self.assertEqual(len(chart.values), 14)
+        self.assertEqual(len(chart.values), 30)
         self.assertEqual(chart.values[-1], 2.0)
         self.assertEqual(chart.values[-4], 10.0)
         self.assertIn('10.0', self.window.daily_summary.text())
-        self.window.daily_range.setCurrentIndex(1)
-        self.assertEqual(len(chart.values), 30)
         self.assertEqual(sum(v is not None for v in chart.values), 2)      # the 40-day-old entry stays out
+        self.window.detail_range.set_key('7d')
+        self.assertEqual(len(chart.values), 7)
 
     def test_identity_editor_validation_and_selected_device_only(self):
         self.load([device(1), device(2)])

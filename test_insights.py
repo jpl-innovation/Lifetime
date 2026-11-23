@@ -57,6 +57,30 @@ class EnergyTests(unittest.TestCase):
         self.assertEqual(result['top'], ['b', 'a'])
         self.assertIsNone(result['computers'][2]['energy'])
 
+    def test_any_period_sums_known_days_only_and_buckets_long_periods(self):
+        items = [dict(device_id='a', name='A', group='Lab', kind='laptop', discharge=[10, 10, 10],
+                      history=dict(daily={day(0): 36000, day(400): 36000, day(2000): 36000})),     # 0.1 kWh a day
+                 dict(device_id='b', name='B', group='Lab', kind='desktop', discharge=[],
+                      history=dict(daily={day(1): 36000})),                                      # 0.8 kWh
+                 dict(device_id='c', name='C', group='Office', kind='desktop', history=None)]
+        config = insights.settings(dict(price=2000))
+        plain = insights.fleet(items, config, TODAY)
+        self.assertNotIn('range', plain['fleet'])                       # without a period nothing changes
+        self.assertNotIn('range', plain['computers'][0])
+        five = insights.fleet(items, config, TODAY, None, (TODAY - dt.timedelta(days=1826), TODAY))
+        self.assertEqual((five['fleet']['range']['kwh'], five['fleet']['range']['cost']), (1.0, 2000.0))   # day 2000 is out
+        self.assertEqual(five['fleet']['range']['kind'], 'month')
+        series = five['fleet']['range']['series']
+        self.assertEqual(len(series), 61)
+        self.assertEqual(sum(value is None for _, value in series), 59)  # months with no record are unknown, not 0
+        self.assertEqual(five['computers'][0]['range'], dict(first=day(1826), last=day(0), days_known=2, kwh=0.2,
+                                                             cost=400.0, awake_hours=20.0))   # no per-day series per computer
+        self.assertNotIn('range', five['computers'][2])
+        self.assertEqual(five['top'], ['b', 'a'])
+        week = insights.fleet(items, config, TODAY, None, (TODAY - dt.timedelta(days=6), TODAY))
+        self.assertEqual(week['fleet']['range']['series'][-2:], [[day(1), 0.8], [day(0), 0.1]])
+        self.assertEqual(week['groups']['Office'].get('range'), None)
+
     def test_settings_are_validated(self):
         for bad in (dict(price=-1), dict(currency='dong'), dict(laptop_watts=0), dict(desktop_watts=5000),
                     dict(group_watts={'x': 'many'}), dict(price=float('inf'))):
