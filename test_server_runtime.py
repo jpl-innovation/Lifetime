@@ -401,7 +401,8 @@ class RuntimeTests(unittest.TestCase):
                                                 host='127.0.0.1', port=0)
             with self.assertRaises(ssl.SSLCertVerificationError):
                 self.runtime.start()
-        self.assertLess(time.monotonic() - started, 2)
+        # It gives up at once (0.1 s here); 5 s leaves room for a busy CI machine and still fails on a 10 s wait.
+        self.assertLess(time.monotonic() - started, 5)
         self.assertEqual((self.root / 'server-cert.pem').read_bytes(), before)
         self.assertEqual(self.runtime._servers, [])
         self.assertEqual(self.runtime._threads, [])

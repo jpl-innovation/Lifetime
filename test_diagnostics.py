@@ -619,9 +619,10 @@ class ScrubTests(unittest.TestCase):
                      'LTS_' + '_'.join(g), 'lts ' + ' '.join(g), json.dumps({'code': self.code}),
                      'lifetime-connect-v1:https://srv.example:8443 ' + self.plain):
             with self.subTest(text=text):
-                result = self.assert_masked('code ' + text + ' end', *g[1:])
+                # 'code:' (a colon is no separator) so the word itself can never join a random code's groups.
+                result = self.assert_masked('code: ' + text + ' end', *g[1:])
                 self.assertIn('LTS-****', result)
-                self.assertTrue(result.startswith('code ') and result.endswith(' end'), result)
+                self.assertTrue(result.startswith('code: ') and result.endswith(' end'), result)
         self.assert_masked('typed LTS-' + g[0] + '-' + g[1][:2], g[0])         # a partial code after LTS
 
     def test_urls_keys_json_and_paths(self):
