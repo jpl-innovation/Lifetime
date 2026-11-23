@@ -121,6 +121,31 @@ Other PCs will differ, but Windows only keeps what fits in its logs. So:
 
 Lifetime stays a Python program. The packaged programs are for employees; the source route (`python lifetime_gui.py`) keeps working. A new `docs/CUSTOMISING.md` will explain the module map, how to change a page, how to run the tests and how to build the packages.
 
+### Rust: only where it is measured to help
+
+The owner allows Rust for parts where it clearly helps, as long as most of Lifetime stays Python. Measured on the
+development PC (23 November 2026), the two obvious candidates do not need it:
+
+| Candidate | Measured | Decision |
+|---|---|---|
+| The always-running tracker | 6.5 MB of memory (14 MB private) | stays Python |
+| Reading past power events from the Windows log | 502 events covering 4.5 months in 0.2 s (filtered); the whole log, 40,412 events, in 12.3 s | stays Python; filter by event ID, also for archived logs |
+
+The one place to watch is the **server at fleet size**: availability and daily rollups for 500 computers × 5 years.
+`lifetime_availability._intersect` is O(n×m) today. The 1.4.0 speed test decides; the first step is a faster
+algorithm in Python (one sweep, O(n+m)), and Rust only if that is still too slow.
+
+Rules for any Rust part:
+
+1. **A measurement first**: Python must be shown to be too slow or too heavy, after trying a better algorithm.
+2. **Small and separate**: one Python extension module (PyO3, built with maturin) behind a plain Python function, with
+   the same tests run against both versions.
+3. **A pure-Python fallback is always kept**, so `python lifetime_gui.py` still runs without a Rust compiler and the
+   team can read and change the logic in Python.
+4. **Only after releases are code-signed.** A new, unsigned native file (`.pyd`, `.dll`, `.exe`) is blocked by Smart App
+   Control, which would break the Python route that today gets around it.
+5. **CI builds it for every target** (Windows x64 and ARM64; Linux x86_64 and aarch64 on glibc 2.28) or it is not used.
+
 ## 11. Feature list
 
 A full feature list in Vietnamese and English (`docs/FEATURES.md`), built from the README and the beginner's guide, updated with every release.
