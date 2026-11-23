@@ -96,8 +96,37 @@ def coverage(ledger, settings=None):
                 notes=notes, gaps=[dict(g) for g in ledger.get('coverage_gaps', [])])
 
 
+UPTIME_ROWS = (('awake', 'Awake (seconds)'), ('asleep', 'Asleep (seconds)'),
+               ('off', 'Off: shut down or restarting (seconds)'), ('unknown', 'Unknown, no record (seconds)'),
+               ('share', 'Awake share of known time (%)'), ('restarts', 'Restarts'), ('shutdowns', 'Shutdowns'),
+               ('unexpected_stops', 'Unexpected stops (Kernel-Power 41 / EventLog 6008)'),
+               ('between_stops', 'Average awake time between unexpected stops (seconds)'),
+               ('longest_awake', 'Longest continuous awake (seconds)'), ('longest_off', 'Longest off (seconds)'),
+               ('evidence_days', 'Days with a record'), ('days', 'Days in the period'))
+
+
+def uptime_section(ledger, start, end, events=None):
+    """Totals and counts for [start, end] (ISO dates) from ``downtime_daily`` and ``daily``; None without dates."""
+    import lifetime_downtime as downtime
+    first = dt.date.fromisoformat(start) if start else downtime.earliest_day(ledger)
+    if first is None:
+        return None
+    last = dt.date.fromisoformat(end) if end else dt.date.today()
+    # As of the last save, so a preview and the saved file agree while time passes.
+    try:
+        now = dt.datetime.fromisoformat(ledger['last_update'].replace('Z', '+00:00')).timestamp()
+    except (KeyError, AttributeError, TypeError, ValueError, OverflowError):
+        now = None
+    totals = downtime.summarize(ledger, first, last, events, now=now)['totals']
+    values = {key: totals.get(key) for key, _ in UPTIME_ROWS}
+    values['share'] = round(totals['share'] * 100, 1) if totals['share'] is not None else None
+    facts = downtime.coverage(ledger)
+    return dict(values=values, first=facts['first'], source=facts['source'], recorded=facts['recorded'],
+                archives=facts['archives'], archive_note=facts['archive_note'], log=facts['log'])
+
+
 def build_report(ledger, settings, start=None, end=None, system_fields=None,
-                 language='en', selected_identity=None, verification=None):
+                 language='en', selected_identity=None, verification=None, power_events=None):
     """Build an independent snapshot; optional metadata is opt-in on every call."""
     if language not in ('en', 'vi'):
         raise ValueError('Unsupported report language')
@@ -163,6 +192,9 @@ def build_report(ledger, settings, start=None, end=None, system_fields=None,
         notes.append('Daily allocation includes estimates; exact historical awake intervals cannot be recovered.')
     if len(daily) > MAX_PREVIEW_DAYS:
         notes.append('Only the first 90 daily rows are shown in the preview and PDF. CSV contains every selected retained daily row.')
+    uptime = uptime_section(ledger, start, end, power_events) if history_allowed else None
+    if uptime is not None:
+        notes.append('Uptime and downtime: asleep is sleep or hibernation, off is shut down or restarting, and unknown is time with no record. Days the system log no longer covers are unknown, never counted as zero. Longest spans need the power events of the system log and are not available without them.')
     comparison = {}
     if verification:
         for key in ('event_seconds', 'awake_seconds', 'difference'):
@@ -177,7 +209,7 @@ def build_report(ledger, settings, start=None, end=None, system_fields=None,
     return dict(version=VERSION, language=language,
                 created=dt.datetime.now().astimezone().isoformat(timespec='seconds'),
                 period=dict(start=start, end=end), identity=identity, system=system,
-                stats=stats, coverage=info, daily=daily, notes=notes, verification=comparison,
+                stats=stats, coverage=info, daily=daily, notes=notes, verification=comparison, uptime=uptime,
                 first_record=daily[0][0] if daily else None,
                 last_record=daily[-1][0] if daily else None)
 
@@ -209,6 +241,18 @@ def report_rows(report):
         if key in ('baseline_seconds', 'boots') and period['start']:
             continue
         yield 'statistics', title, report['stats'][key]
+    uptime = report.get('uptime')
+    if uptime:
+        for key, title in UPTIME_ROWS:
+            yield 'uptime', title, uptime['values'][key]
+        sources = {'windows-log': 'Windows log', 'journal': 'system journal', 'lifetime': 'Lifetime', 'imported': 'OS logs'}
+        yield 'uptime', 'Data from', uptime['first']
+        yield 'uptime', 'Data source', tr(sources.get(uptime['source'], 'Unknown'), lang) if uptime['source'] else None
+        yield 'uptime', 'Recorded by Lifetime since', uptime['recorded']
+        if uptime['log'] == 'windows-log':
+            yield 'uptime', 'Archived System logs read', uptime['archives']
+            if uptime['archive_note'] in ('denied', 'error'):
+                yield 'uptime', 'Archived System logs', tr('archived logs could not be read', lang)
     yield 'coverage', 'Source', tr(SOURCES[c['source']], lang)
     yield 'coverage', 'Coverage', tr('Partial' if c['status'] == 'partial' else 'Unknown', lang)
     if not period['start']:
@@ -242,7 +286,7 @@ def report_html(report):
             'td,th{padding:5pt;border-bottom:1px solid #d8deda;text-align:left;}li{margin-bottom:5pt;}',
             '</style></head><body><h1>', esc(tr('Computer Awake-Time Report', lang)), '</h1>']
     headings = {'identity': 'Computer identity', 'system': 'Selected system information',
-                'statistics': 'Awake time (seconds)', 'coverage': 'Coverage and sources',
+                'statistics': 'Awake time (seconds)', 'uptime': 'Uptime and downtime', 'coverage': 'Coverage and sources',
                 'availability': 'Availability (server monitoring)', 'incidents': 'Incidents',
                 'health': 'Health summary', 'replacement': 'Replacement candidates', 'energy': 'Energy and cost'}
     previous = None

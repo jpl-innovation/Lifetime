@@ -1,4 +1,6 @@
 """Downtime per day (asleep / off / unknown, restarts, shutdowns, unexpected stops). Synthetic data only."""
+import os
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import contextlib
 import copy
 import datetime as dt
@@ -545,6 +547,71 @@ class SendingTests(unittest.TestCase):
         self.assertNotIn('downtime_daily', machine.ledger())
         self.assertNotIn('downtime_sources', machine.ledger())
         self.assertIsNone(agent.MachineAgent.power_reader)       # off unless the reporting loop runs
+
+
+class UptimeReportTests(unittest.TestCase):
+    """Desktop report (PDF/CSV): the Uptime and downtime section for the chosen period."""
+    @classmethod
+    def setUpClass(cls):
+        from PyQt6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    @staticmethod
+    def ledger():
+        value = tracker.new_ledger()
+        value['daily'] = {'2026-11-17': 8 * H, '2026-11-18': 6 * H}
+        value['total_seconds'] = 14 * H
+        value['last_update'] = '2026-11-20T05:00:00+00:00'
+        value['downtime_daily'] = {'2026-11-18': entry(asleep_s=10 * H, off_s=4 * H, unknown_s=4 * H, restarts=1, shutdowns=1,
+                                                       unexpected_stops=1)}
+        value['downtime_sources'] = dict(log='windows-log', log_from='2026-11-18', archives=0, archive_note='denied')
+        return value
+
+    @staticmethod
+    def build(ledger, history=True, **kwargs):
+        import lifetime_reports as reports
+        return reports.build_report(ledger, dict(completed=True, history=history), **kwargs)
+
+    def test_totals_counts_and_coverage_for_the_period(self):
+        report = self.build(self.ledger(), start='2026-11-16', end='2026-11-18')
+        values = report['uptime']['values']
+        self.assertEqual((values['awake'], values['asleep'], values['off']), (14 * H, 10 * H, 4 * H))
+        self.assertEqual(values['unknown'], sum(int(downtime.day_length(dt.date(2026, 11, d))) for d in (16, 17, 18)) - 28 * H)
+        self.assertEqual((values['restarts'], values['shutdowns'], values['unexpected_stops']), (1, 1, 1))
+        self.assertEqual(values['share'], round(14 / 28 * 100, 1))
+        self.assertEqual(values['between_stops'], 14 * H)
+        self.assertIsNone(values['longest_awake'])          # no power events given
+        self.assertEqual((values['days'], values['evidence_days']), (3, 2))
+        self.assertTrue(any('never counted as zero' in note for note in report['notes']))
+        events = [dict(time=at('2026-11-18T08:00'), kind='start'), dict(time=at('2026-11-18T11:00'), kind='shutdown'),
+                  dict(time=at('2026-11-18T12:00'), kind='start')]
+        with_events = self.build(self.ledger(), start='2026-11-16', end='2026-11-18', power_events=events)
+        self.assertEqual(with_events['uptime']['values']['longest_off'], 1 * H)
+
+    def test_csv_and_pdf_carry_the_section_in_both_languages(self):
+        import csv
+        import lifetime_reports as reports
+        for language, heading, row in (('en', 'Uptime and downtime', 'Unexpected stops (Kernel-Power 41 / EventLog 6008)'),
+                                       ('vi', 'Thời gian hoạt động và ngừng hoạt động', 'Lần dừng bất thường (Kernel-Power 41 / EventLog 6008)')):
+            report = self.build(self.ledger(), start='2026-11-16', end='2026-11-18', language=language)
+            directory = Path(tempfile.mkdtemp())
+            reports.write_csv(report, directory / 'report.csv')
+            with (directory / 'report.csv').open(encoding='utf-8-sig', newline='') as stream:
+                rows = [line for line in csv.reader(stream) if line[0] == 'uptime']
+            self.assertIn(['uptime', 'Restarts', '1', '', ''], rows)
+            self.assertIn(['uptime', 'Archived System logs', reports.tr('archived logs could not be read', language), '', ''], rows)
+            page = reports.report_html(report)
+            self.assertIn(heading, page)
+            self.assertIn(row, page)
+            reports.write_pdf(report, directory / 'report.pdf')
+            self.assertTrue((directory / 'report.pdf').read_bytes().startswith(b'%PDF-'))
+
+    def test_no_section_without_history_consent_and_stable_between_preview_and_save(self):
+        self.assertIsNone(self.build(self.ledger(), history=False, start='2026-11-16', end='2026-11-18')['uptime'])
+        first = self.build(self.ledger())
+        second = self.build(self.ledger())
+        self.assertEqual(first['uptime'], second['uptime'])          # all data: as of the last save, not "now"
+        self.assertIsNone(self.build(tracker.new_ledger())['uptime'])
 
 
 if __name__ == '__main__':
