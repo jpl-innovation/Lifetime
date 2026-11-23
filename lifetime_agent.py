@@ -770,6 +770,12 @@ class MachineAgent:
                 if len(json.dumps(candidate, ensure_ascii=True, separators=(',', ':')).encode()) > protocol.MAX_BYTES:
                     break
                 message = candidate
+            if rows and state['policy']['history'] and 'history' not in message:
+                # Only the newest row keeps a snapshot: an earlier batch of a long backlog carries it too.
+                newest = self._db.execute('SELECT history FROM outbox WHERE history IS NOT NULL ORDER BY seq DESC LIMIT 1').fetchone()
+                candidate = dict(message, history=json.loads(newest[0]) if newest else _history(state['ledger']))
+                if len(json.dumps(candidate, ensure_ascii=True, separators=(',', ':')).encode()) <= protocol.MAX_BYTES:
+                    message = candidate
             if not rows:
                 if state['policy']['history']:
                     message['history'] = _history(state['ledger'])

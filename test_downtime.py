@@ -998,6 +998,23 @@ class OutboxSizeTests(unittest.TestCase):
         self.assertEqual(len(message['records']), 60)
         self.assertEqual(len(message['history']['daily']), 3660)         # the newest snapshot travels with the batch
 
+    def test_every_batch_of_a_long_backlog_carries_the_newest_history(self):
+        import lifetime_agent as agent
+        import lifetime_protocol as protocol
+        root = Path(tempfile.mkdtemp()) / 'machine'
+        with patch.object(agent, 'protect_root'):
+            machine = agent.MachineAgent.initialize(root)
+        self.addCleanup(machine.close)
+        machine.set_policy(dict(history=True, resources=False))
+        for i in range(150):
+            stamp = (dt.datetime(2026, 11, 20, 5, tzinfo=UTC) + dt.timedelta(seconds=30 * i)).isoformat()
+            machine.sample(100 + 30 * i, 'boot-a', stamp)
+        message = machine.batch()
+        protocol.validate_sync(message)
+        self.assertEqual(len(message['records']), 100)
+        self.assertIn('history', message)                                # not only once the backlog has drained
+        self.assertEqual(message['history']['daily'], machine.ledger()['daily'])
+
 
 if __name__ == '__main__':
     unittest.main()
