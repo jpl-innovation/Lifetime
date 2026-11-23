@@ -21,6 +21,7 @@ STOP_WINDOW = 900        # Kernel-Power 41 / EventLog 6008 are written within mi
 UNTRUSTED_GAP = 45 * 86400   # a boot whose own first sign of life is this long after its start has a wrong start
                              # time (a reset clock, fixed later by the network): its start is not used
 EVENT_KINDS = ('start', 'shutdown', 'restart', 'sleep', 'wake', 'unexpected')
+STOP_FIRST = ('unexpected', 'shutdown', 'restart', 'sleep', 'wake', 'start')    # order of events at the same instant
 
 
 # --- validation (ledger and the server contract) ---
@@ -176,9 +177,12 @@ def from_boots(boots, extras=None, now=None, tz=None):
             bucket(local_day(boot['end'], tz))['restarts' if kind == 'restart' else 'shutdowns'] += 1
             event(boot['end'], kind, by=request.get('by', ''), reason=request.get('reason', ''))
         elif stopped:
-            bucket(local_day(boot['end'], tz))['unexpected_stops'] += 1
-            event(boot['end'], 'unexpected')
-    events.sort(key=lambda e: (e['time'], EVENT_KINDS.index(e['kind'])))
+            # When it stopped is not known (the boot's last logged event can be hours earlier): the stop is counted
+            # where it was found, at the next start, and the event keeps the last time the computer was seen.
+            bucket(local_day(following['start'], tz))['unexpected_stops'] += 1
+            event(following['start'], 'unexpected', source='found at the next start')
+            events[-1]['last_seen'] = boot['end']
+    events.sort(key=lambda e: (e['time'], STOP_FIRST.index(e['kind'])))
     return dict(start=boots[0]['start'] if boots else None, end=now, days=days, events=events)
 
 
@@ -379,7 +383,7 @@ def longest_spans(events, start, end):
             awake_from = stamp
         elif kind in ('sleep', 'shutdown', 'restart', 'unexpected'):
             if awake_from is not None:
-                close('awake', awake_from, stamp)
+                close('awake', awake_from, min(stamp, item.get('last_seen', stamp)))
             awake_from = None
             off_from = stamp if kind in ('shutdown', 'restart') else None
     if awake_from is not None:

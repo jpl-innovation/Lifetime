@@ -498,7 +498,7 @@ class DeeperImportTests(unittest.TestCase):
         self.assertEqual(result['days']['2026-11-02']['shutdowns'], 1)
         self.assertEqual(result['days']['2026-11-02']['off_s'], 7*H)
         self.assertEqual(result['days']['2026-11-03']['off_s'], 8*H)
-        self.assertEqual(result['days']['2026-11-03']['unexpected_stops'], 1)      # the crash record
+        self.assertEqual(result['days']['2026-11-04']['unexpected_stops'], 1)      # the crash record, found at the next start
 
 
 class SendingTests(unittest.TestCase):
@@ -828,6 +828,18 @@ class WrongClockTests(unittest.TestCase):
         downtime.apply(ledger, result, now=at('2026-11-20T12:00'), tz=TZ)
         self.assertEqual(ledger['downtime_daily']['2026-11-18']['shutdowns'], 1)
 
+
+class StopPlacementTests(unittest.TestCase):
+    """Review finding 5: an unexpected stop is counted on the day it was found, the next start."""
+    def test_stop_is_counted_and_listed_at_the_next_start(self):
+        boots = [boot('2026-11-18T08:00', '2026-11-18T10:00', clean=False), boot('2026-11-19T09:00', '2026-11-19T12:00')]
+        result = downtime.from_boots(boots, dict(stops=[at('2026-11-19T09:00:20')]), tz=TZ)
+        self.assertEqual(result['days']['2026-11-19']['unexpected_stops'], 1)
+        self.assertNotIn('unexpected_stops', {k for k, v in result['days'].get('2026-11-18', {}).items() if v})
+        kinds = [(e['kind'], e['time']) for e in result['events']]
+        self.assertEqual(kinds[1:3], [('unexpected', at('2026-11-19T09:00')), ('start', at('2026-11-19T09:00'))])
+        spans = downtime.longest_spans(result['events'], at('2026-11-18T00:00'), at('2026-11-19T12:00'))
+        self.assertEqual(spans['awake'], 3*H)       # the unknown night is not counted as awake
 
 if __name__ == '__main__':
     unittest.main()
