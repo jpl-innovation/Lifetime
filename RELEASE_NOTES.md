@@ -158,8 +158,8 @@ Automated tests only: the full test suite on Windows Server 2022 and 2025 and on
 the Linux packages installed, started and connected to a server in containers on 11 distributions; and a new test in
 which a Linux computer in one container connects to a Linux server in another by typing the code only (the server's
 name does not resolve, the computer's own name points to 127.0.1.1 as on Ubuntu, and a second computer must find
-the server through the network search). Nothing in 1.3.0 has been tried on real computers yet: a test version,
-1.3.0-rc1, goes to the tester first.
+the server through the network search). 1.3.0 was released before it had been tried on real computers (the test version 1.3.0-rc1 went out a few days
+earlier); please report anything that does not work.
 
 ### Known issues
 

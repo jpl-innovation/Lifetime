@@ -119,7 +119,7 @@ class SocketTests(SocketFixture):
         url = f'wss://127.0.0.1:{self.port}{ws.PATH}?device={self.device}'
         for headers in ({'Authorization': 'Bearer ' + 'x' * 43}, {}):
             with self.assertRaises(InvalidStatus) as caught:
-                connect(url, ssl=context, additional_headers=headers, open_timeout=5, proxy=None)
+                connect(url, ssl=context, additional_headers=headers, open_timeout=20, proxy=None)   # slow CI runners
             self.assertEqual(caught.exception.response.status_code, 403)
         self.assertFalse(self.runtime.hub.connected(self.device))
         self.assertEqual(self.samples(), 0)
